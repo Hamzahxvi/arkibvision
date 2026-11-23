@@ -844,6 +844,13 @@ def rojakface_identify_faces(image_path: str = "", threshold: float = 0.88, save
             else ("NO_FACE_DETECTED" if cached["matches_count"] == 0 else "NOT_IN_DATABASE")
         )
         ocr_chunks = _build_ocr_document_chunks(resolved) if cached_status == "NO_FACE_DETECTED" else None
+        cached_instruction = (
+            "If the user only asked who the person is, reply concisely with the enrolled name(s) and confidence. "
+            "If the user also asked for details/profile/photos, render Table 1 (| Field | Value | from matched_profiles[0].public_fields) "
+            "and Table 2 (| Image | Description | Photograph by | Location | Date | Time |) with ONE ROW FOR EVERY IMAGE in matched_profiles[0].images."
+            if cached_status == "MATCHED"
+            else None
+        )
         return json.dumps(
             {
                 "file": cached["file"],
@@ -852,6 +859,7 @@ def rojakface_identify_faces(image_path: str = "", threshold: float = 0.88, save
                 "matched_identities": cached_names,
                 "matched_profiles": matched_profiles,
                 "ocr_document_chunks": ocr_chunks,
+                "display_instruction": cached_instruction,
                 "applied_threshold": safe_threshold,
                 "matches_count": cached["matches_count"],
                 "matches": cached_matches,
@@ -880,6 +888,13 @@ def rojakface_identify_faces(image_path: str = "", threshold: float = 0.88, save
         else ("NO_FACE_DETECTED" if len(clean_matches) == 0 else "NOT_IN_DATABASE")
     )
     ocr_chunks = _build_ocr_document_chunks(resolved) if db_status == "NO_FACE_DETECTED" else None
+    display_inst = (
+        "If the user only asked who the person is, reply concisely with the enrolled name(s) and confidence. "
+        "If the user also asked for details/profile/photos, render Table 1 (| Field | Value | from matched_profiles[0].public_fields) "
+        "and Table 2 (| Image | Description | Photograph by | Location | Date | Time |) with ONE ROW FOR EVERY IMAGE in matched_profiles[0].images."
+        if db_status == "MATCHED"
+        else None
+    )
     result = {
         "file": resolved.name,
         "database_status": db_status,
@@ -887,6 +902,7 @@ def rojakface_identify_faces(image_path: str = "", threshold: float = 0.88, save
         "matched_identities": matched_names,
         "matched_profiles": matched_profiles,
         "ocr_document_chunks": ocr_chunks,
+        "display_instruction": display_inst,
         "gallery_image_saved": gallery_saved,
         "applied_threshold": safe_threshold,
         "matches_count": len(clean_matches),
