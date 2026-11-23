@@ -1,0 +1,20 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - type: bind
+        source: ./librechat.yaml
+        target: /app/librechat.yaml
+      - type: bind
+        source: ./custom-index.html
+        target: /app/client/dist/index.html
+        read_only: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  rag_api:
+    image: registry.librechat.ai/librechat-ai/librechat-rag-api-dev:latest
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

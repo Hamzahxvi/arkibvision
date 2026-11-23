@@ -1,0 +1,6 @@
+{
+  "qdrant_collection": "enterprise_faces",
+  "min_clip_identify_threshold": 0.88,
+  "mcp_port": 8005,
+  "librechat_port": 3080
+}

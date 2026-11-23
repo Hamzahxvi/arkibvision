@@ -1,0 +1,179 @@
+/* White & Royal Blue (Light) + Dark Slate & Royal Blue (Dark) matching RojakFace Admin Portal */
+:root,
+html,
+html.light {
+  color-scheme: light !important;
+  --text-primary: 15 23 42 !important;
+  --text-secondary: 71 85 105 !important;
+  --text-secondary-alt: 100 116 139 !important;
+  --text-tertiary: 100 116 139 !important;
+  --text-muted: 100 116 139 !important;
+  --badge-label: 30 58 138 !important;
+  --link: 29 78 216 !important;
+  --link-hover: 30 64 175 !important;
+  --accent-primary: 29 78 216 !important;
+  --accent-primary-hover: 30 64 175 !important;
+  --ring-primary: 29 78 216 !important;
+  --header-primary: 255 255 255 !important;
+  --header-hover: 239 246 255 !important;
+  --header-button-hover: 239 246 255 !important;
+  --surface-primary: 255 255 255 !important;
+  --surface-primary-alt: 248 250 252 !important;
+  --surface-primary-contrast: 241 245 249 !important;
+  --surface-secondary: 248 250 252 !important;
+  --surface-secondary-alt: 241 245 249 !important;
+  --surface-tertiary: 241 245 249 !important;
+  --surface-tertiary-alt: 226 232 240 !important;
+  --surface-active: 219 234 254 !important;
+  --surface-active-alt: 191 219 254 !important;
+  --surface-hover: 239 246 255 !important;
+  --surface-hover-alt: 219 234 254 !important;
+  --surface-composer: 255 255 255 !important;
+  --surface-composer-hover: 248 250 252 !important;
+  --surface-chat: 255 255 255 !important;
+  --surface-canvas: 255 255 255 !important;
+  --page-canvas: 255 255 255 !important;
+  --presentation: 255 255 255 !important;
+  --surface-user-message: 239 246 255 !important;
+  --surface-card: 248 250 252 !important;
+  --surface-card-hover: 239 246 255 !important;
+  --surface-dialog: 255 255 255 !important;
+  --dialog-title: 30 58 138 !important;
+  --surface-menu: 255 255 255 !important;
+  --surface-popover: 255 255 255 !important;
+  --surface-sidebar: 30 58 138 !important;
+  --surface-nav-hover: 37 99 235 !important;
+  --surface-nav-selected: 29 78 216 !important;
+  --surface-search: 30 64 175 !important;
+  --surface-submit: 29 78 216 !important;
+  --surface-submit-hover: 30 64 175 !important;
+  --button-primary: 29 78 216 !important;
+  --button-primary-hover: 30 64 175 !important;
+  --text-inverted: 255 255 255 !important;
+  --border-light: 226 232 240 !important;
+  --border-medium: 203 213 225 !important;
+  --border-medium-alt: 203 213 225 !important;
+  --border-heavy: 148 163 184 !important;
+  --border-field-focus: 29 78 216 !important;
+  --field-fill: 255 255 255 !important;
+  --field-text: 15 23 42 !important;
+  --surface-code: 248 250 252 !important;
+  --surface-code-body: 248 250 252 !important;
+  --surface-code-inline: 241 245 249 !important;
+}
+
+html.dark {
+  color-scheme: dark !important;
+  --text-primary: 241 245 249 !important;
+  --text-secondary: 148 163 184 !important;
+  --text-secondary-alt: 148 163 184 !important;
+  --text-tertiary: 148 163 184 !important;
+  --text-muted: 148 163 184 !important;
+  --badge-label: 191 219 254 !important;
+  --link: 96 165 250 !important;
+  --link-hover: 147 197 253 !important;
+  --accent-primary: 37 99 235 !important;
+  --accent-primary-hover: 29 78 216 !important;
+  --ring-primary: 59 130 246 !important;
+  --header-primary: 15 23 42 !important;
+  --header-hover: 30 41 59 !important;
+  --header-button-hover: 30 41 59 !important;
+  --surface-primary: 15 23 42 !important;
+  --surface-primary-alt: 30 41 59 !important;
+  --surface-primary-contrast: 30 41 59 !important;
+  --surface-secondary: 30 41 59 !important;
+  --surface-secondary-alt: 51 65 85 !important;
+  --surface-tertiary: 30 41 59 !important;
+  --surface-tertiary-alt: 51 65 85 !important;
+  --surface-active: 30 58 138 !important;
+  --surface-active-alt: 29 78 216 !important;
+  --surface-hover: 30 41 59 !important;
+  --surface-hover-alt: 51 65 85 !important;
+  --surface-composer: 30 41 59 !important;
+  --surface-composer-hover: 51 65 85 !important;
+  --surface-chat: 15 23 42 !important;
+  --surface-canvas: 15 23 42 !important;
+  --page-canvas: 15 23 42 !important;
+  --presentation: 15 23 42 !important;
+  --surface-user-message: 30 58 138 !important;
+  --surface-card: 30 41 59 !important;
+  --surface-card-hover: 51 65 85 !important;
+  --surface-dialog: 30 41 59 !important;
+  --dialog-title: 241 245 249 !important;
+  --surface-menu: 30 41 59 !important;
+  --surface-popover: 30 41 59 !important;
+  --surface-sidebar: 30 58 138 !important;
+  --surface-nav-hover: 37 99 235 !important;
+  --surface-nav-selected: 29 78 216 !important;
+  --surface-search: 30 64 175 !important;
+  --surface-submit: 37 99 235 !important;
+  --surface-submit-hover: 29 78 216 !important;
+  --button-primary: 37 99 235 !important;
+  --button-primary-hover: 29 78 216 !important;
+  --text-inverted: 255 255 255 !important;
+  --border-light: 51 65 85 !important;
+  --border-medium: 71 85 105 !important;
+  --border-medium-alt: 71 85 105 !important;
+  --border-heavy: 100 116 139 !important;
+  --border-field-focus: 59 130 246 !important;
+  --field-fill: 30 41 59 !important;
+  --field-text: 241 245 249 !important;
+  --surface-code: 15 23 42 !important;
+  --surface-code-body: 15 23 42 !important;
+  --surface-code-inline: 30 41 59 !important;
+}
+
+/* Royal Blue left navigation sidebar */
+.bg-surface-sidebar,
+nav,
+aside,
+[aria-label="Controls"],
+[data-testid="nav"],
+.nav {
+  --text-primary: 255 255 255 !important;
+  --text-secondary: 255 255 255 !important;
+  --text-secondary-alt: 255 255 255 !important;
+  --text-tertiary: 255 255 255 !important;
+  --text-muted: 255 255 255 !important;
+  --border-light: 59 130 246 !important;
+  --border-medium: 96 165 250 !important;
+  color: #ffffff !important;
+}
+
+.bg-surface-sidebar :is(a, button, span, div, p, h1, h2, h3, label),
+.bg-surface-sidebar svg,
+nav :is(a, button, span, div, p, h1, h2, h3, label),
+nav svg,
+aside :is(a, button, span, div, p, h1, h2, h3, label),
+aside svg {
+  color: #ffffff !important;
+}
+
+/* Keep dropdowns/menus opened from sidebar readable in both modes */
+html.light .bg-surface-sidebar [role="menu"],
+html.light .bg-surface-sidebar [role="menu"] *,
+html.light nav [role="menu"],
+html.light nav [role="menu"] * {
+  --text-primary: 15 23 42 !important;
+  --text-secondary: 71 85 105 !important;
+  color: #0f172a !important;
+}
+
+/* Center-align Markdown table cells (both vertically and horizontally) in chat */
+.markdown table th,
+.markdown table td,
+.prose table th,
+.prose table td,
+main table th,
+main table td {
+  vertical-align: middle !important;
+  text-align: center !important;
+}
+
+.markdown table td img,
+.prose table td img,
+main table td img {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
