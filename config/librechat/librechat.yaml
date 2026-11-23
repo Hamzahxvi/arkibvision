@@ -16,7 +16,7 @@ endpoints:
           - "qwen3-vl:4b-instruct-16k"
         fetch: false
       titleConvo: true
-      titleModel: "qwen2.5:3b"
+      titleModel: "qwen3-vl:4b-instruct-16k"
       titleMethod: "structured"
       titlePromptTemplate: "User asked: {input}\nAssistant answered: {output}"
       titlePrompt: |

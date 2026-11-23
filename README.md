@@ -23,7 +23,7 @@ An **air-gapped, 100% on-premise multimodal AI platform** that integrates **Biom
 
 ## 1. Key Features
 
-- **100% Air-Gapped Local AI**: Zero cloud API dependencies. Runs entirely on local hardware using **Ollama** (`qwen3-vl:4b-instruct-16k`, `qwen2.5:3b`, `nomic-embed-text:latest`), **YuNet ONNX** face detection, **CLIP ViT-B/32 (768-D)** embeddings, and **Qdrant** vector search.
+- **100% Air-Gapped Local AI (Single Vision-Language Model)**: Zero cloud API dependencies. Runs entirely on local hardware using a single Ollama model (**`qwen3-vl:4b-instruct-16k`** for chat, vision, tool calls, multilingual OCR, and chat titling), **YuNet ONNX** face detection, **CLIP ViT-B/32 (768-D)** embeddings, and **Qdrant** vector search.
 - **Biometric Face Recognition & Auto-Gallery Capture**: Identifies enrolled individuals with an anti-false-positive cosine threshold (`>= 0.88`) and automatically captures new high-confidence (`>= 0.90`), non-duplicate face angles into the person's profile gallery using 16×16 perceptual average hashing (`aHash`).
 - **Direct Database & Visual Attribute Photo Search**: Case- and spacing-insensitive identity lookup supporting count limits (*"3 photos only"*), photos-only rendering, and visual attribute filtering (*"photo that wear songkok"*, *"wearing glasses"*) in `0.00s` via per-profile `visual_index.json` + local VLM fallback.
 - **Public vs. Private Data Boundary**: Profile attributes are divided into **🌐 Public Data** (shown in chatbox Markdown tables) and **🔒 Private Data** (e.g., `license_no`, `dob`, `ic`, `nric`, `passport`, `exp`, `phone`, strictly hidden from chat and accessible only in the Admin Portal).
@@ -43,7 +43,7 @@ flowchart TD
     User(["User in LibreChat Chatbox (Port 3080)"])
     Admin(["Admin in RojakFace Portal (Port 8005/admin)"])
 
-    User --> VLM["Local AI Engine (Ollama Port 11434)\nqwen3-vl:4b-instruct-16k  |  qwen2.5:3b  |  nomic-embed-text"]
+    User --> VLM["Local AI Engine (Ollama Port 11434)\nSingle Model: qwen3-vl:4b-instruct-16k (16K Context)"]
     VLM --> Router{"RojakFace FastMCP Router\n(SSE Port 8005)"}
 
     %% 4 Clean Parallel Vertical Pipelines (Zero Crossing Lines)
@@ -125,14 +125,11 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-### Step 2 — Pull & Build the Required Local Ollama Models
-Ensure Ollama is running (`ollama serve`), then pull the required models and build the 16K-context vision model from `models/Modelfile`:
+### Step 2 — Pull & Build the Local Ollama Model
+Ensure Ollama is running (`ollama serve`), then pull `qwen3-vl:4b-instruct` and build the 16K-context vision model from `models/Modelfile` (only this single model is required):
 ```powershell
 ollama pull qwen3-vl:4b-instruct
 ollama create qwen3-vl:4b-instruct-16k -f models/Modelfile
-
-ollama pull qwen2.5:3b
-ollama pull nomic-embed-text:latest
 ```
 
 ### Step 3 — Set Up Sibling LibreChat & Apply Configuration Snapshots
