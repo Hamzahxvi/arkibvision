@@ -114,8 +114,8 @@ flowchart TD
 
 ### Step 1 — Clone the Repository & Create the Python Virtual Environment
 ```powershell
-git clone <your-github-repo-url> "test image to text"
-cd "test image to text"
+git clone https://github.com/Hamzahxvi/rojakface-enterprise-vision.git
+cd rojakface-enterprise-vision
 
 python -m venv .venv
 .\.venv\Scripts\activate
