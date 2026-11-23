@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from RojakFace import LocalStorage, RojakFaceManager
-from src.utils.face_utils import COLLECTION_NAME, IMAGE_EXTS, STORE_FACES_DIR, primary_face_bytes
+from src.utils.face_utils import COLLECTION_NAME, IMAGE_EXTS, STORE_FACES_DIR, primary_face_bytes, sync_profile_folder
 from src.utils.paths import PROCESSED_DIR, RAW_DIR
 from src.utils.qdrant_helper import get_qdrant_client
 
@@ -41,6 +41,7 @@ try:
                     print(f"  + Enrolled new angle from {img.name} -> {emp_id}")
                 else:
                     print(f"  = {img.name} already covered by {temp_id}")
+            sync_profile_folder(qdrant, emp_id, img)
 
     print("\nBatch enrollment complete.")
 finally:

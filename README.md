@@ -135,8 +135,16 @@ ollama pull qwen2.5:3b
 ollama pull nomic-embed-text:latest
 ```
 
-### Step 3 — Apply LibreChat Configuration & Theme Snapshots
-Copy the provided LibreChat configuration files from `config/librechat/` into your sibling `../LibreChat/` directory:
+### Step 3 — Set Up Sibling LibreChat & Apply Configuration Snapshots
+If you do not already have LibreChat cloned as a sibling folder (`../LibreChat`), clone it and create its `.env` file first:
+```powershell
+if (-not (Test-Path ..\LibreChat)) {
+    git clone https://github.com/danny-avila/LibreChat.git ..\LibreChat
+    Copy-Item ..\LibreChat\.env.example ..\LibreChat\.env
+}
+New-Item -ItemType Directory -Force -Path ..\LibreChat\images | Out-Null
+```
+Then copy the provided LibreChat configuration and theme files from `config/librechat/` into `../LibreChat/`:
 ```powershell
 Copy-Item config\librechat\librechat.yaml ..\LibreChat\librechat.yaml -Force
 Copy-Item config\librechat\docker-compose.override.yml ..\LibreChat\docker-compose.override.yml -Force
