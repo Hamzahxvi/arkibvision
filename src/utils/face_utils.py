@@ -73,7 +73,20 @@ def sync_profile_folder(qdrant, identity: str, source_image: Path | None = None)
         except (json.JSONDecodeError, OSError):
             existing_meta = {}
 
-    existing_images = list(existing_meta.get("images", []))
+    existing_images = []
+    for item in existing_meta.get("images", []):
+        if not isinstance(item, dict):
+            continue
+        updated_item = dict(item)
+        target_name = Path(str(updated_item.get("profile_path") or updated_item.get("filename") or "")).name
+        if target_name:
+            profile_file = images_dir / target_name
+            web_file = web_dir / target_name
+            if profile_file.is_file() and not web_file.is_file():
+                shutil.copy2(profile_file, web_file)
+            updated_item["profile_path"] = str(profile_file.relative_to(PROFILE_DIR.parent))
+            updated_item["url"] = f"{LIBRECHAT_URL}/images/profile-gallery/{slug}/{target_name}"
+        existing_images.append(updated_item)
     if source_image is not None and source_image.is_file():
         target_name = f"{len(existing_images) + 1:02d}_{source_image.name}"
         profile_target = images_dir / target_name
