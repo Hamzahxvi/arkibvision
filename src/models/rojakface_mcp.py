@@ -1461,9 +1461,15 @@ def _public_profile_display(canonical: str) -> dict | None:
         profile = json.loads(profile_metadata.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    public_details = _public_other_details(profile.get("other_details"))
+    identity_name = profile.get("identity", canonical)
+    public_fields = [{"field": "Name", "value": identity_name}] + [
+        {"field": k, "value": v} for k, v in public_details.items()
+    ]
     return {
-        "name": profile.get("identity", canonical),
-        "public_other_details": _public_other_details(profile.get("other_details")),
+        "name": identity_name,
+        "public_fields": public_fields,
+        "public_other_details": public_details,
         "images": [
             {
                 "filename": item.get("filename"),
@@ -1666,7 +1672,7 @@ def rojakface_search_identity(
             instruction = (
                 "If the user specifically asked for photos/images only, render ONLY each image in profile_metadata.images as ![Original image](url) without extra metadata tables. "
                 "Otherwise, format the response using clean Markdown tables with centered columns: "
-                "1) First show a table with columns | Field | Value | (separator | :---: | :---: |) containing Name and every key-value pair in public_other_details (if non-empty). "
+                "1) First show a table with columns | Field | Value | (separator | :---: | :---: |) with ONE row for EACH entry in profile_metadata.public_fields (putting entry.field in the Field column and entry.value in the Value column — e.g. | Name | Eula Lawrence |, | test | hamzah |. NEVER print the literal key 'public_other_details' or 'public_fields' as a row!). "
                 "2) Then show a table with columns | Image | Description | Photograph by | Location | Date | Time | (separator | :---: | :---: | :---: | :---: | :---: | :---: |) with one row per image in profile_metadata.images, "
                 "putting ![Original image](url) in the Image column and that image's own Description, Photograph by, Location, Date, and 12-hour AM/PM Time in the other columns. "
                 "Never show private data, profile folder, or face crops."

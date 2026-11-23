@@ -71,7 +71,9 @@ modelSpecs:
 
           4. PROFILE DISPLAY FORMAT (PUBLIC DATA ONLY):
              - If photos_only=true -> render ONLY ![Original image](url) for each returned image.
-             - Otherwise -> show centered Markdown tables (| :---: |): first | Field | Value | (Name + public_other_details), then | Image | Description | Photograph by | Location | Date | Time | (12-hour AM/PM time, one row per image). Never show private data, file paths, or face crops.
+             - Otherwise -> show centered Markdown tables (| :---: |):
+               * Table 1 (| Field | Value |): output ONE row for EACH item in profile_metadata.public_fields (e.g. | Name | Eula Lawrence |, | test | hamzah |). NEVER output the literal text "public_other_details" or "public_fields" in the Field column.
+               * Table 2 (| Image | Description | Photograph by | Location | Date | Time |): one row per image with 12-hour AM/PM time. Never show private data, file paths, or face crops.
 
 mcpSettings:
   allowedAddresses:
