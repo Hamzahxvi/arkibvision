@@ -4,7 +4,7 @@ use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::sync::OnceLock;
 
-pub const PRIVATE_KEYS: [&str; 10] = [
+pub const PRIVATE_KEYS: [&str; 23] = [
     "license_no",
     "dob",
     "date_of_birth",
@@ -15,6 +15,19 @@ pub const PRIVATE_KEYS: [&str; 10] = [
     "phone",
     "email",
     "exp",
+    "no_kp",
+    "no_ic",
+    "no_mykad",
+    "mykad",
+    "kad_pengenalan",
+    "tarikh_lahir",
+    "no_lesen",
+    "no_pasport",
+    "no_telefon",
+    "telefon",
+    "emel",
+    "tarikh_luput",
+    "tamat_tempoh",
 ];
 
 pub const STANDARD_META_FIELDS: [&str; 7] = [
@@ -118,19 +131,19 @@ pub fn format_time_12h(value: &str) -> String {
 }
 
 pub fn default_detail_visibility(key: &str) -> &'static str {
-    let norm: String = key
-        .trim_matches(is_py_ws)
-        .to_lowercase()
-        .chars()
-        .map(|c| {
-            if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if PRIVATE_KEYS.contains(&norm.as_str()) {
+    let mut norm = String::with_capacity(key.len());
+    let mut prev_sep = false;
+    for c in key.trim_matches(is_py_ws).to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            norm.push(c);
+            prev_sep = false;
+        } else if !prev_sep {
+            norm.push('_');
+            prev_sep = true;
+        }
+    }
+    let clean = norm.trim_matches('_');
+    if PRIVATE_KEYS.contains(&clean) {
         "private"
     } else {
         "public"
@@ -320,7 +333,11 @@ mod tests {
         assert_eq!(format_time_12h("11:48 am"), "11:48 AM");
         assert_eq!(format_time_12h("unknown"), "Unknown");
         assert_eq!(default_detail_visibility("Date of Birth"), "private");
+        assert_eq!(default_detail_visibility("Tarikh Lahir"), "private");
+        assert_eq!(default_detail_visibility("No. MyKad"), "private");
+        assert_eq!(default_detail_visibility("No Telefon"), "private");
         assert_eq!(default_detail_visibility("Organization"), "public");
+        assert_eq!(default_detail_visibility("Jawatan"), "public");
         assert_eq!(
             parse_proposed_metadata(r#"{"name": "Eula", "broken": "#)
                 .get("name")

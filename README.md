@@ -184,13 +184,21 @@ Open **`http://127.0.0.1:8005/admin`**:
 
 ---
 
-## 8. Chatbox Usage & Example Prompts
+## 8. Chatbox Usage & Example Prompts (English & Bahasa Melayu)
 
+### English Prompts
 - **Face Identification** *(attach portrait)*: `who is this? show all his details and photos`
 - **Profile Lookup**: `show eula lawrence full details` / `show azhar idrus details`
 - **Photo Limits & Visual Search**: `show lando zawawi photos. 2 photos only.` / `show lando zawawi photo that wear songkok`
 - **Multilingual OCR** *(attach document/handwriting)*: `read this jawi text, convert to rumi, and explain the meaning` / `transcribe this sanskrit text chunk by chunk`
 - **Guest Staging**: `enroll this person as Ahmad Faizal` / `extract all details from this ID card and save them to Carl Johnson's profile`
+
+### Bahasa Melayu (Malaysia) Prompts
+- **Pengecaman Wajah** *(lampirkan gambar)*: `siapa ini? tunjuk maklumat penuh dan semua gambar beliau`
+- **Carian Profil**: `tunjuk maklumat penuh eula lawrence` / `siapa azhar idrus?`
+- **Had Gambar & Carian Visual**: `tunjuk 2 gambar lando zawawi sahaja` / `tunjuk gambar lando zawawi yang pakai cermin mata` / `tunjuk gambar lando zawawi yang pakai songkok`
+- **OCR Dokumen & Jawi** *(lampirkan dokumen/tulisan tangan)*: `baca tulisan jawi ini, tukar ke rumi, dan jelaskan maksudnya`
+- **Pendaftaran & Kad Pengenalan**: `daftar orang ini sebagai Ahmad Faizal` / `ekstrak maklumat kad pengenalan ini dan simpan ke profil Carl Johnson`
 
 ---
 

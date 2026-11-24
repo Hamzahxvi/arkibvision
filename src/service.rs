@@ -947,19 +947,7 @@ impl RojakFaceService {
         if clean_query.is_empty() || images.is_empty() {
             return images;
         }
-        const STOPWORDS: &[&str] = &[
-            "the", "a", "an", "that", "this", "with", "in", "on", "of", "is", "are", "photo",
-            "photos", "image", "images", "picture", "pictures", "show", "only", "his", "her",
-            "their", "wearing", "wear", "man", "woman", "person",
-        ];
-        static TOK_RE: OnceLock<Regex> = OnceLock::new();
-        let tok_re = TOK_RE.get_or_init(|| Regex::new(r"[a-z0-9]+").expect("regex"));
-        let q_lower = clean_query.to_ascii_lowercase();
-        let tokens: Vec<&str> = tok_re
-            .find_iter(&q_lower)
-            .map(|m| m.as_str())
-            .filter(|t| !STOPWORDS.contains(t))
-            .collect();
+        let token_groups = expand_bilingual_query_groups(clean_query);
 
         let slug = profile_slug(canonical);
         let visual_index_path = self.cfg.profile_dir.join(&slug).join("visual_index.json");
@@ -969,7 +957,7 @@ impl RojakFaceService {
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
 
-        if !tokens.is_empty() {
+        if !token_groups.is_empty() {
             let mut text_matches = Vec::new();
             for item in &images {
                 let url_name = item
@@ -997,7 +985,10 @@ impl RojakFaceService {
                     hay.push_str(v);
                 }
                 let hay_lower = hay.to_ascii_lowercase();
-                if tokens.iter().all(|t| hay_lower.contains(t)) {
+                if token_groups
+                    .iter()
+                    .all(|group| group.iter().any(|syn| hay_lower.contains(syn.as_str())))
+                {
                     text_matches.push(item.clone());
                 }
             }
@@ -2026,5 +2017,196 @@ impl RojakFaceService {
             "skipped": skipped,
             "errors": errors,
         }))
+    }
+}
+
+/// Tokenizes an English or Bahasa Melayu visual search query, strips bilingual stopwords,
+/// and expands Malay phrases/words into English+Malay synonym groups for instant visual_index matching.
+fn expand_bilingual_query_groups(query: &str) -> Vec<Vec<String>> {
+    const STOPWORDS: &[&str] = &[
+        // English
+        "the",
+        "a",
+        "an",
+        "that",
+        "this",
+        "with",
+        "in",
+        "on",
+        "of",
+        "is",
+        "are",
+        "photo",
+        "photos",
+        "image",
+        "images",
+        "picture",
+        "pictures",
+        "show",
+        "only",
+        "his",
+        "her",
+        "their",
+        "wearing",
+        "wear",
+        "man",
+        "woman",
+        "person",
+        "holding",
+        "hold",
+        // Bahasa Melayu
+        "yang",
+        "pakai",
+        "memakai",
+        "berpakaian",
+        "gambar",
+        "foto",
+        "tunjuk",
+        "tunjukkan",
+        "papar",
+        "paparkan",
+        "sahaja",
+        "saja",
+        "je",
+        "dengan",
+        "di",
+        "dalam",
+        "pada",
+        "untuk",
+        "tentang",
+        "mengenai",
+        "lelaki",
+        "perempuan",
+        "wanita",
+        "orang",
+        "dia",
+        "beliau",
+        "ini",
+        "itu",
+        "ada",
+        "sedang",
+        "sila",
+        "boleh",
+        "pegang",
+        "memegang",
+        "berwarna",
+        "warna",
+    ];
+    const PHRASES: &[(&str, &[&str])] = &[
+        (
+            "cermin mata",
+            &["cermin mata", "glasses", "spectacles", "eyewear"],
+        ),
+        (
+            "kaca mata",
+            &["kaca mata", "glasses", "spectacles", "eyewear"],
+        ),
+        ("baju petak", &["baju petak", "plaid", "checkered"]),
+        ("baju berkotak", &["baju berkotak", "plaid", "checkered"]),
+        ("topi lanun", &["topi lanun", "pirate"]),
+        ("tali leher", &["tali leher", "tie", "necktie"]),
+        ("baju melayu", &["baju melayu", "traditional", "malay"]),
+        ("rambut biru", &["rambut biru", "blue hair"]),
+    ];
+    const SYNONYMS: &[(&str, &[&str])] = &[
+        ("spek", &["spek", "glasses", "spectacles", "eyewear"]),
+        ("bercermin", &["bercermin", "glasses", "spectacles"]),
+        ("songkok", &["songkok", "peci", "cap"]),
+        ("kopiah", &["kopiah", "skullcap", "taqiyah", "cap"]),
+        ("tudung", &["tudung", "hijab", "headscarf"]),
+        ("topi", &["topi", "hat", "cap"]),
+        ("lanun", &["lanun", "pirate"]),
+        ("petak", &["petak", "plaid", "checkered"]),
+        ("berkotak", &["berkotak", "plaid", "checkered"]),
+        ("kotak", &["kotak", "plaid", "checkered"]),
+        ("baju", &["baju", "shirt", "attire", "top"]),
+        ("kemeja", &["kemeja", "shirt", "collared"]),
+        ("kot", &["kot", "suit", "blazer", "jacket", "coat"]),
+        ("sut", &["sut", "suit", "blazer"]),
+        ("jaket", &["jaket", "jacket"]),
+        ("batik", &["batik"]),
+        ("seragam", &["seragam", "uniform"]),
+        ("tentera", &["tentera", "military", "uniform"]),
+        ("mikrofon", &["mikrofon", "microphone", "mic"]),
+        ("janggut", &["janggut", "beard"]),
+        ("misai", &["misai", "mustache", "moustache"]),
+        ("senyum", &["senyum", "smiling", "smile"]),
+        ("hitam", &["hitam", "black"]),
+        ("putih", &["putih", "white"]),
+        ("biru", &["biru", "blue"]),
+        ("hijau", &["hijau", "green"]),
+        ("merah", &["merah", "red"]),
+        ("kuning", &["kuning", "yellow"]),
+        ("kelabu", &["kelabu", "gray", "grey"]),
+        ("coklat", &["coklat", "brown"]),
+        ("emas", &["emas", "gold", "golden"]),
+        ("ungu", &["ungu", "purple"]),
+    ];
+
+    static TOK_RE: OnceLock<Regex> = OnceLock::new();
+    let tok_re = TOK_RE.get_or_init(|| Regex::new(r"[a-z0-9]+").expect("regex"));
+
+    let mut remaining = query.to_ascii_lowercase();
+    let mut groups: Vec<Vec<String>> = Vec::new();
+    for &(phrase, syns) in PHRASES {
+        if remaining.contains(phrase) {
+            groups.push(syns.iter().map(|s| (*s).to_string()).collect());
+            remaining = remaining.replace(phrase, " ");
+        }
+    }
+
+    for m in tok_re.find_iter(&remaining) {
+        let tok = m.as_str();
+        if STOPWORDS.contains(&tok) {
+            continue;
+        }
+        if let Some(&(_, syns)) = SYNONYMS.iter().find(|&&(k, _)| k == tok) {
+            groups.push(syns.iter().map(|s| (*s).to_string()).collect());
+        } else {
+            groups.push(vec![tok.to_string()]);
+        }
+    }
+    groups
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn matches_caption(query: &str, caption: &str) -> bool {
+        let groups = expand_bilingual_query_groups(query);
+        let hay = caption.to_ascii_lowercase();
+        !groups.is_empty()
+            && groups
+                .iter()
+                .all(|g| g.iter().any(|syn| hay.contains(syn.as_str())))
+    }
+
+    #[test]
+    fn test_bilingual_malay_english_visual_search() {
+        assert!(matches_caption(
+            "tunjuk gambar yang pakai cermin mata",
+            "Close-up portrait of a man wearing glasses indoors"
+        ));
+        assert!(matches_caption(
+            "pakai baju petak",
+            "Smiling man in a red plaid shirt"
+        ));
+        assert!(matches_caption(
+            "topi lanun",
+            "Outdoor photo wearing a black pirate hat"
+        ));
+        assert!(matches_caption(
+            "pakai songkok hitam",
+            "Formal portrait wearing a black songkok and suit"
+        ));
+        assert!(matches_caption(
+            "memegang mikrofon",
+            "Speaker holding a microphone on stage"
+        ));
+        assert!(!matches_caption(
+            "pakai cermin mata",
+            "Portrait wearing a white kopiah"
+        ));
     }
 }
