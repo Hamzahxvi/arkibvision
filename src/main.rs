@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
 
 mod admin;
+mod ancient_scripts;
+mod archives;
 mod biometrics;
 mod config;
+mod forensics;
 mod jawi;
 mod mcp_sse;
 mod metadata;
@@ -23,6 +26,8 @@ use std::sync::Arc;
 async fn health_handler(State(service): State<Arc<RojakFaceService>>) -> Json<Value> {
     let identities = service.store.list_counts().len();
     let vectors = service.store.total_vectors();
+    let locations = archives::list_locations(&service.cfg).len();
+    let documents = archives::list_documents(&service.cfg).len();
     Json(json!({
         "status": "ok",
         "service": "rojakface-server",
@@ -30,6 +35,8 @@ async fn health_handler(State(service): State<Arc<RojakFaceService>>) -> Json<Va
         "runtime": "rust",
         "identities": identities,
         "vectors": vectors,
+        "locations": locations,
+        "documents": documents,
     }))
 }
 

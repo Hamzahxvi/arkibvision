@@ -9,6 +9,7 @@ description = "100% Pure-Rust RojakFace Enterprise Vision, Biometric Identity, M
 axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock"] }
+flate2 = "1"
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
 kamadak-exif = "0.6"
@@ -19,10 +20,12 @@ regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "charset", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 opt-level = 3

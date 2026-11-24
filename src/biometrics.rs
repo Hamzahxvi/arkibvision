@@ -103,6 +103,12 @@ impl FaceEngine {
         self.extract_features(&img)
     }
 
+    /// Compute a 768-D CLIP ViT-B/32 embedding for a full photo (buildings, landmarks, archival locations).
+    pub fn embed_full_image_from_path(&self, path: &Path) -> Result<Vec<f32>, String> {
+        let img = load_rgb_image(path)?;
+        self.embed_clip(&img)
+    }
+
     pub fn primary_face_bytes(&self, path: &Path) -> Result<(Vec<u8>, String), String> {
         let img = load_rgb_image(path)?;
         let detections = self.extract_features(&img)?;

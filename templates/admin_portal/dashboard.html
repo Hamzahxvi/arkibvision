@@ -144,8 +144,12 @@
   <nav class="nav-links" aria-label="Admin navigation">
     <a class="nav-link active" href="#queue-section" onclick="setActiveNav(this)">📋 Review Enrollment Request</a>
     <a class="nav-link" href="#people-section" onclick="setActiveNav(this)">👥 Enrolled People</a>
+    <a class="nav-link" href="#locations-section" onclick="setActiveNav(this)">📍 Locations</a>
+    <a class="nav-link" href="#documents-section" onclick="setActiveNav(this)">📁 Documents</a>
     <a class="nav-link" href="/admin/test-recognition">🔍 Test Recognition</a>
     <button type="button" class="nav-action add-btn" onclick="openProfileModal()">＋ Add Enrolled Person</button>
+    <button type="button" class="nav-action add-btn" style="background:#0284c7" onclick="openLocationModal()">＋ Add Location</button>
+    <button type="button" class="nav-action add-btn" style="background:#7c3aed" onclick="openDocumentModal()">＋ Add Document</button>
   </nav>
   <div class="sidebar-footer">
     <span id="refresh-counter">Auto-refresh in <b id="ctr">5</b>s</span>
@@ -177,6 +181,16 @@
     <div class="section-head"><div><h2>Enrolled people</h2><p class="section-help">Edit profile details, add reference images, or remove a person.</p></div><span class="section-label">Trusted profiles</span></div>
     <div class="people-toolbar"><input id="person-search" type="search" placeholder="Search enrolled people…" oninput="renderProfiles()"/></div>
     <div class="person-grid" id="person-grid"><p class="empty">Loading…</p></div>
+  </section>
+  <section class="people-section" id="locations-section">
+    <div class="section-head"><div><h2>📍 Archival Locations &amp; Landmarks</h2><p class="section-help">Manage specific halls, wings, rooms, and historical buildings (e.g. National Archives of Malaysia). Uploaded photos are indexed via CLIP 768-D for visual landmark recognition.</p></div><span class="section-label">Location folders</span></div>
+    <div class="people-toolbar"><input id="location-search" type="search" placeholder="Search locations, wings, halls, or addresses…" oninput="renderLocations()"/></div>
+    <div class="person-grid" id="location-grid"><p class="empty">Loading…</p></div>
+  </section>
+  <section class="people-section" id="documents-section">
+    <div class="section-head"><div><h2>📁 Archival Documents &amp; Manuscripts</h2><p class="section-help">Manage digitized manuscripts (Jawi, Pallava, Kawi, Rencong, Rumi, English), PDF/DOCX/TXT records, auto-summaries, and fraud/authenticity checks.</p></div><span class="section-label">Document folders</span></div>
+    <div class="people-toolbar"><input id="document-search" type="search" placeholder="Search documents by title, reference code, script, or content…" oninput="renderDocuments()"/></div>
+    <div class="person-grid" id="document-grid"><p class="empty">Loading…</p></div>
   </section>
 </main>
 </div>
@@ -230,6 +244,78 @@
     </form>
   </div>
 </div>
+<div class="modal hidden" id="location-modal" role="dialog" aria-modal="true" aria-labelledby="location-modal-title">
+  <div class="modal-box">
+    <h2 id="location-modal-title">Add archival location</h2>
+    <form id="location-form">
+      <div class="form-grid">
+        <div class="form-field full"><label for="loc-name">Location Name</label><input id="loc-name" required placeholder="e.g. Arkib Negara Malaysia — Dewan Penyelidikan"/></div>
+        <div class="form-field"><label for="loc-institution">Parent Institution</label><input id="loc-institution" placeholder="e.g. Arkib Negara Malaysia"/></div>
+        <div class="form-field"><label for="loc-category">Category</label><input id="loc-category" placeholder="e.g. Research Hall, Gallery, Repository, Monument"/></div>
+        <div class="form-field"><label for="loc-building">Building / Wing</label><input id="loc-building" placeholder="e.g. Wisma Warisan / Blok Pameran"/></div>
+        <div class="form-field"><label for="loc-floor">Floor / Specific Room</label><input id="loc-floor" placeholder="e.g. Tingkat 1, Bilik Mikrofilem"/></div>
+        <div class="form-field full"><label for="loc-address">Address</label><input id="loc-address" placeholder="e.g. Jalan Tuanku Abdul Halim, 50568 Kuala Lumpur"/></div>
+        <div class="form-field full"><label for="loc-coords">GPS Coordinates</label><input id="loc-coords" placeholder="e.g. 3.1736, 101.6776"/></div>
+        <div class="form-field full"><label for="loc-history">Historical Significance</label><textarea id="loc-history" placeholder="Historical context, collections housed here, heritage importance…"></textarea></div>
+        <div class="form-field full"><label for="loc-desc">Description</label><textarea id="loc-desc" placeholder="Visual features, architecture, room layout…"></textarea></div>
+        <div class="form-field full"><label for="loc-notes">Notes</label><textarea id="loc-notes" placeholder="Internal archival notes…"></textarea></div>
+        <div class="form-field full hidden" id="loc-images-box">
+          <label>Reference Photos (automatically CLIP-indexed for visual landmark recognition)</label>
+          <div class="image-gallery" id="loc-images"></div>
+          <input id="loc-add-image" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" onchange="uploadLocationImage()" style="margin-top:8px"/>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" class="cancel-btn" onclick="closeLocationModal()">Cancel</button><button type="submit" class="btn btn-approve" id="loc-save">Save location</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal hidden" id="document-modal" role="dialog" aria-modal="true" aria-labelledby="document-modal-title">
+  <div class="modal-box">
+    <h2 id="document-modal-title">Add archival document folder</h2>
+    <form id="document-form">
+      <div class="form-grid">
+        <div class="form-field full"><label for="doc-title">Document Title</label><input id="doc-title" required placeholder="e.g. Perjanjian Kemerdekaan 1957 / Manuskrip Jawi"/></div>
+        <div class="form-field"><label for="doc-ref">Reference / Call Code</label><input id="doc-ref" placeholder="e.g. ANM/1957/001"/></div>
+        <div class="form-field"><label for="doc-category">Category</label><input id="doc-category" placeholder="e.g. Manuscript, Treaty, Letter, Official Record"/></div>
+        <div class="form-field"><label for="doc-script">Script / Writing System</label>
+          <select id="doc-script" style="background:var(--field-bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px">
+            <option value="Jawi">Jawi (Traditional Malay-Arabic)</option>
+            <option value="Pallava">Pallava Script (Aksara Pallava)</option>
+            <option value="Kawi">Kawi Script (Aksara Kawi)</option>
+            <option value="Rencong">Rencong / Surat Ulu Script</option>
+            <option value="Rumi / Bahasa Melayu">Rumi / Bahasa Melayu</option>
+            <option value="English">English</option>
+            <option value="Multilingual">Multilingual / Mixed</option>
+          </select>
+        </div>
+        <div class="form-field"><label for="doc-date">Date Created / Era</label><input id="doc-date" placeholder="e.g. 31 August 1957 / 7th Century CE"/></div>
+        <div class="form-field"><label for="doc-origin">Origin / Archival Location</label><input id="doc-origin" placeholder="e.g. Arkib Negara Malaysia — Dewan Penyelidikan"/></div>
+        <div class="form-field"><label for="doc-author">Author / Source</label><input id="doc-author" placeholder="e.g. Kerajaan Persekutuan Tanah Melayu"/></div>
+        <div class="form-field full hidden" id="doc-files-box">
+          <label>Document Files (TXT, MD, CSV, JSON, HTML, PDF, DOCX, JPG, PNG — auto-extracts text &amp; checks authenticity)</label>
+          <div id="doc-files-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+          <input id="doc-add-file" type="file" accept=".txt,.md,.csv,.json,.html,.htm,.xml,.pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp" onchange="uploadDocumentFile()"/>
+          <div id="doc-auth-box" style="margin-top:8px;font-size:.82rem"></div>
+        </div>
+        <div class="form-field full">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <label for="doc-summary">Automatic Description &amp; Archival Summary</label>
+            <button type="button" class="photo-save-btn hidden" id="doc-auto-sum-btn" onclick="autoSummarizeDocument()">✨ Auto-Summarize</button>
+          </div>
+          <textarea id="doc-summary" placeholder="Concise archival summary preserving original context and meaning…"></textarea>
+        </div>
+        <div class="form-field full"><label for="doc-text">Searchable Digital Text / Transcription</label><textarea id="doc-text" style="min-height:110px" placeholder="Paste or auto-extract digitized text from PDF/DOCX/TXT/OCR…"></textarea></div>
+        <div class="form-field"><label for="doc-topics">Key Topics (comma-separated)</label><input id="doc-topics" placeholder="e.g. independence, treaty, sovereignty"/></div>
+        <div class="form-field"><label for="doc-names">Key Names / Entities (comma-separated)</label><input id="doc-names" placeholder="e.g. Tunku Abdul Rahman"/></div>
+        <div class="form-field full"><label for="doc-dates">Key Dates (comma-separated)</label><input id="doc-dates" placeholder="e.g. 31 August 1957, 1963"/></div>
+        <div class="form-field full"><label for="doc-notes">Notes</label><textarea id="doc-notes" placeholder="Conservation notes, provenance details…"></textarea></div>
+      </div>
+      <div class="modal-actions"><button type="button" class="cancel-btn" onclick="closeDocumentModal()">Cancel</button><button type="submit" class="btn btn-approve" id="doc-save">Save document</button></div>
+    </form>
+  </div>
+</div>
+
 <div class="image-viewer hidden" id="image-viewer" onclick="closeImageViewer()"><button type="button" aria-label="Close image viewer">×</button><img id="image-viewer-img" alt="Enlarged profile image" onclick="event.stopPropagation()"/></div>
 <script>
 const grid=document.getElementById('grid');
@@ -598,11 +684,230 @@ applyTheme(localStorage.getItem('rojakface_admin_theme')||'light');
 
 load();
 loadProfiles();
+loadLocations();
+loadDocuments();
 if(new URLSearchParams(window.location.search).get('add')==='1'){
   openProfileModal();
   history.replaceState(null,'','/admin');
 }
 interval=setInterval(tick,1000);
+
+// ─── Managed Locations UI ─────────────────────────────────────────────────────
+let locations=[],editingLocSlug=null;
+async function loadLocations(){
+  try{const r=await fetch('/admin/api/locations?ts='+Date.now(),{cache:'no-store'});if(!r.ok)return;locations=await r.json();renderLocations();}
+  catch(e){document.getElementById('location-grid').innerHTML='<p class="empty">Could not load locations.</p>';}
+}
+function renderLocations(){
+  const q=(document.getElementById('location-search').value||'').toLowerCase();
+  const list=locations.filter(l=>!q||JSON.stringify(l).toLowerCase().includes(q));
+  const el=document.getElementById('location-grid');
+  if(!list.length){el.innerHTML='<p class="empty">No archival locations yet. Click "＋ Add Location" to create one.</p>';return;}
+  el.innerHTML=list.map(l=>{
+    const thumb=l.images&&l.images[0]?'<img class="person-thumb" src="'+escapeHtml(l.images[0].admin_url)+'" alt="'+escapeHtml(l.name)+'"/>':'<div class="person-thumb" style="display:grid;place-items:center;font-size:1.4rem">📍</div>';
+    const sub=[l.parent_institution,l.building_or_wing,l.floor_or_room].filter(Boolean).join(' · ');
+    return '<article class="person-card"><div class="person-head">'+thumb+'<div><div class="person-name">'+escapeHtml(l.name)+'</div><div class="person-meta">'+escapeHtml(sub||l.category||'Archival Location')+'</div><div class="person-meta">'+(l.image_count||0)+' reference photo(s)'+(l.coordinates?' · '+escapeHtml(l.coordinates):'')+'</div></div></div><div class="person-desc">'+escapeHtml(l.description||l.historical_significance||'')+'</div><div class="person-actions"><button class="edit-btn" onclick="openLocationModal(\''+escapeHtml(l.slug)+'\')">✏️ Edit</button><button class="delete-btn" onclick="deleteLocation(\''+escapeHtml(l.slug)+'\',\''+escapeHtml(l.name).replace(/'/g,"\\'")+'\')">🗑️ Delete</button></div></article>';
+  }).join('');
+}
+function openLocationModal(slug=null){
+  editingLocSlug=slug;
+  const loc=slug?locations.find(x=>x.slug===slug):null;
+  document.getElementById('location-modal-title').textContent=loc?'Edit archival location':'Add archival location';
+  document.getElementById('loc-name').value=loc?loc.name||'':'';
+  document.getElementById('loc-institution').value=loc?loc.parent_institution||'':'';
+  document.getElementById('loc-category').value=loc?loc.category||'':'';
+  document.getElementById('loc-building').value=loc?loc.building_or_wing||'':'';
+  document.getElementById('loc-floor').value=loc?loc.floor_or_room||'':'';
+  document.getElementById('loc-address').value=loc?loc.address||'':'';
+  document.getElementById('loc-coords').value=loc?loc.coordinates||'':'';
+  document.getElementById('loc-history').value=loc?loc.historical_significance||'':'';
+  document.getElementById('loc-desc').value=loc?loc.description||'':'';
+  document.getElementById('loc-notes').value=loc?loc.notes||'':'';
+  const box=document.getElementById('loc-images-box');
+  box.classList.toggle('hidden',!loc);
+  if(loc) renderLocationImages(loc);
+  document.getElementById('location-modal').classList.remove('hidden');
+}
+function closeLocationModal(){document.getElementById('location-modal').classList.add('hidden');editingLocSlug=null;}
+function renderLocationImages(loc){
+  const el=document.getElementById('loc-images');
+  const imgs=loc.images||[];
+  if(!imgs.length){el.innerHTML='<span style="font-size:.82rem;color:var(--muted)">No reference photos uploaded yet.</span>';return;}
+  el.innerHTML=imgs.map(img=>'<div class="gallery-item"><img src="'+escapeHtml(img.admin_url)+'" alt="'+escapeHtml(img.filename)+'" onclick="openImageViewer(\''+escapeHtml(img.admin_url)+'\')"/><button type="button" class="gallery-del" onclick="deleteLocationImage(\''+escapeHtml(loc.slug)+'\',\''+escapeHtml(img.filename)+'\')">×</button></div>').join('');
+}
+document.getElementById('location-form').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const body={
+    name:document.getElementById('loc-name').value,
+    parent_institution:document.getElementById('loc-institution').value,
+    category:document.getElementById('loc-category').value,
+    building_or_wing:document.getElementById('loc-building').value,
+    floor_or_room:document.getElementById('loc-floor').value,
+    address:document.getElementById('loc-address').value,
+    coordinates:document.getElementById('loc-coords').value,
+    historical_significance:document.getElementById('loc-history').value,
+    description:document.getElementById('loc-desc').value,
+    notes:document.getElementById('loc-notes').value,
+  };
+  try{
+    const url=editingLocSlug?'/admin/api/locations/'+encodeURIComponent(editingLocSlug):'/admin/api/locations';
+    const r=await fetch(url,{method:editingLocSlug?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.reason||'Could not save location');
+    closeLocationModal();showToast(editingLocSlug?'✅ Location updated':'✅ Location created');loadLocations();
+  }catch(err){showToast('Error: '+err.message,false);}
+});
+async function uploadLocationImage(){
+  const input=document.getElementById('loc-add-image');
+  if(!editingLocSlug||!input.files[0])return;
+  const data=new FormData();data.append('image',input.files[0]);
+  try{
+    const r=await fetch('/admin/api/locations/'+encodeURIComponent(editingLocSlug)+'/images',{method:'POST',body:data});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Upload failed');
+    input.value='';renderLocationImages(j.location);loadLocations();showToast('✅ Photo uploaded & CLIP-indexed');
+  }catch(err){showToast('Error: '+err.message,false);}
+}
+async function deleteLocationImage(slug,fname){
+  try{
+    const r=await fetch('/admin/api/locations/'+encodeURIComponent(slug)+'/images/'+encodeURIComponent(fname),{method:'DELETE'});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Delete failed');
+    renderLocationImages(j.location);loadLocations();showToast('🗑️ Location photo deleted');
+  }catch(err){showToast('Error: '+err.message,false);}
+}
+async function deleteLocation(slug,name){
+  if(!window.confirm('Delete location folder "'+name+'" and all its reference photos?'))return;
+  try{
+    const r=await fetch('/admin/api/locations/'+encodeURIComponent(slug),{method:'DELETE'});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Delete failed');
+    loadLocations();showToast('🗑️ Deleted location '+name);
+  }catch(err){showToast('Error: '+err.message,false);}
+}
+
+// ─── Managed Documents UI ─────────────────────────────────────────────────────
+let documentsList=[],editingDocSlug=null;
+async function loadDocuments(){
+  try{const r=await fetch('/admin/api/documents?ts='+Date.now(),{cache:'no-store'});if(!r.ok)return;documentsList=await r.json();renderDocuments();}
+  catch(e){document.getElementById('document-grid').innerHTML='<p class="empty">Could not load documents.</p>';}
+}
+function renderDocuments(){
+  const q=(document.getElementById('document-search').value||'').toLowerCase();
+  const list=documentsList.filter(d=>!q||JSON.stringify(d).toLowerCase().includes(q));
+  const el=document.getElementById('document-grid');
+  if(!list.length){el.innerHTML='<p class="empty">No archival document folders yet. Click "＋ Add Document" to create one.</p>';return;}
+  el.innerHTML=list.map(d=>{
+    const verdict=d.authenticity_report&&d.authenticity_report.verdict?d.authenticity_report.verdict:'';
+    const badge=verdict?' · <b style="color:#d97706">'+escapeHtml(verdict)+'</b>':'';
+    return '<article class="person-card"><div class="person-head"><div class="person-thumb" style="display:grid;place-items:center;font-size:1.4rem">📁</div><div><div class="person-name">'+escapeHtml(d.title)+'</div><div class="person-meta">'+escapeHtml([d.reference_code,d.script_type,d.category].filter(Boolean).join(' · ')||'Archival Document')+'</div><div class="person-meta">'+(d.file_count||0)+' file(s)'+badge+'</div></div></div><div class="person-desc">'+escapeHtml(d.summary||d.extracted_text||'No summary yet.')+'</div><div class="person-actions"><button class="edit-btn" onclick="openDocumentModal(\''+escapeHtml(d.slug)+'\')">✏️ Edit</button><button class="delete-btn" onclick="deleteDocument(\''+escapeHtml(d.slug)+'\',\''+escapeHtml(d.title).replace(/'/g,"\\'")+'\')">🗑️ Delete</button></div></article>';
+  }).join('');
+}
+function openDocumentModal(slug=null){
+  editingDocSlug=slug;
+  const doc=slug?documentsList.find(x=>x.slug===slug):null;
+  document.getElementById('document-modal-title').textContent=doc?'Edit archival document folder':'Add archival document folder';
+  document.getElementById('doc-title').value=doc?doc.title||'':'';
+  document.getElementById('doc-ref').value=doc?doc.reference_code||'':'';
+  document.getElementById('doc-category').value=doc?doc.category||'':'';
+  document.getElementById('doc-script').value=doc&&doc.script_type?doc.script_type:'Jawi';
+  document.getElementById('doc-date').value=doc?doc.date_created||'':'';
+  document.getElementById('doc-origin').value=doc?doc.origin_location||'':'';
+  document.getElementById('doc-author').value=doc?doc.author_or_source||'':'';
+  document.getElementById('doc-summary').value=doc?doc.summary||'':'';
+  document.getElementById('doc-text').value=doc?doc.extracted_text||'':'';
+  document.getElementById('doc-topics').value=doc&&Array.isArray(doc.key_topics)?doc.key_topics.join(', '):'';
+  document.getElementById('doc-names').value=doc&&Array.isArray(doc.key_names)?doc.key_names.join(', '):'';
+  document.getElementById('doc-dates').value=doc&&Array.isArray(doc.key_dates)?doc.key_dates.join(', '):'';
+  document.getElementById('doc-notes').value=doc?doc.notes||'':'';
+  document.getElementById('doc-files-box').classList.toggle('hidden',!doc);
+  document.getElementById('doc-auto-sum-btn').classList.toggle('hidden',!doc);
+  if(doc) renderDocumentFiles(doc);
+  document.getElementById('document-modal').classList.remove('hidden');
+}
+function closeDocumentModal(){document.getElementById('document-modal').classList.add('hidden');editingDocSlug=null;}
+function renderDocumentFiles(doc){
+  const el=document.getElementById('doc-files-list');
+  const files=doc.files||[];
+  if(!files.length){el.innerHTML='<span style="font-size:.82rem;color:var(--muted)">No files uploaded yet.</span>';}
+  else{
+    el.innerHTML=files.map(f=>'<div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.82rem"><a href="'+escapeHtml(f.admin_url)+'" target="_blank" style="color:var(--primary);text-decoration:none">📄 '+escapeHtml(f.filename)+'</a><button type="button" onclick="deleteDocumentFile(\''+escapeHtml(doc.slug)+'\',\''+escapeHtml(f.filename)+'\')" style="border:0;background:transparent;color:#dc2626;cursor:pointer;font-weight:700">×</button></div>').join('');
+  }
+  const authEl=document.getElementById('doc-auth-box');
+  if(doc.authenticity_report&&doc.authenticity_report.verdict){
+    const a=doc.authenticity_report;
+    authEl.innerHTML='<b>🛡️ Authenticity Check:</b> '+escapeHtml(a.verdict)+' (Risk: '+escapeHtml(a.fraud_risk||'N/A')+')';
+  }else{authEl.innerHTML='';}
+}
+document.getElementById('document-form').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const body={
+    title:document.getElementById('doc-title').value,
+    reference_code:document.getElementById('doc-ref').value,
+    category:document.getElementById('doc-category').value,
+    script_type:document.getElementById('doc-script').value,
+    date_created:document.getElementById('doc-date').value,
+    origin_location:document.getElementById('doc-origin').value,
+    author_or_source:document.getElementById('doc-author').value,
+    summary:document.getElementById('doc-summary').value,
+    extracted_text:document.getElementById('doc-text').value,
+    key_topics:document.getElementById('doc-topics').value,
+    key_names:document.getElementById('doc-names').value,
+    key_dates:document.getElementById('doc-dates').value,
+    notes:document.getElementById('doc-notes').value,
+  };
+  try{
+    const url=editingDocSlug?'/admin/api/documents/'+encodeURIComponent(editingDocSlug):'/admin/api/documents';
+    const r=await fetch(url,{method:editingDocSlug?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Could not save document');
+    closeDocumentModal();showToast(editingDocSlug?'✅ Document updated':'✅ Document folder created');loadDocuments();
+  }catch(err){showToast('Error: '+err.message,false);}
+});
+async function uploadDocumentFile(){
+  const input=document.getElementById('doc-add-file');
+  if(!editingDocSlug||!input.files[0])return;
+  const data=new FormData();data.append('file',input.files[0]);
+  try{
+    const r=await fetch('/admin/api/documents/'+encodeURIComponent(editingDocSlug)+'/files',{method:'POST',body:data});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Upload failed');
+    input.value='';
+    const d=j.document;
+    document.getElementById('doc-text').value=d.extracted_text||'';
+    document.getElementById('doc-summary').value=d.summary||'';
+    document.getElementById('doc-topics').value=Array.isArray(d.key_topics)?d.key_topics.join(', '):'';
+    document.getElementById('doc-names').value=Array.isArray(d.key_names)?d.key_names.join(', '):'';
+    document.getElementById('doc-dates').value=Array.isArray(d.key_dates)?d.key_dates.join(', '):'';
+    renderDocumentFiles(d);loadDocuments();showToast('✅ File uploaded, parsed & authenticity checked');
+  }catch(err){showToast('Error: '+err.message,false);}
+}
+async function deleteDocumentFile(slug,fname){
+  try{
+    const r=await fetch('/admin/api/documents/'+encodeURIComponent(slug)+'/files/'+encodeURIComponent(fname),{method:'DELETE'});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Delete failed');
+    renderDocumentFiles(j.document);loadDocuments();showToast('🗑️ File deleted');
+  }catch(err){showToast('Error: '+err.message,false);}
+}
+async function autoSummarizeDocument(){
+  if(!editingDocSlug)return;
+  const btn=document.getElementById('doc-auto-sum-btn');
+  btn.disabled=true;btn.textContent='⏳ Summarizing…';
+  try{
+    const r=await fetch('/admin/api/documents/'+encodeURIComponent(editingDocSlug)+'/summarize',{method:'POST'});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Summarization failed');
+    const d=j.document;
+    document.getElementById('doc-summary').value=d.summary||'';
+    document.getElementById('doc-topics').value=Array.isArray(d.key_topics)?d.key_topics.join(', '):'';
+    document.getElementById('doc-names').value=Array.isArray(d.key_names)?d.key_names.join(', '):'';
+    document.getElementById('doc-dates').value=Array.isArray(d.key_dates)?d.key_dates.join(', '):'';
+    loadDocuments();showToast('✨ Archival summary generated');
+  }catch(err){showToast('Error: '+err.message,false);}
+  finally{btn.disabled=false;btn.textContent='✨ Auto-Summarize';}
+}
+async function deleteDocument(slug,title){
+  if(!window.confirm('Delete document folder "'+title+'" and all its files?'))return;
+  try{
+    const r=await fetch('/admin/api/documents/'+encodeURIComponent(slug),{method:'DELETE'});
+    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Delete failed');
+    loadDocuments();showToast('🗑️ Deleted document '+title);
+  }catch(err){showToast('Error: '+err.message,false);}
+}
 </script>
 </body>
 </html>

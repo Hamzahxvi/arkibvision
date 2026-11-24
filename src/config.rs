@@ -14,18 +14,27 @@ pub const MAX_AUTO_IMAGE_AGE_SECS: u64 = 60;
 pub const ADMIN_SESSION_COOKIE: &str = "rojakface_admin_session";
 pub const ADMIN_SESSION_TTL_SECS: u64 = 8 * 60 * 60;
 pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp"];
+pub const DOCUMENT_EXTS: &[&str] = &[
+    "txt", "md", "json", "csv", "html", "htm", "xml", "pdf", "docx", "jpg", "jpeg", "png", "webp",
+    "bmp",
+];
 
 #[derive(Clone, Debug)]
 pub struct AppConfig {
     pub project_root: PathBuf,
     pub store_faces_dir: PathBuf,
     pub profile_dir: PathBuf,
+    pub locations_dir: PathBuf,
+    pub documents_dir: PathBuf,
     pub pending_dir: PathBuf,
     pub pending_images_dir: PathBuf,
     pub pending_file: PathBuf,
     pub vectors_file: PathBuf,
+    pub location_vectors_file: PathBuf,
     pub librechat_dir: PathBuf,
     pub profile_web_dir: PathBuf,
+    pub location_web_dir: PathBuf,
+    pub document_web_dir: PathBuf,
     pub librechat_url: String,
     pub image_dirs: Vec<PathBuf>,
     pub host: String,
@@ -45,6 +54,13 @@ pub fn is_image_ext(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .map(|e| IMAGE_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+pub fn is_document_ext(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| DOCUMENT_EXTS.contains(&e.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
 }
 
@@ -214,10 +230,13 @@ impl AppConfig {
         let processed_dir = data_dir.join("processed");
         let store_faces_dir = interim_dir.join("store-faces");
         let profile_dir = processed_dir.join("profiles");
+        let locations_dir = processed_dir.join("locations");
+        let documents_dir = processed_dir.join("documents");
         let pending_dir = interim_dir.join("pending_requests");
         let pending_images_dir = pending_dir.join("images");
         let pending_file = pending_dir.join("requests.json");
         let vectors_file = processed_dir.join("rojakface_vectors.json");
+        let location_vectors_file = processed_dir.join("location_vectors.json");
 
         let default_lc = project_root
             .parent()
@@ -227,6 +246,8 @@ impl AppConfig {
             .map(PathBuf::from)
             .unwrap_or(default_lc);
         let profile_web_dir = librechat_dir.join("images").join("profile-gallery");
+        let location_web_dir = librechat_dir.join("images").join("location-gallery");
+        let document_web_dir = librechat_dir.join("images").join("document-gallery");
         let librechat_url = env::var("LIBRECHAT_URL")
             .unwrap_or_else(|_| "http://localhost:3080".to_string())
             .trim_end_matches('/')
@@ -259,6 +280,10 @@ impl AppConfig {
 
         let _ = fs::create_dir_all(&pending_images_dir);
         let _ = fs::create_dir_all(&profile_dir);
+        let _ = fs::create_dir_all(&locations_dir);
+        let _ = fs::create_dir_all(&documents_dir);
+        let _ = fs::create_dir_all(&location_web_dir);
+        let _ = fs::create_dir_all(&document_web_dir);
         let _ = fs::create_dir_all(store_faces_dir.join("crops"));
         let _ = fs::create_dir_all(store_faces_dir.join("originals"));
 
@@ -266,12 +291,17 @@ impl AppConfig {
             project_root,
             store_faces_dir,
             profile_dir,
+            locations_dir,
+            documents_dir,
             pending_dir,
             pending_images_dir,
             pending_file,
             vectors_file,
+            location_vectors_file,
             librechat_dir,
             profile_web_dir,
+            location_web_dir,
+            document_web_dir,
             librechat_url,
             image_dirs,
             host,

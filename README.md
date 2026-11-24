@@ -28,10 +28,16 @@ An **air-gapped, 100% on-premise multimodal AI platform** written in **100% safe
 - **Biometric Face Recognition & Auto-Gallery Capture**: Identifies enrolled individuals with an anti-false-positive cosine threshold (`>= 0.88`) and automatically captures new high-confidence (`>= 0.90`), non-duplicate face angles using 16×16 perceptual average hashing (`aHash`).
 - **Direct Database & Visual Attribute Photo Search**: Case- and spacing-insensitive identity lookup supporting count limits (*"3 photos only"*), photos-only rendering, and visual attribute filtering (*"photo that wear songkok"*, *"wearing glasses"*) via per-profile `visual_index.json` + async `reqwest` Ollama vision fallback.
 - **Public vs. Private Data Boundary**: Profile attributes are divided into **Public Data** (shown in centered Markdown tables in chat) and **Private Data** (`license_no`, `dob`, `date_of_birth`, `ic`, `nric`, `passport`, `ssn`, `phone`, `email`, `exp`, strictly hidden from chat and editable only in the Admin Portal).
-- **Multilingual Document & Handwriting OCR with Visual Chunking**:
-  - **Adaptive Line-Valley Chunker** (`rojakface_ocr_document`): Projects horizontal edge energy in microseconds to count exact text lines and slices tall/dense manuscripts along natural whitespace valleys (`Top`, `Middle`, `Bottom`) with auto-contrast and `1.4×` sharpening.
-  - **Jawi-to-Rumi Orthographic & Phonetic Decoder** (`rojakface_decode_jawi`): Restores 3-dot Jawi letters (`ڤ`=`p`, `ڠ`=`ng`, `ݢ`=`g`, `چ`=`c`, `ڽ`=`ny`), applies classical Jawi vowel & reduplication rules (`٢`), and matches phonetic skeletons against a Standard Bahasa Melayu Rumi lexicon.
-  - Supports **Jawi**, **Sanskrit (Devanagari)**, **Tamil**, **Mandarin Chinese**, **Bahasa Melayu**, and **English**.
+- **Historical Malay & Ancient Script OCR & Transliteration**:
+  - **Adaptive Line-Valley Chunker** (`rojakface_ocr_document`): Projects horizontal edge energy in microseconds and slices tall/dense manuscripts along natural whitespace valleys (`Top`, `Middle`, `Bottom`) with auto-contrast and `1.4×` sharpening.
+  - **Jawi, Pallava, Kawi & Rencong Script Decoder** (`rojakface_decode_jawi` & `rojakface_decode_ancient_script`): Restores 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`), transliterates Unicode **Kawi** (`U+11F00–U+11F5F`) and **Rencong / Surat Ulu** (`U+A930–U+A95F`), normalizes **Pallava** Old Malay/Srivijaya inscriptions with archival glossary notes, and converts manuscripts into searchable digital text.
+- **Computer Vision, Archival Location Recognition & Forensic Authenticity (`rojakface_analyze_image`, `rojakface_detect_authenticity`)**:
+  - Recognizes buildings, landmarks, and specific archival locations (e.g., halls/wings/galleries in the **National Archives of Malaysia**) using CLIP ViT-B/32 768-D embeddings against managed **Location Folders**.
+  - Extracts full technical & EXIF metadata (file name, size, MIME, dimensions, Date/Time, Camera Make/Model, GPS coordinates, Software, PNG `tEXt`/`iTXt`/`zTXt` chunks, SHA-256, perceptual `aHash`).
+  - **Fraud & Authenticity Detection**: Detects exact SHA-256 archive copies, perceptual near-duplicate re-encoded copies, editing software signatures, and AI-generation markers (`Stable Diffusion`, `ComfyUI`, `Midjourney`, `DALL-E`, `Adobe Firefly`, `C2PA`, canvas heuristics).
+- **Automatic Description, Archival Summarization & Managed Document Folders (`rojakface_summarize_document`, `rojakface_search_documents`)**:
+  - Parses multi-format documents (**TXT, MD, CSV, JSON, HTML, XML, DOCX, PDF, and image scans**) in pure Rust, extracting concise archival summaries, key topics, names, dates, events, script type, and authenticity status.
+- **Managed Admin Portal Folders**: Manage **👥 Enrolled People**, **📍 Locations** (e.g. specific halls/wings in Arkib Negara Malaysia with CLIP-indexed reference photos), **📁 Documents** (multi-format archival files with one-click Auto-Summarize and Authenticity badges), and **📋 Approval Requests** in `http://127.0.0.1:8005/admin`.
 - **Role-Based Governance & Security Hardening**: Chatbox users operate as **Guests** (enrollments and ID card updates are staged as `REQ-*` requests). **Admins** review requests in the session-authenticated Admin Portal. MCP endpoints enforce DNS-rebinding `Host` header validation and automatic SSE session cleanup on disconnect.
 
 ---
@@ -151,7 +157,7 @@ curl http://127.0.0.1:8005/health
 
 ---
 
-## 6. Core Processing Pipelines & 14 MCP Tools
+## 6. Core Processing Pipelines & 20 MCP Tools
 
 Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/messages/`):
 
@@ -159,12 +165,18 @@ Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/mess
 | :--- | :--- | :--- |
 | **Pipeline A: Biometric Face ID** | `rojakface_identify_faces` | YuNet face detection + 768-D CLIP embeddings + SIMD cosine match (`>= 0.88`), auto-gallery capture (`>= 0.90`), returns `MATCHED`, `NOT_IN_DATABASE`, or `NO_FACE_DETECTED` (with `ocr_document_chunks`). |
 | | `rojakface_detect_faces` | Low-level YuNet bounding box `[x, y, w, h]` and confidence inspection. |
-| **Pipeline B: Database & Photo Search** | `rojakface_search_identity` | Case/spacing-insensitive profile lookup supporting `limit`, `photos_only`, and visual `query` via `visual_index.json` + local Ollama vision fallback. Filters out Private Data and formats per-photo `Time` in 12-hour AM/PM. |
+| **Pipeline B: People, Locations & Documents Search** | `rojakface_search_identity` | Case/spacing-insensitive profile lookup supporting `limit`, `photos_only`, and bilingual English/Malay visual `query`. |
 | | `rojakface_list_identities` | Lists all enrolled identities and reference vector counts. |
-| **Pipeline C: Document Chunking & Jawi OCR** | `rojakface_ocr_document` | Adaptive horizontal edge-energy line-valley chunking with autocontrast & `1.4×` sharpening (`/images/ocr-chunks/`). |
+| | `rojakface_search_locations` | Searches/lists managed archival **Location** folders (e.g. Arkib Negara Malaysia halls/wings/rooms) with coordinates, history, and gallery photos. |
+| | `rojakface_search_documents` | Searches/lists managed archival **Document** folders by title, reference code, script, topic, or extracted digital text. |
+| **Pipeline C: Historical Script OCR & Archival Vision** | `rojakface_ocr_document` | Adaptive horizontal edge-energy line-valley chunking with autocontrast & `1.4×` sharpening (`/images/ocr-chunks/`). |
 | | `rojakface_decode_jawi` | Decodes Jawi script or rough transliterations into corrected 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`) and Standard Bahasa Melayu (Rumi). |
+| | `rojakface_decode_ancient_script` | Auto-detects & transliterates **Jawi**, **Pallava**, **Kawi** (`U+11F00–U+11F5F`), and **Rencong / Surat Ulu** (`U+A930–U+A95F`) with archival Old Malay glossary notes. |
+| | `rojakface_analyze_image` | Extracts full file/EXIF/GPS/PNG metadata, runs authenticity/fraud analysis, and matches buildings/landmarks via CLIP 768-D against managed Locations. |
+| | `rojakface_detect_authenticity` | Forensic detector for **Original vs Exact Copy (SHA-256) vs Near-Duplicate Copy (`aHash`) vs Edited vs AI-Generated** files/images. |
+| | `rojakface_summarize_document` | Multi-format (TXT/MD/CSV/JSON/HTML/DOCX/PDF/Image) automatic archival description & structured summary (topics, names, dates, events, authenticity). |
 | **Pipeline D: Role-Based Governance** | `rojakface_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
-| | `rojakface_request_update_metadata` | Stages a Guest metadata/ID-card update request (`REQ-*`), auto-classifying sensitive keys as `private`. |
+| | `rojakface_request_update_metadata` | Stages a Guest metadata/MyKad/ID-card update request (`REQ-*`), auto-classifying English & Malay sensitive keys as `private`. |
 | | `rojakface_list_pending_requests` | Lists pending, approved, or rejected staging requests. |
 | | `rojakface_review_pending_request` | Admin-key guarded approval/rejection tool. |
 | | `rojakface_enroll_named_identity` | Admin direct enrollment tool (auto-stages for Guests). |
@@ -214,10 +226,13 @@ Open **`http://127.0.0.1:8005/admin`**:
 │   ├── vector_store.rs             # Embedded pre-normalized 768-D SIMD cosine vector store
 │   ├── vision_ops.rs               # EXIF orientation, perceptual aHash, OCR line-valley chunker
 │   ├── jawi.rs                     # Jawi-to-Rumi orthographic & phonetic skeleton decoder
-│   ├── metadata.rs                 # Slugs, identity normalization, 12h time, privacy & JSON recovery
-│   ├── service.rs                  # Core business logic backing all 14 MCP tools & Admin APIs
+│   ├── ancient_scripts.rs          # Jawi, Pallava, Kawi & Rencong script decoder & glossary
+│   ├── forensics.rs                # File/EXIF/GPS/PNG metadata & AI/Copy fraud authenticity engine
+│   ├── archives.rs                 # Managed Location & Document folders + PDF/DOCX/TXT summarizer
+│   ├── metadata.rs                 # Slugs, identity normalization, 12h time, bilingual privacy keys
+│   ├── service.rs                  # Core business logic backing all 20 MCP tools & Admin APIs
 │   ├── mcp_sse.rs                  # MCP-over-SSE server (/sse & /messages/) + DNS guard
-│   └── admin.rs                    # Axum Admin Portal routes & session auth middleware
+│   └── admin.rs                    # Axum Admin Portal routes (People, Locations, Documents, Queue)
 ├── templates/
 │   └── admin_portal/               # login.html, dashboard.html, test_recognition.html
 ├── config/

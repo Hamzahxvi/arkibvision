@@ -258,6 +258,14 @@ async fn dispatch_tool(
                 .tool_search_identity(&identity, &query, limit, photos_only)
                 .await)
         }
+        "rojakface_summarize_document" => {
+            let file_path = arg_str(&args, "file_path");
+            let text = arg_str(&args, "text");
+            let language = arg_str(&args, "language");
+            Ok(service
+                .tool_summarize_document(&file_path, &text, &language)
+                .await)
+        }
         other => {
             let svc = service.clone();
             let tool = other.to_string();
@@ -270,6 +278,23 @@ async fn dispatch_tool(
                     arg_i64(&args, "max_chunks", 3),
                 )),
                 "rojakface_decode_jawi" => Ok(svc.tool_decode_jawi(&arg_str(&args, "text"))),
+                "rojakface_decode_ancient_script" => Ok(svc.tool_decode_ancient_script(
+                    &arg_str(&args, "text"),
+                    &arg_str(&args, "script"),
+                )),
+                "rojakface_analyze_image" => {
+                    Ok(svc.tool_analyze_image(&arg_str(&args, "image_path")))
+                }
+                "rojakface_detect_authenticity" => {
+                    Ok(svc.tool_detect_authenticity(&arg_str(&args, "file_path")))
+                }
+                "rojakface_search_locations" => {
+                    Ok(svc.tool_search_locations(&arg_str(&args, "query")))
+                }
+                "rojakface_search_documents" => {
+                    Ok(svc
+                        .tool_search_documents(&arg_str(&args, "query"), &arg_str(&args, "script")))
+                }
                 "rojakface_identify_faces" => Ok(svc.tool_identify_faces(
                     &arg_str(&args, "image_path"),
                     arg_f32(&args, "threshold", 0.88),
@@ -498,6 +523,71 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "rojakface_decode_ancient_script",
+            "description": "Recognize, decode, and transliterate historical Malay & Southeast Asian scripts (Jawi, Pallava, Kawi, Rencong / Surat Ulu) into searchable digital text with archival historical notes.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["text"],
+                "properties": {
+                    "text": { "type": "string" },
+                    "script": { "type": "string", "default": "auto", "description": "Optional script hint: auto, jawi, pallava, kawi, or rencong" }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_analyze_image",
+            "description": "Computer Vision & Archival Image Analyzer: extracts file/EXIF/GPS metadata, checks authenticity (original vs copy vs AI-generated vs edited), and matches buildings/landmarks against managed archival Locations via CLIP 768-D.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "image_path": { "type": "string", "default": "" }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_detect_authenticity",
+            "description": "Forensic fraud & authenticity detector: determines whether a file or image is likely original, an exact SHA-256 copy, a perceptual near-duplicate copy, edited, or AI-generated.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "default": "" }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_summarize_document",
+            "description": "Automatic archival description & structured summarization for lengthy documents (TXT, MD, CSV, JSON, HTML, DOCX, PDF, or image scans), extracting concise summary, key topics, names, dates, events, script, and authenticity status.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "file_path": { "type": "string", "default": "" },
+                    "text": { "type": "string", "default": "" },
+                    "language": { "type": "string", "default": "auto" }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_search_locations",
+            "description": "Search or list managed archival Location folders (e.g. specific halls, wings, galleries, or buildings in the National Archives of Malaysia) with historical significance, coordinates, and reference photos.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "default": "" }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_search_documents",
+            "description": "Search or list managed archival Document folders by title, reference code, script (Jawi/Pallava/Kawi/Rencong/Rumi/English), topic, or extracted digital text.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "default": "" },
+                    "script": { "type": "string", "default": "" }
+                }
+            }
+        }),
     ]
 }
 
@@ -508,7 +598,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_catalog_and_host_guard() {
         let tools = tool_definitions();
-        assert_eq!(tools.len(), 14);
+        assert_eq!(tools.len(), 20);
         for t in &tools {
             assert!(t["name"].as_str().unwrap_or("").starts_with("rojakface_"));
             assert_eq!(t["inputSchema"]["type"].as_str(), Some("object"));

@@ -1,10 +1,16 @@
 #![forbid(unsafe_code)]
 
+use crate::ancient_scripts::decode_ancient_script;
+use crate::archives::{
+    ensure_default_locations, extract_document_structure, extract_text_from_file, load_location,
+    search_documents, search_locations, summarize_file_info, summarize_with_ollama,
+};
 use crate::biometrics::FaceEngine;
 use crate::config::{
     AUTO_GALLERY_MAX_IMAGES, AUTO_GALLERY_MIN_SCORE, AppConfig, MAX_AUTO_IMAGE_AGE_SECS,
     MIN_CLIP_IDENTIFY_THRESHOLD, PERCEPTUAL_HASH_DISTANCE, is_image_ext,
 };
+use crate::forensics::{analyze_authenticity, extract_file_metadata};
 use crate::jawi::decode_jawi_text;
 use crate::metadata::{
     format_identity_name, format_time_12h, merge_profile_metadata, normalize_alnum_lower,
@@ -40,6 +46,7 @@ pub struct RojakFaceService {
     pub cfg: AppConfig,
     pub engine: Arc<FaceEngine>,
     pub store: Arc<VectorStore>,
+    pub location_store: Arc<VectorStore>,
     pub http: reqwest::Client,
     id_cache: Mutex<Vec<CacheEntry>>,
     pub pending_lock: Mutex<()>,
@@ -107,8 +114,10 @@ fn find_docker_binary() -> Option<PathBuf> {
 
 impl RojakFaceService {
     pub fn new(cfg: AppConfig) -> Result<Self, String> {
+        ensure_default_locations(&cfg);
         let engine = Arc::new(FaceEngine::load(&cfg)?);
         let store = Arc::new(VectorStore::load_or_create(&cfg.vectors_file)?);
+        let location_store = Arc::new(VectorStore::load_or_create(&cfg.location_vectors_file)?);
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(90))
             .build()
@@ -117,6 +126,7 @@ impl RojakFaceService {
             cfg,
             engine,
             store,
+            location_store,
             http,
             id_cache: Mutex::new(Vec::new()),
             pending_lock: Mutex::new(()),
@@ -228,7 +238,14 @@ impl RojakFaceService {
                 .filter_entry(|e| {
                     if e.file_type().is_dir() {
                         let name = e.file_name().to_str().unwrap_or("");
-                        !matches!(name, "profile-gallery" | "ocr-chunks" | "identity-gallery")
+                        !matches!(
+                            name,
+                            "profile-gallery"
+                                | "ocr-chunks"
+                                | "identity-gallery"
+                                | "location-gallery"
+                                | "document-gallery"
+                        )
                     } else {
                         true
                     }
@@ -1068,6 +1085,170 @@ impl RojakFaceService {
     pub fn tool_decode_jawi(&self, text: &str) -> Value {
         decode_jawi_text(text.to_string())
             .unwrap_or_else(|e| json!({ "status": "error", "reason": e }))
+    }
+
+    pub fn tool_decode_ancient_script(&self, text: &str, script_hint: &str) -> Value {
+        decode_ancient_script(text, script_hint)
+    }
+
+    pub fn tool_analyze_image(&self, image_path: &str) -> Value {
+        let resolved = match self.resolve_image_path(image_path) {
+            Ok(p) => p,
+            Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
+        };
+        let metadata = extract_file_metadata(&resolved).unwrap_or_else(|e| json!({ "error": e }));
+        let archive_roots = [
+            self.cfg.profile_dir.as_path(),
+            self.cfg.locations_dir.as_path(),
+            self.cfg.documents_dir.as_path(),
+        ];
+        let authenticity = analyze_authenticity(&resolved, &archive_roots)
+            .unwrap_or_else(|e| json!({ "error": e }));
+
+        // Match full image against enrolled Archival Locations / Buildings / Landmarks via CLIP 768-D!
+        let mut matched_locations = Vec::new();
+        if let Ok(emb) = self.engine.embed_full_image_from_path(&resolved) {
+            let hits = self.location_store.search(&emb, 3);
+            for hit in hits {
+                if hit.score >= 0.78 {
+                    let loc_detail = load_location(&self.cfg, &hit.point.crop_path);
+                    matched_locations.push(json!({
+                        "location_name": hit.point.identity,
+                        "location_slug": hit.point.crop_path,
+                        "similarity": (f64::from(hit.score) * 10000.0).round() / 10000.0,
+                        "matched_reference_image": hit.point.filename,
+                        "location_details": loc_detail,
+                    }));
+                }
+            }
+        }
+
+        let faces_summary = self.tool_detect_faces(&resolved.to_string_lossy());
+        json!({
+            "file": resolved.file_name().and_then(|s| s.to_str()).unwrap_or(""),
+            "file_metadata": metadata,
+            "authenticity_analysis": authenticity,
+            "matched_archival_locations": matched_locations,
+            "faces_detected": faces_summary["faces_detected"],
+            "analysis_instruction": "Combine the extracted technical/EXIF metadata, authenticity verdict (Original/Copy/AI-Generated/Edited), and any matched archival location details with your own visual inspection of the attached image: describe objects, buildings, architectural features, landmarks, geographical context, and any visible embedded text in structured tables.",
+        })
+    }
+
+    pub fn tool_detect_authenticity(&self, file_path: &str) -> Value {
+        let resolved = match self.resolve_image_path(file_path) {
+            Ok(p) => p,
+            Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
+        };
+        let archive_roots = [
+            self.cfg.profile_dir.as_path(),
+            self.cfg.locations_dir.as_path(),
+            self.cfg.documents_dir.as_path(),
+        ];
+        match analyze_authenticity(&resolved, &archive_roots) {
+            Ok(report) => report,
+            Err(reason) => json!({ "status": "error", "reason": reason }),
+        }
+    }
+
+    pub async fn tool_summarize_document(
+        &self,
+        file_path: &str,
+        raw_text: &str,
+        language: &str,
+    ) -> Value {
+        let mut text = raw_text.trim().to_string();
+        let mut file_meta: Value = Value::Null;
+        let mut authenticity: Value = Value::Null;
+        let mut ocr_chunks: Value = Value::Null;
+
+        if text.is_empty() && !file_path.trim().is_empty() {
+            let resolved = match self.resolve_image_path(file_path) {
+                Ok(p) => p,
+                Err(_) => {
+                    let direct = PathBuf::from(file_path.trim());
+                    let rel = self.cfg.project_root.join(file_path.trim());
+                    if direct.is_file() {
+                        direct
+                    } else if rel.is_file() {
+                        rel
+                    } else {
+                        return json!({
+                            "status": "unresolved",
+                            "reason": format!("Document '{file_path}' not found on disk."),
+                        });
+                    }
+                }
+            };
+            file_meta = summarize_file_info(&resolved).unwrap_or(Value::Null);
+            let archive_roots = [
+                self.cfg.profile_dir.as_path(),
+                self.cfg.locations_dir.as_path(),
+                self.cfg.documents_dir.as_path(),
+            ];
+            authenticity = analyze_authenticity(&resolved, &archive_roots).unwrap_or(Value::Null);
+            if is_image_ext(&resolved) {
+                ocr_chunks =
+                    build_ocr_document_chunks(&self.cfg, &resolved, 3).unwrap_or(Value::Null);
+            } else {
+                text = extract_text_from_file(&resolved).unwrap_or_default();
+            }
+        }
+
+        if text.is_empty() && !ocr_chunks.is_null() {
+            return json!({
+                "status": "image_document_chunked",
+                "file_metadata": file_meta,
+                "authenticity_analysis": authenticity,
+                "ocr_document_chunks": ocr_chunks,
+                "instruction": "Read the attached document image chunk-by-chunk, extract all text accurately, then produce a structured archival description & summary covering: Summary, Key Topics, Key Names, Key Dates, Events, and the Authenticity Verdict.",
+            });
+        }
+
+        if text.is_empty() {
+            return json!({
+                "status": "rejected",
+                "reason": "Provide either `text` or a valid `file_path` (TXT, MD, CSV, JSON, HTML, DOCX, PDF, or image scan).",
+            });
+        }
+
+        let structure = extract_document_structure(&text);
+        let ai_summary = summarize_with_ollama(&self.http, &self.cfg, &text, language).await;
+        let final_summary = ai_summary.clone().unwrap_or_else(|| {
+            structure["extractive_summary"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        });
+
+        json!({
+            "status": "summarized",
+            "file_metadata": file_meta,
+            "authenticity_analysis": authenticity,
+            "archival_summary": final_summary,
+            "generated_by_llm": ai_summary.is_some(),
+            "structured_extraction": structure,
+        })
+    }
+
+    pub fn tool_search_locations(&self, query: &str) -> Value {
+        let items = search_locations(&self.cfg, query);
+        json!({
+            "status": if items.is_empty() { "not_found" } else { "found" },
+            "query": query,
+            "total_matches": items.len(),
+            "locations": items,
+        })
+    }
+
+    pub fn tool_search_documents(&self, query: &str, script_filter: &str) -> Value {
+        let items = search_documents(&self.cfg, query, script_filter);
+        json!({
+            "status": if items.is_empty() { "not_found" } else { "found" },
+            "query": query,
+            "script_filter": script_filter,
+            "total_matches": items.len(),
+            "documents": items,
+        })
     }
 
     pub fn tool_identify_faces(

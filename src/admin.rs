@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
+use crate::archives;
 use crate::config::{
-    ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_SECS, MIN_CLIP_IDENTIFY_THRESHOLD, is_image_ext,
+    ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_SECS, MIN_CLIP_IDENTIFY_THRESHOLD, is_document_ext,
+    is_image_ext,
 };
 use crate::metadata::value_to_trimmed_string;
 use crate::service::RojakFaceService;
@@ -92,7 +94,11 @@ async fn auth_middleware(State(state): State<AdminState>, req: Request, next: Ne
         return next.run(req).await;
     }
     if valid_session_token(req.headers(), &state.sessions).is_none() {
-        if path.starts_with("/admin/api/") || path.starts_with("/admin/profile-images/") {
+        if path.starts_with("/admin/api/")
+            || path.starts_with("/admin/profile-images/")
+            || path.starts_with("/admin/location-images/")
+            || path.starts_with("/admin/document-files/")
+        {
             return (
                 StatusCode::UNAUTHORIZED,
                 Json(json!({
@@ -158,6 +164,52 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
         )
         .route("/admin/api/approve/{request_id}", post(admin_approve))
         .route("/admin/api/reject/{request_id}", post(admin_reject))
+        // Managed Archival Location Folders
+        .route(
+            "/admin/api/locations",
+            get(admin_api_locations).post(admin_create_location),
+        )
+        .route(
+            "/admin/api/locations/{slug}",
+            patch(admin_update_location).delete(admin_delete_location),
+        )
+        .route(
+            "/admin/api/locations/{slug}/images",
+            post(admin_add_location_image),
+        )
+        .route(
+            "/admin/api/locations/{slug}/images/{*filename}",
+            axum::routing::delete(admin_delete_location_image),
+        )
+        .route(
+            "/admin/location-images/{slug}/{*filename}",
+            get(admin_location_image),
+        )
+        // Managed Archival Document Folders
+        .route(
+            "/admin/api/documents",
+            get(admin_api_documents).post(admin_create_document),
+        )
+        .route(
+            "/admin/api/documents/{slug}",
+            patch(admin_update_document).delete(admin_delete_document),
+        )
+        .route(
+            "/admin/api/documents/{slug}/files",
+            post(admin_add_document_file),
+        )
+        .route(
+            "/admin/api/documents/{slug}/files/{*filename}",
+            axum::routing::delete(admin_delete_document_file),
+        )
+        .route(
+            "/admin/api/documents/{slug}/summarize",
+            post(admin_summarize_document),
+        )
+        .route(
+            "/admin/document-files/{slug}/{*filename}",
+            get(admin_document_file),
+        )
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -941,4 +993,468 @@ async fn admin_reject(
         StatusCode::BAD_REQUEST
     };
     (status, Json(res)).into_response()
+}
+
+// ─── Managed Location Folder Endpoints ───────────────────────────────────────
+
+async fn admin_api_locations(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let list = tokio::task::spawn_blocking(move || archives::list_locations(&cfg))
+        .await
+        .unwrap_or_default();
+    Json(Value::Array(list))
+}
+
+async fn admin_create_location(
+    State(state): State<AdminState>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || archives::save_location(&cfg, None, &payload)).await {
+        Ok(Ok(loc)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "created", "location": loc })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_update_location(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid location slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::save_location(&cfg, Some(&clean_slug), &payload)
+    })
+    .await
+    {
+        Ok(Ok(loc)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "updated", "location": loc })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_location(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid location slug." })),
+        )
+            .into_response();
+    };
+    let svc = state.service.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::delete_location(&svc.cfg, &svc.location_store, &clean_slug)
+    })
+    .await
+    {
+        Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_add_location_image(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    mut multipart: Multipart,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Invalid location slug." })),
+        )
+            .into_response();
+    };
+    let mut upload_bytes: Option<Vec<u8>> = None;
+    let mut upload_name = String::new();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("image") {
+            upload_name = field.file_name().unwrap_or("photo.jpg").to_string();
+            if let Ok(bytes) = field.bytes().await {
+                upload_bytes = Some(bytes.to_vec());
+            }
+        }
+    }
+    let Some(bytes) = upload_bytes else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "rejected", "reason": "Choose an image to upload." })),
+        )
+            .into_response();
+    };
+    if !is_image_ext(Path::new(&upload_name)) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "rejected", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
+        )
+            .into_response();
+    }
+    let svc = state.service.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::add_location_image(
+            &svc.cfg,
+            &svc.engine,
+            &svc.location_store,
+            &clean_slug,
+            &upload_name,
+            &bytes,
+        )
+    })
+    .await
+    {
+        Ok(Ok(loc)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "image_added", "location": loc })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_location_image(
+    State(state): State<AdminState>,
+    AxumPath((slug, filename)): AxumPath<(String, String)>,
+) -> Response {
+    let (Some(clean_slug), Some(clean_name)) = (safe_filename(&slug), safe_filename(&filename))
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Image not found." })),
+        )
+            .into_response();
+    };
+    match archives::delete_location_image(&state.service.cfg, clean_slug, clean_name) {
+        Ok(loc) => (
+            StatusCode::OK,
+            Json(json!({ "status": "image_deleted", "location": loc })),
+        )
+            .into_response(),
+        Err(reason) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": reason })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_location_image(
+    State(state): State<AdminState>,
+    AxumPath((slug, filename)): AxumPath<(String, String)>,
+) -> Response {
+    let (Some(clean_slug), Some(clean_name)) = (safe_filename(&slug), safe_filename(&filename))
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let path = state
+        .service
+        .cfg
+        .locations_dir
+        .join(clean_slug)
+        .join("images")
+        .join(clean_name);
+    if !path.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    serve_file_bytes(&path)
+}
+
+// ─── Managed Document Folder Endpoints ───────────────────────────────────────
+
+async fn admin_api_documents(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let list = tokio::task::spawn_blocking(move || archives::list_documents(&cfg))
+        .await
+        .unwrap_or_default();
+    Json(Value::Array(list))
+}
+
+async fn admin_create_document(
+    State(state): State<AdminState>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || archives::save_document(&cfg, None, &payload)).await {
+        Ok(Ok(doc)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "created", "document": doc })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_update_document(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid document slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::save_document(&cfg, Some(&clean_slug), &payload)
+    })
+    .await
+    {
+        Ok(Ok(doc)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "updated", "document": doc })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_document(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid document slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || archives::delete_document(&cfg, &clean_slug)).await {
+        Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_add_document_file(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    mut multipart: Multipart,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Invalid document slug." })),
+        )
+            .into_response();
+    };
+    let mut upload_bytes: Option<Vec<u8>> = None;
+    let mut upload_name = String::new();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("file") || field.name() == Some("image") {
+            upload_name = field.file_name().unwrap_or("document.txt").to_string();
+            if let Ok(bytes) = field.bytes().await {
+                upload_bytes = Some(bytes.to_vec());
+            }
+        }
+    }
+    let Some(bytes) = upload_bytes else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "rejected", "reason": "Choose a file to upload." })),
+        )
+            .into_response();
+    };
+    if !is_document_ext(Path::new(&upload_name)) {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "status": "rejected", "reason": "Supported formats: TXT, MD, CSV, JSON, HTML, XML, PDF, DOCX, JPG, PNG, WEBP, BMP." }))).into_response();
+    }
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::add_document_file(&cfg, &clean_slug, &upload_name, &bytes)
+    })
+    .await
+    {
+        Ok(Ok(doc)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "file_added", "document": doc })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_document_file(
+    State(state): State<AdminState>,
+    AxumPath((slug, filename)): AxumPath<(String, String)>,
+) -> Response {
+    let (Some(clean_slug), Some(clean_name)) = (safe_filename(&slug), safe_filename(&filename))
+    else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "File not found." })),
+        )
+            .into_response();
+    };
+    match archives::delete_document_file(&state.service.cfg, clean_slug, clean_name) {
+        Ok(doc) => (
+            StatusCode::OK,
+            Json(json!({ "status": "file_deleted", "document": doc })),
+        )
+            .into_response(),
+        Err(reason) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": reason })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_document_file(
+    State(state): State<AdminState>,
+    AxumPath((slug, filename)): AxumPath<(String, String)>,
+) -> Response {
+    let (Some(clean_slug), Some(clean_name)) = (safe_filename(&slug), safe_filename(&filename))
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let path = state
+        .service
+        .cfg
+        .documents_dir
+        .join(clean_slug)
+        .join("files")
+        .join(clean_name);
+    if !path.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    serve_file_bytes(&path)
+}
+
+async fn admin_summarize_document(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid document slug." })),
+        )
+            .into_response();
+    };
+    let Some(doc) = archives::load_document(&state.service.cfg, &clean_slug) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Document folder not found." })),
+        )
+            .into_response();
+    };
+    let text = doc["extracted_text"].as_str().unwrap_or("").to_string();
+    if text.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "status": "error", "reason": "Add extracted text or upload a readable file (TXT/DOCX/PDF) before summarizing." }))).into_response();
+    }
+    let summary_res = state
+        .service
+        .tool_summarize_document("", &text, "auto")
+        .await;
+    let mut patch = Map::new();
+    if let Some(s) = summary_res["archival_summary"].as_str() {
+        patch.insert("summary".to_string(), Value::String(s.to_string()));
+    }
+    if let Some(st) = summary_res.get("structured_extraction") {
+        patch.insert("key_topics".to_string(), st["key_topics"].clone());
+        patch.insert("key_names".to_string(), st["key_names"].clone());
+        patch.insert("key_dates".to_string(), st["key_dates"].clone());
+    }
+    match archives::save_document(&state.service.cfg, Some(&clean_slug), &patch) {
+        Ok(updated) => (
+            StatusCode::OK,
+            Json(json!({ "status": "summarized", "document": updated })),
+        )
+            .into_response(),
+        Err(reason) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+    }
 }
