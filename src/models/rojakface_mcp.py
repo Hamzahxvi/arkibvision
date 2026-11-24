@@ -36,8 +36,20 @@ from src.utils.face_utils import (
     sync_profile_folder,
 )
 from src.utils.jawi_decoder import decode_jawi_text
+from src.utils.metadata_utils import (
+    PRIVATE_DETAIL_KEYS,
+    default_detail_visibility as _default_detail_visibility,
+    format_identity_name as _format_identity_name_impl,
+    format_time_12h as _format_time_12h_impl,
+    parse_proposed_metadata as _parse_proposed_metadata_str,
+)
 from src.utils.paths import INTERIM_DIR, PROCESSED_DIR
 from src.utils.qdrant_helper import get_qdrant_client
+from src.utils.vision_ops import (
+    compute_ahash_bits,
+    compute_text_line_chunks,
+    hash_distance as _hash_distance,
+)
 
 IMAGE_DIRS = [
     LIBRECHAT_DIR / "images",
@@ -186,12 +198,7 @@ def _perceptual_hash(image_path: Path) -> str:
     with Image.open(image_path) as image:
         image = ImageOps.exif_transpose(image).convert("L").resize((16, 16))
         pixels = list(image.getdata())
-    average = sum(pixels) / len(pixels)
-    return "".join("1" if pixel >= average else "0" for pixel in pixels)
-
-
-def _hash_distance(left: str, right: str) -> int:
-    return sum(a != b for a, b in zip(left, right))
+    return compute_ahash_bits(pixels)
 
 
 def _cached_identification(image_path: Path, threshold: float) -> dict | None:
@@ -262,14 +269,7 @@ def _primary_face_image(image_path: Path) -> tuple[bytes, str]:
 
 def _format_identity_name(identity: str) -> str:
     """Normalize whitespace and capitalize the first letter of each word."""
-    words = (identity or "").strip().split()
-    formatted = []
-    for word in words:
-        if word.islower() or word.isupper():
-            formatted.append(word[:1].upper() + word[1:].lower())
-        else:
-            formatted.append(word[:1].upper() + word[1:])
-    return " ".join(formatted)
+    return _format_identity_name_impl(identity or "")
 
 
 def _canonical_identity(identity: str) -> str:
@@ -670,92 +670,25 @@ def _build_ocr_document_chunks(image_path: Path, max_chunks: int = 3) -> dict:
         gray = np.asarray(img.convert("L"), dtype=np.float32)
 
     if width > 2:
-        row_energy = np.abs(np.diff(gray, axis=1)).mean(axis=1)
+        row_energy = np.abs(np.diff(gray, axis=1)).mean(axis=1).tolist()
     else:
-        row_energy = np.zeros(height, dtype=np.float32)
+        row_energy = [0.0] * height
 
-    win = max(3, height // 150)
-    kernel = np.ones(win, dtype=np.float32) / float(win)
-    smooth = np.convolve(row_energy, kernel, mode="same")
-    thresh = max(3.5, float(np.percentile(smooth, 30)) * 1.35)
-    active = smooth >= thresh
-
-    min_line_h = max(4, height // 140)
-    lines: list[tuple[int, int]] = []
-    in_line = False
-    start_y = 0
-    for y, val in enumerate(active):
-        if val and not in_line:
-            in_line = True
-            start_y = y
-        elif not val and in_line:
-            in_line = False
-            if y - start_y >= min_line_h:
-                lines.append((start_y, y))
-    if in_line and height - start_y >= min_line_h:
-        lines.append((start_y, height))
-
-    if len(lines) <= 4 or height < 420 or max_chunks == 1:
-        num_chunks = 1
-    elif len(lines) <= 9 or height < 750:
-        num_chunks = min(2, max_chunks)
-    else:
-        num_chunks = min(3, max_chunks)
-
-    chunk_groups: list[list[tuple[int, int]]] = []
-    if num_chunks == 1 or len(lines) < num_chunks * 2:
-        chunk_groups = [lines]
-        num_chunks = 1
-    else:
-        split_indices: list[int] = []
-        for k in range(1, num_chunks):
-            target = int(round(k * len(lines) / num_chunks))
-            lo = max(1, target - max(1, len(lines) // 6))
-            hi = min(len(lines) - 1, target + max(1, len(lines) // 6))
-            best_idx = target
-            best_gap = -1
-            for idx in range(lo, hi + 1):
-                if split_indices and idx <= split_indices[-1]:
-                    continue
-                gap = lines[idx][0] - lines[idx - 1][1]
-                if gap > best_gap:
-                    best_gap = gap
-                    best_idx = idx
-            split_indices.append(best_idx)
-        prev = 0
-        for s_idx in split_indices:
-            chunk_groups.append(lines[prev:s_idx])
-            prev = s_idx
-        chunk_groups.append(lines[prev:])
+    plan = compute_text_line_chunks(row_energy, height, max_chunks)
+    planned_chunks = plan["chunks"]
+    total_detected_lines = int(plan["detected_text_lines"])
 
     out_dir = LIBRECHAT_DIR / "images" / "ocr-chunks"
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", image_path.stem)[:48]
-    pad = max(12, int(height * 0.03))
-    labels_by_count = {
-        1: ["Full Document"],
-        2: ["Top Section", "Bottom Section"],
-        3: ["Top Section", "Middle Section", "Bottom Section"],
-    }
-    region_labels = labels_by_count.get(
-        len(chunk_groups),
-        [f"Section {i + 1}" for i in range(len(chunk_groups))],
-    )
 
     chunks: list[dict] = []
     with Image.open(image_path) as raw_img:
         base_img = ImageOps.exif_transpose(raw_img).convert("RGB")
-        for idx, group in enumerate(chunk_groups, start=1):
-            if group:
-                y0 = max(0, group[0][0] - pad)
-                y1 = min(height, group[-1][1] + pad)
-            else:
-                y0 = int((idx - 1) * height / len(chunk_groups))
-                y1 = int(idx * height / len(chunk_groups))
-            if idx == 1:
-                y0 = 0
-            if idx == len(chunk_groups):
-                y1 = height
+        for item in planned_chunks:
+            idx = int(item["chunk_index"])
+            y0 = int(item["y0"])
+            y1 = int(item["y1"])
             crop = base_img.crop((0, y0, width, max(y0 + 1, y1)))
             enhanced = ImageOps.autocontrast(crop, cutoff=1)
             enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.4)
@@ -764,10 +697,10 @@ def _build_ocr_document_chunks(image_path: Path, max_chunks: int = 3) -> dict:
             chunks.append(
                 {
                     "chunk_index": idx,
-                    "region_label": region_labels[idx - 1],
-                    "vertical_range_pct": f"{round(100 * y0 / max(1, height))}%-{round(100 * y1 / max(1, height))}%",
+                    "region_label": item["region_label"],
+                    "vertical_range_pct": item["vertical_range_pct"],
                     "box_xywh": [0, y0, width, max(1, y1 - y0)],
-                    "detected_text_lines": len(group) if group else 1,
+                    "detected_text_lines": int(item["detected_text_lines"]),
                     "enhanced_chunk_url": f"{LIBRECHAT_URL}/images/ocr-chunks/{chunk_name}",
                 }
             )
@@ -776,7 +709,7 @@ def _build_ocr_document_chunks(image_path: Path, max_chunks: int = 3) -> dict:
         "file": image_path.name,
         "image_dimensions": {"width": width, "height": height},
         "total_chunks": len(chunks),
-        "total_detected_text_lines": len(lines),
+        "total_detected_text_lines": total_detected_lines,
         "chunks": chunks,
         "anti_hallucination_guide": (
             "Read the document/handwriting strictly chunk-by-chunk from Top to Bottom, matching the "
@@ -940,12 +873,6 @@ def rojakface_request_enrollment(
 
 STANDARD_META_FIELDS = {"description", "photograph_by", "location", "date", "time", "address", "notes"}
 PROTECTED_META_FIELDS = {"identity", "name", "images", "database", "vector_count", "stored_original_image_count"}
-PRIVATE_DETAIL_KEYS = {"license_no", "dob", "date_of_birth", "ic", "nric", "passport", "ssn", "phone", "email", "exp"}
-
-
-def _default_detail_visibility(key: str) -> str:
-    norm = re.sub(r"[^a-z0-9_]", "_", key.strip().lower())
-    return "private" if norm in PRIVATE_DETAIL_KEYS else "public"
 
 
 def _normalize_other_details(raw: dict | None) -> dict[str, dict[str, str]]:
@@ -984,23 +911,17 @@ def _parse_proposed_metadata(raw: str | dict) -> dict:
     if not text:
         return {}
     if text.startswith("{"):
+        parsed = _parse_proposed_metadata_str(text)
+        if parsed and not (list(parsed.keys()) == ["description"] and parsed["description"] == text):
+            return parsed
         for candidate in (text, text.rstrip(",") + "}"):
-            try:
-                obj = json.loads(candidate)
-                if isinstance(obj, dict):
-                    return obj
-            except Exception:
-                pass
             try:
                 obj = ast.literal_eval(candidate)
                 if isinstance(obj, dict):
                     return obj
             except Exception:
                 pass
-        pairs = re.findall(r'"([^"\\]+)"\s*:\s*"([^"\\]*)"', text)
-        if pairs:
-            return dict(pairs)
-    return {"description": text}
+    return _parse_proposed_metadata_str(text)
 
 
 def _merge_profile_metadata(meta: dict, proposed_meta: dict) -> dict:
@@ -1450,21 +1371,7 @@ def rojakface_list_identities() -> str:
 
 def _format_time_12h(value: str | None) -> str:
     """Format a 24-hour time string (HH:MM or HH:MM:SS) as 12-hour AM/PM (e.g. '12:15 PM')."""
-    text = str(value or "").strip()
-    if not text or text.casefold() == "unknown":
-        return "Unknown"
-    if re.search(r"\b(am|pm)\b", text, flags=re.IGNORECASE):
-        return re.sub(r"\b(am|pm)\b", lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
-    match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", text)
-    if not match:
-        return text
-    hour = int(match.group(1))
-    minute = int(match.group(2))
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return text
-    period = "AM" if hour < 12 else "PM"
-    hour_12 = hour % 12 or 12
-    return f"{hour_12}:{minute:02d} {period}"
+    return _format_time_12h_impl(str(value or ""))
 
 
 def _public_profile_display(canonical: str) -> dict | None:

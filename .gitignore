@@ -6,3 +6,9 @@ __pycache__/
 .rojakface_admin_key
 data/interim/
 data/processed/
+.rust-anything/
+rust/*/target/
+rust/*/cases.jsonl
+rust/*/python/**/*.pyd
+rust/*/python/**/*.so
+rust/*/python/**/*.dylib

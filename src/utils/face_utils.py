@@ -6,6 +6,7 @@ import re
 import shutil
 from PIL import Image, ImageOps
 from qdrant_client.models import FieldCondition, Filter, MatchValue
+from src.utils.metadata_utils import profile_slug
 from src.utils.paths import INTERIM_DIR, PROCESSED_DIR, PROJECT_ROOT
 
 BASE_DIR = PROJECT_ROOT
@@ -23,11 +24,6 @@ PROFILE_DESCRIPTIONS = {
         "for a cumulative 24 years."
     ),
 }
-
-
-def profile_slug(identity: str) -> str:
-    """Return a filesystem- and URL-safe directory name for an identity."""
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", identity).strip("._")
 
 
 def primary_face_bytes(detector, image_path: Path) -> tuple[bytes, str]:

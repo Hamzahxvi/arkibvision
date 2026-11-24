@@ -411,3 +411,25 @@ def decode_jawi_text(text: str) -> dict:
         "standard_malay_rumi_lines": rumi_lines,
         "standard_malay_rumi_text": "\n".join(rumi_lines),
     }
+# >>> rust-anything: jawi-decoder-rs is on. `rust-anything disable ../../rust/jawi-decoder-rs` removes this block.
+def _rust_anything_jawi_decoder_rs():
+    import importlib, os, sys
+    mode = os.environ.get("RUST_ANYTHING_MODE")
+    if mode == "old" or os.environ.get("RUST_ANYTHING_UNIT_JAWI_DECODER") == "original":
+        return
+    at = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../rust/jawi-decoder-rs/python"))
+    sys.path.insert(0, at)
+    try:
+        native = importlib.import_module("jawi_decoder_rs")
+    except ImportError:
+        if mode == "new":
+            raise
+        return
+    finally:
+        sys.path.remove(at)
+    globals().update({name: getattr(native, name) for name in ["normalize_rough_rumi_word", "decode_jawi_or_rough_rumi_line", "decode_jawi_text"]})
+
+
+_rust_anything_jawi_decoder_rs()
+del _rust_anything_jawi_decoder_rs
+# <<< rust-anything: jawi-decoder-rs

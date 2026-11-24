@@ -9,7 +9,14 @@ from starlette.applications import Starlette
 from src.models.admin_routes import mount_admin_portal
 from src.utils.face_utils import profile_slug
 from src.utils.jawi_decoder import decode_jawi_text
+from src.utils.metadata_utils import (
+    default_detail_visibility,
+    format_identity_name,
+    format_time_12h,
+    parse_proposed_metadata,
+)
 from src.utils.paths import CONFIG_DIR, DATA_DIR, INTERIM_DIR, MODELS_DIR, PROCESSED_DIR, PROJECT_ROOT, RAW_DIR
+from src.utils.vision_ops import compute_ahash_bits, compute_text_line_chunks, hash_distance
 
 
 class TestProjectStructure(unittest.TestCase):
@@ -84,6 +91,45 @@ class TestProjectStructure(unittest.TestCase):
         self.assertEqual(decoded[1], "dengan nama Allah yang Maha Pemurah lagi Maha")
         self.assertEqual(decoded[2], "Mengasihani (1) Segala puji tertentu bagi")
         self.assertEqual(decoded[3], "orang-orang yang sesat (7)")
+
+    def test_metadata_utils(self):
+        self.assertEqual(format_identity_name("  eula   lawrence "), "Eula Lawrence")
+        self.assertEqual(format_identity_name("AZHAR IDRUS"), "Azhar Idrus")
+        self.assertEqual(format_identity_name("McDonald's"), "McDonald's")
+        self.assertEqual(format_time_12h("00:05"), "12:05 AM")
+        self.assertEqual(format_time_12h("13:45:30"), "1:45 PM")
+        self.assertEqual(format_time_12h("11:48 am"), "11:48 AM")
+        self.assertEqual(format_time_12h("unknown"), "Unknown")
+        self.assertEqual(format_time_12h("25:99"), "25:99")
+        self.assertEqual(default_detail_visibility("Date of Birth"), "private")
+        self.assertEqual(default_detail_visibility("NRIC"), "private")
+        self.assertEqual(default_detail_visibility("Organization"), "public")
+        self.assertEqual(parse_proposed_metadata('{"name": "Eula", "role": "Captain"}'), {"name": "Eula", "role": "Captain"})
+        self.assertEqual(parse_proposed_metadata('{"name": "Eula", "role": "Captain",'), {"name": "Eula", "role": "Captain"})
+        self.assertEqual(parse_proposed_metadata('{"name": "Eula", "broken": '), {"name": "Eula"})
+        self.assertEqual(parse_proposed_metadata("Plain bio text"), {"description": "Plain bio text"})
+        self.assertEqual(parse_proposed_metadata("   "), {})
+
+    def test_vision_ops(self):
+        bits = compute_ahash_bits([0, 10, 20, 200, 210, 220])
+        self.assertEqual(bits, "000111")
+        self.assertEqual(hash_distance("000111", "010101"), 2)
+        self.assertEqual(compute_ahash_bits([]), "")
+
+        # Simulate a 900px document with 12 distinct text lines separated by whitespace valleys.
+        energies = [1.0] * 900
+        for line_idx in range(12):
+            y_start = 40 + line_idx * 70
+            for y in range(y_start, y_start + 24):
+                energies[y] = 28.0
+        plan = compute_text_line_chunks(energies, 900, 3)
+        self.assertEqual(plan["detected_text_lines"], 12)
+        self.assertEqual(plan["chunk_count"], 3)
+        self.assertEqual(plan["chunks"][0]["region_label"], "Top Section")
+        self.assertEqual(plan["chunks"][1]["region_label"], "Middle Section")
+        self.assertEqual(plan["chunks"][2]["region_label"], "Bottom Section")
+        self.assertEqual(plan["chunks"][0]["y0"], 0)
+        self.assertEqual(plan["chunks"][-1]["y1"], 900)
 
 
 if __name__ == "__main__":

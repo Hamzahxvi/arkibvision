@@ -1,0 +1,85 @@
+{
+  "schema": "rust-anything/bridge@1",
+  "root": "C:\\Users\\beats\\Downloads\\project\\test image to text",
+  "unit": "src/utils/vision_ops.py",
+  "language": "python",
+  "kind": "pyo3",
+  "crate_name": "vision-ops-rs",
+  "exports": [
+    {
+      "name": "compute_ahash_bits",
+      "file": "src/utils/vision_ops.py",
+      "line": 8,
+      "params": [
+        {
+          "name": "pixels",
+          "ts_type": "int[]",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "string",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "hash_distance",
+      "file": "src/utils/vision_ops.py",
+      "line": 16,
+      "params": [
+        {
+          "name": "left",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "right",
+          "ts_type": "string",
+          "optional": false,
+          "rest": false
+        }
+      ],
+      "returns": "int",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    },
+    {
+      "name": "compute_text_line_chunks",
+      "file": "src/utils/vision_ops.py",
+      "line": 21,
+      "params": [
+        {
+          "name": "row_energies",
+          "ts_type": "number[]",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "height",
+          "ts_type": "int",
+          "optional": false,
+          "rest": false
+        },
+        {
+          "name": "max_chunks",
+          "ts_type": "int",
+          "optional": true,
+          "rest": false,
+          "default": "3"
+        }
+      ],
+      "returns": "dict",
+      "is_async": false,
+      "is_generator": false,
+      "type_params": [],
+      "uses_instanceof": false
+    }
+  ],
+  "classes": [],
+  "js_only": []
+}

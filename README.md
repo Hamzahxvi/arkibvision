@@ -13,11 +13,12 @@ An **air-gapped, 100% on-premise multimodal AI platform** that integrates **Biom
 4. [Installation & Setup Guide](#4-installation--setup-guide)
 5. [Running & Stopping the Platform](#5-running--stopping-the-platform)
 6. [Core Processing Pipelines & MCP Tools](#6-core-processing-pipelines--mcp-tools)
-7. [Admin Portal & Public/Private Data Governance](#7-admin-portal--publicprivate-data-governance)
-8. [Chatbox Usage & Example Prompts](#8-chatbox-usage--example-prompts)
-9. [Project Structure](#9-project-structure)
-10. [Configuration & Environment Variables](#10-configuration--environment-variables)
-11. [Testing & Troubleshooting](#11-testing--troubleshooting)
+7. [Rust Acceleration (`rust-anything` + PyO3)](#7-rust-acceleration-rust-anything--pyo3)
+8. [Admin Portal & Public/Private Data Governance](#8-admin-portal--publicprivate-data-governance)
+9. [Chatbox Usage & Example Prompts](#9-chatbox-usage--example-prompts)
+10. [Project Structure](#10-project-structure)
+11. [Configuration & Environment Variables](#11-configuration--environment-variables)
+12. [Testing & Troubleshooting](#12-testing--troubleshooting)
 
 ---
 
@@ -32,6 +33,7 @@ An **air-gapped, 100% on-premise multimodal AI platform** that integrates **Biom
   - **Jawi-to-Rumi Orthographic & Phonetic Decoder** (`rojakface_decode_jawi`): Restores 3-dot Jawi letters (`ڤ`=`p`, `ڠ`=`ng`, `ݢ`=`g`, `چ`=`c`, `ڽ`=`ny`), applies classical Jawi vowel rules (`ى`→`-a`, `ي`→`e`, `ؤ`→`o`, `٢`→word reduplication), and matches Jawi phonetic skeletons against a Bahasa Melayu Rumi lexicon.
   - Supports **Jawi**, **Sanskrit (Devanagari)**, **Tamil**, **Mandarin Chinese**, **Bahasa Melayu**, and **English** printed documents and handwriting.
 - **Role-Based Governance (Guest vs. Admin)**: Chatbox users operate as **Guests** (read-only search; new enrollments and ID card metadata updates are staged as `REQ-*` requests). **Admins** review, approve, or reject requests and manage profiles in the authenticated Admin Portal.
+- **Safe Rust Native Acceleration (`rust-anything` + PyO3)**: Compute-intensive hot paths — Jawi phonetic decoding (`jawi-decoder-rs`), adaptive OCR line-valley chunking & perceptual `aHash` (`vision-ops-rs`), and identity/time/metadata normalization (`metadata-utils-rs`) — are compiled as zero-`unsafe` (`#![forbid(unsafe_code)]`) PyO3 Rust extensions with automatic, transparent Python fallback.
 
 ---
 
@@ -208,7 +210,32 @@ The FastMCP server ([src/models/rojakface_mcp.py](src/models/rojakface_mcp.py)) 
 
 ---
 
-## 7. Admin Portal & Public/Private Data Governance
+## 7. Rust Acceleration (`rust-anything` + PyO3)
+
+RojakFace uses a hybrid **Python orchestration + safe Rust compute** architecture migrated and verified with [`rust-anything`](https://github.com/erkamyaman/rust-anything):
+
+- **Thin Python Shell**: FastMCP SSE routing, Starlette/Uvicorn Admin Portal (`src/models/`), Qdrant client, and `RojakFace` ONNX/CLIP bindings remain in Python.
+- **Zero-`unsafe` Native Rust Crates (`#![forbid(unsafe_code)]`)**: All portable algorithmic hot paths run natively in compiled Rust via PyO3 (`abi3-py39`), verified with **100% differential parity**, **100% fuzz parity**, **0 Clippy warnings**, and **0% fallback**:
+
+| Rust Crate | Python Module | Recorded Diff | Fuzz Parity | Gate | Benchmark Speedup |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **`jawi-decoder-rs`** ([report](rust/jawi-decoder-rs/report/REPORT.md)) | `src/utils/jawi_decoder.py` | 669 / 669 (100%) | 415 / 415 (100%) | 12/12 PASS | **47×** geometric mean (`decode_jawi_text` **51×**) |
+| **`vision-ops-rs`** ([report](rust/vision-ops-rs/report/REPORT.md)) | `src/utils/vision_ops.py` | 652 / 652 (100%) | 520 / 520 (100%) | 12/12 PASS | **14.6×** on 1200px OCR line-valley chunking; **4.9×** on 16×16 `aHash` |
+| **`metadata-utils-rs`** ([report](rust/metadata-utils-rs/report/REPORT.md)) | `src/utils/metadata_utils.py` | 1115 / 1115 (100%) | 683 / 683 (100%) | 12/12 PASS | **2.7×** `profile_slug`, **2.3×** `format_time_12h` & visibility |
+
+### Graceful Python Fallback & Optional Rust Rebuild
+- **Zero Rust Required to Run**: If the compiled native `.pyd`/`.so` extensions are not present, every module transparently falls back to its pure-Python implementation.
+- **Force Python Mode for Debugging**: Set `RUST_ANYTHING_MODE=old` in your environment to bypass Rust extensions for a single run without modifying code.
+- **Rebuild Native Rust Extensions** (requires Rust toolchain + `maturin` + `rust-anything`):
+  ```powershell
+  rust-anything build rust/jawi-decoder-rs
+  rust-anything build rust/metadata-utils-rs
+  rust-anything build rust/vision-ops-rs
+  ```
+
+---
+
+## 8. Admin Portal & Public/Private Data Governance
 
 Open **`http://127.0.0.1:8005/admin`** in your browser:
 
@@ -224,7 +251,7 @@ Open **`http://127.0.0.1:8005/admin`** in your browser:
 
 ---
 
-## 8. Chatbox Usage & Example Prompts
+## 9. Chatbox Usage & Example Prompts
 
 ### A. Retrieve Photos by Name, Count, or Visual Attribute (No Attachment Needed)
 - `show lando zawawi photos. 3 photos only.`
@@ -256,7 +283,7 @@ Open **`http://127.0.0.1:8005/admin`** in your browser:
 
 ---
 
-## 9. Project Structure
+## 10. Project Structure
 
 ```text
 ├── config/                         # Service settings & LibreChat configuration snapshots
@@ -275,6 +302,10 @@ Open **`http://127.0.0.1:8005/admin`** in your browser:
 │   └── Modelfile
 ├── reports/                        # Scalable vector pipeline architecture diagram
 │   └── pipeline_diagram.svg
+├── rust/                           # Safe Rust PyO3 crates migrated via rust-anything
+│   ├── jawi-decoder-rs/            # 47x faster Jawi-to-Rumi phonetic decoder + report card
+│   ├── metadata-utils-rs/          # Identity slug, 12h time, privacy & JSON metadata parser
+│   └── vision-ops-rs/              # Adaptive OCR line-valley chunker & 16x16 aHash ops
 ├── src/
 │   ├── data/                       # Ingestion and batch enrollment scripts
 │   │   ├── batch_enroll.py
@@ -284,11 +315,13 @@ Open **`http://127.0.0.1:8005/admin`** in your browser:
 │   │   ├── admin_portal/           # login.html, dashboard.html, test_recognition.html
 │   │   ├── admin_routes.py         # Admin HTTP endpoints & session auth middleware
 │   │   └── rojakface_mcp.py        # FastMCP SSE server (14 tools)
-│   └── utils/                      # Shared utilities
+│   └── utils/                      # Shared utilities (Rust-accelerated with Python fallback)
 │       ├── face_utils.py           # Profile sync & face crop helpers
 │       ├── jawi_decoder.py         # Jawi-to-Rumi orthographic & phonetic skeleton decoder
+│       ├── metadata_utils.py       # Identity normalization, 12h time, visibility & JSON parse
 │       ├── paths.py                # Centralized project paths
-│       └── qdrant_helper.py        # Qdrant client factory
+│       ├── qdrant_helper.py        # Qdrant client factory
+│       └── vision_ops.py           # Adaptive OCR line-valley chunking & perceptual aHash
 ├── tests/                          # Unit and validation tests
 │   └── test_core.py
 ├── .gitignore
@@ -302,7 +335,7 @@ Open **`http://127.0.0.1:8005/admin`** in your browser:
 
 ---
 
-## 10. Configuration & Environment Variables
+## 11. Configuration & Environment Variables
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
@@ -318,7 +351,7 @@ Open **`http://127.0.0.1:8005/admin`** in your browser:
 
 ---
 
-## 11. Testing & Troubleshooting
+## 12. Testing & Troubleshooting
 
 ### Run the Automated Test Suite
 ```powershell
