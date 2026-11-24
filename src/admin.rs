@@ -3,6 +3,7 @@
 use crate::config::{
     ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_SECS, MIN_CLIP_IDENTIFY_THRESHOLD, is_image_ext,
 };
+use crate::metadata::value_to_trimmed_string;
 use crate::service::RojakFaceService;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Form, Multipart, Path as AxumPath, Request, State};
@@ -255,11 +256,12 @@ async fn admin_api_requests(State(state): State<AdminState>) -> Json<Value> {
 async fn admin_api_profiles(State(state): State<AdminState>) -> Json<Value> {
     let svc = state.service.clone();
     let profiles = tokio::task::spawn_blocking(move || {
-        let mut names: Vec<String> = svc.store.list_counts().into_keys().collect();
-        names.sort_by_key(|a| a.to_ascii_lowercase());
-        names
-            .iter()
-            .map(|n| svc.admin_profile_record(n))
+        let counts = svc.store.list_counts();
+        let mut entries: Vec<(String, usize)> = counts.into_iter().collect();
+        entries.sort_by_key(|(name, _)| name.to_ascii_lowercase());
+        entries
+            .into_iter()
+            .map(|(n, count)| svc.admin_profile_record_with_count(&n, count))
             .collect::<Vec<_>>()
     })
     .await
@@ -566,10 +568,7 @@ async fn admin_update_profile(
     let mut metadata = Map::new();
     for (k, v) in &payload {
         if allowed.contains(&k.as_str()) && !v.is_null() {
-            metadata.insert(
-                k.clone(),
-                Value::String(v.as_str().unwrap_or("").trim().to_string()),
-            );
+            metadata.insert(k.clone(), Value::String(value_to_trimmed_string(v)));
         }
     }
     if let Some(Value::Object(other)) = payload.get("other_details") {

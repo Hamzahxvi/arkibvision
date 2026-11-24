@@ -223,7 +223,18 @@ impl RojakFaceService {
             if !folder.is_dir() {
                 continue;
             }
-            for entry in WalkDir::new(folder).into_iter().flatten() {
+            for entry in WalkDir::new(folder)
+                .into_iter()
+                .filter_entry(|e| {
+                    if e.file_type().is_dir() {
+                        let name = e.file_name().to_str().unwrap_or("");
+                        !matches!(name, "profile-gallery" | "ocr-chunks" | "identity-gallery")
+                    } else {
+                        true
+                    }
+                })
+                .flatten()
+            {
                 let p = entry.path();
                 if entry.file_type().is_file() && is_image_ext(p) {
                     let ts = file_latest_unix_secs(p);
@@ -667,13 +678,13 @@ impl RojakFaceService {
                         self.cfg.store_faces_dir.join("crops").join(&crop_name),
                         &face.face_crop_jpeg,
                     );
-                    let pt = FacePoint {
-                        id: Uuid::new_v4().to_string(),
-                        identity: new_identity.clone(),
-                        filename: saved_orig.clone(),
-                        crop_path: crop_rel,
-                        vector: face.embedding,
-                    };
+                    let pt = FacePoint::new(
+                        Uuid::new_v4().to_string(),
+                        new_identity.clone(),
+                        saved_orig.clone(),
+                        crop_rel,
+                        face.embedding,
+                    );
                     self.store.upsert(pt)?;
                     new_faces += 1;
                     details.push(json!({
@@ -1798,6 +1809,11 @@ impl RojakFaceService {
     }
 
     pub fn admin_profile_record(&self, identity: &str) -> Value {
+        let count = self.store.count_by_identity(identity);
+        self.admin_profile_record_with_count(identity, count)
+    }
+
+    pub fn admin_profile_record_with_count(&self, identity: &str, vector_count: usize) -> Value {
         let slug = profile_slug(identity);
         let pdir = self.cfg.profile_dir.join(&slug);
         let meta_file = pdir.join("metadata.json");
@@ -1890,7 +1906,6 @@ impl RojakFaceService {
                 .unwrap_or("")
                 .to_string()
         };
-        let vector_count = self.store.count_by_identity(identity);
 
         json!({
             "slug": slug,
@@ -1956,5 +1971,60 @@ impl RojakFaceService {
             "identity": clean,
             "details": stats["details"],
         })
+    }
+
+    /// Pure-Rust batch enrollment from `<root>/<Identity Name>/*.jpg` directories.
+    pub fn enroll_directory(&self, dir: &Path) -> Result<Value, String> {
+        if !dir.is_dir() {
+            return Err(format!("Directory not found: {}", dir.display()));
+        }
+        let mut enrolled = 0usize;
+        let mut skipped = 0usize;
+        let mut errors = Vec::new();
+        let mut subdirs: Vec<PathBuf> = fs::read_dir(dir)
+            .map_err(|e| format!("Failed reading {}: {e}", dir.display()))?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        subdirs.sort();
+
+        for person_dir in subdirs {
+            let Some(identity) = person_dir.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let mut imgs: Vec<PathBuf> = fs::read_dir(&person_dir)
+                .ok()
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && is_image_ext(p))
+                .collect();
+            imgs.sort();
+            for img_path in imgs {
+                let res = self.tool_enroll_named_identity(
+                    identity,
+                    &img_path.to_string_lossy(),
+                    &self.cfg.admin_key,
+                    "",
+                );
+                match res.get("status").and_then(Value::as_str).unwrap_or("") {
+                    "enrolled_by_admin" => enrolled += 1,
+                    "unchanged" | "rejected" => skipped += 1,
+                    _ => errors.push(json!({
+                        "identity": identity,
+                        "file": img_path.display().to_string(),
+                        "result": res,
+                    })),
+                }
+            }
+        }
+        Ok(json!({
+            "status": "completed",
+            "enrolled": enrolled,
+            "skipped": skipped,
+            "errors": errors,
+        }))
     }
 }

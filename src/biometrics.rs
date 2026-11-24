@@ -5,6 +5,7 @@ use crate::vision_ops::{encode_jpeg, load_rgb_image, load_rgb_image_from_bytes};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage};
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 use std::path::Path;
 use std::sync::Mutex;
@@ -63,13 +64,25 @@ impl FaceEngine {
             .build()
             .map_err(|e| format!("Failed building ONNX Runtime environment: {e}"))?;
 
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().clamp(2, 4))
+            .unwrap_or(4);
+
         let yunet = Session::builder(&env)
             .map_err(|e| format!("YuNet session builder error: {e}"))?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| format!("YuNet optimization error: {e}"))?
+            .with_intra_threads(threads)
+            .map_err(|e| format!("YuNet threads error: {e}"))?
             .commit_from_file(&cfg.yunet_model_path)
             .map_err(|e| format!("Failed loading YuNet model: {e}"))?;
 
         let clip = Session::builder(&env)
             .map_err(|e| format!("CLIP session builder error: {e}"))?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| format!("CLIP optimization error: {e}"))?
+            .with_intra_threads(threads)
+            .map_err(|e| format!("CLIP threads error: {e}"))?
             .commit_from_file(&cfg.clip_model_path)
             .map_err(|e| format!("Failed loading CLIP model: {e}"))?;
 
@@ -287,13 +300,37 @@ fn iou(a: (f32, f32, f32, f32, f32), b: (f32, f32, f32, f32, f32)) -> f32 {
     if denom <= 0.0 { 0.0 } else { inter / denom }
 }
 
-fn nms(mut boxes: Vec<(f32, f32, f32, f32, f32)>, thresh: f32) -> Vec<(f32, f32, f32, f32, f32)> {
+fn nms(mut boxes: Vec<RawFaceBox>, thresh: f32) -> Vec<RawFaceBox> {
     boxes.sort_by(|a, b| b.4.total_cmp(&a.4));
-    let mut kept: Vec<(f32, f32, f32, f32, f32)> = Vec::new();
+    let mut kept: Vec<RawFaceBox> = Vec::new();
     for cand in boxes {
         if kept.iter().all(|&k| iou(k, cand) <= thresh) {
             kept.push(cand);
         }
     }
     kept
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_square_pad_and_nms() {
+        let rect = RgbImage::from_pixel(40, 20, Rgb([128, 64, 32]));
+        let sq = square_pad(&rect);
+        assert_eq!(sq.dimensions(), (40, 40));
+        assert_eq!(*sq.get_pixel(0, 0), Rgb([0, 0, 0]));
+        assert_eq!(*sq.get_pixel(20, 20), Rgb([128, 64, 32]));
+
+        let boxes = vec![
+            (10.0, 10.0, 50.0, 50.0, 0.95),
+            (12.0, 12.0, 52.0, 52.0, 0.85), // overlapping -> suppressed
+            (100.0, 100.0, 140.0, 140.0, 0.90),
+        ];
+        let kept = nms(boxes, 0.30);
+        assert_eq!(kept.len(), 2);
+        assert!((kept[0].4 - 0.95).abs() < 1e-6);
+        assert!((kept[1].4 - 0.90).abs() < 1e-6);
+    }
 }

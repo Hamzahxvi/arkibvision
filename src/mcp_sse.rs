@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 use crate::service::RojakFaceService;
-use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::extract::{Query, Request, State};
+use axum::http::{StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::stream::Stream;
@@ -11,7 +13,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -29,6 +33,56 @@ struct SessionQuery {
     session_id: String,
 }
 
+/// Automatically removes an SSE session from the map when the client disconnects.
+struct ManagedSseStream<S> {
+    inner: S,
+    session_id: String,
+    sessions: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
+}
+
+impl<S: Stream<Item = Result<Event, Infallible>> + Unpin> Stream for ManagedSseStream<S> {
+    type Item = Result<Event, Infallible>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.inner).poll_next(cx)
+    }
+}
+
+impl<S> Drop for ManagedSseStream<S> {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.sessions.lock() {
+            guard.remove(&self.session_id);
+        }
+    }
+}
+
+fn is_allowed_host(host: &str) -> bool {
+    let bare = host
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    matches!(
+        bare.as_str(),
+        "localhost" | "127.0.0.1" | "host.docker.internal" | "0.0.0.0" | "[::1]"
+    )
+}
+
+async fn dns_rebinding_guard(req: Request, next: Next) -> Response {
+    if let Some(host_val) = req.headers().get(header::HOST)
+        && let Ok(host_str) = host_val.to_str()
+        && !is_allowed_host(host_str)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Disallowed Host header" })),
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
 pub fn mcp_router(service: Arc<RojakFaceService>) -> Router {
     let state = McpState {
         service,
@@ -38,6 +92,7 @@ pub fn mcp_router(service: Arc<RojakFaceService>) -> Router {
         .route("/sse", get(sse_handler))
         .route("/messages", post(messages_handler))
         .route("/messages/", post(messages_handler))
+        .layer(middleware::from_fn(dns_rebinding_guard))
         .with_state(state)
 }
 
@@ -61,7 +116,13 @@ async fn sse_handler(
     let messages = UnboundedReceiverStream::new(rx)
         .map(|payload| Ok::<Event, Infallible>(Event::default().event("message").data(payload)));
 
-    Sse::new(initial.chain(messages)).keep_alive(
+    let stream = ManagedSseStream {
+        inner: Box::pin(initial.chain(messages)),
+        session_id,
+        sessions: state.sessions.clone(),
+    };
+
+    Sse::new(stream).keep_alive(
         KeepAlive::new()
             .interval(Duration::from_secs(15))
             .text("ping"),
@@ -438,4 +499,23 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mcp_tool_catalog_and_host_guard() {
+        let tools = tool_definitions();
+        assert_eq!(tools.len(), 14);
+        for t in &tools {
+            assert!(t["name"].as_str().unwrap_or("").starts_with("rojakface_"));
+            assert_eq!(t["inputSchema"]["type"].as_str(), Some("object"));
+        }
+        assert!(is_allowed_host("localhost:8005"));
+        assert!(is_allowed_host("host.docker.internal:8005"));
+        assert!(is_allowed_host("127.0.0.1:8005"));
+        assert!(!is_allowed_host("evil.example.com:8005"));
+    }
 }

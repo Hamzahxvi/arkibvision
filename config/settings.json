@@ -1,6 +1,9 @@
 {
-  "qdrant_collection": "enterprise_faces",
+  "vector_store": "data/processed/rojakface_vectors.json",
+  "vector_dimension": 768,
   "min_clip_identify_threshold": 0.88,
+  "auto_gallery_min_score": 0.90,
+  "auto_gallery_max_images": 15,
   "mcp_port": 8005,
   "librechat_port": 3080
 }
