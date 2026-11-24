@@ -1,6 +1,6 @@
-# RojakFace Enterprise Vision, Biometric Identity & Multilingual OCR Platform
+# RojakFace Enterprise Vision, Biometric Identity & Multilingual OCR Platform (Pure Rust)
 
-An **air-gapped, 100% on-premise multimodal AI platform** that integrates **Biometric Face Recognition**, **Privacy-Aware Identity & Visual Photo Retrieval**, **ID Card / Document Data Ingestion**, and **Multilingual Document & Handwriting OCR (Jawi, Sanskrit, Tamil, Mandarin, Malay, English)** inside **LibreChat** (`http://localhost:3080`), powered by a role-governed **FastMCP Server** (`http://0.0.0.0:8005/sse`) and **Admin Portal** (`http://127.0.0.1:8005/admin`).
+An **air-gapped, 100% on-premise multimodal AI platform** written in **100% safe Rust (`#![forbid(unsafe_code)]`)** that integrates **Biometric Face Recognition**, **Privacy-Aware Identity & Visual Photo Retrieval**, **ID Card / Document Data Ingestion**, and **Multilingual Document & Handwriting OCR (Jawi, Sanskrit, Tamil, Mandarin, Malay, English)** inside **LibreChat** (`http://localhost:3080`), powered by a single compiled **Rust Axum + Tokio MCP SSE Server** (`http://0.0.0.0:8005/sse`) and **Admin Portal** (`http://127.0.0.1:8005/admin`).
 
 ![RojakFace Pipeline Architecture Diagram](reports/pipeline_diagram.svg)
 
@@ -8,94 +8,46 @@ An **air-gapped, 100% on-premise multimodal AI platform** that integrates **Biom
 
 ## Table of Contents
 1. [Key Features](#1-key-features)
-2. [System Pipeline Architecture](#2-system-pipeline-architecture)
+2. [Pure-Rust Architecture](#2-pure-rust-architecture)
 3. [System Requirements & Prerequisites](#3-system-requirements--prerequisites)
-4. [Installation & Setup Guide](#4-installation--setup-guide)
+4. [Build & Setup Guide](#4-build--setup-guide)
 5. [Running & Stopping the Platform](#5-running--stopping-the-platform)
-6. [Core Processing Pipelines & MCP Tools](#6-core-processing-pipelines--mcp-tools)
-7. [Rust Acceleration (`rust-anything` + PyO3)](#7-rust-acceleration-rust-anything--pyo3)
-8. [Admin Portal & Public/Private Data Governance](#8-admin-portal--publicprivate-data-governance)
-9. [Chatbox Usage & Example Prompts](#9-chatbox-usage--example-prompts)
-10. [Project Structure](#10-project-structure)
-11. [Configuration & Environment Variables](#11-configuration--environment-variables)
-12. [Testing & Troubleshooting](#12-testing--troubleshooting)
+6. [Core Processing Pipelines & 14 MCP Tools](#6-core-processing-pipelines--14-mcp-tools)
+7. [Admin Portal & Public/Private Data Governance](#7-admin-portal--publicprivate-data-governance)
+8. [Chatbox Usage & Example Prompts](#8-chatbox-usage--example-prompts)
+9. [Project Structure](#9-project-structure)
+10. [Configuration & Environment Variables](#10-configuration--environment-variables)
+11. [Testing & Verification](#11-testing--verification)
 
 ---
 
 ## 1. Key Features
 
-- **100% Air-Gapped Local AI (Single Vision-Language Model)**: Zero cloud API dependencies. Runs entirely on local hardware using a single Ollama model (**`qwen3-vl:4b-instruct-16k`** for chat, vision, tool calls, multilingual OCR, and chat titling), **YuNet ONNX** face detection, **CLIP ViT-B/32 (768-D)** embeddings, and **Qdrant** vector search.
-- **Biometric Face Recognition & Auto-Gallery Capture**: Identifies enrolled individuals with an anti-false-positive cosine threshold (`>= 0.88`) and automatically captures new high-confidence (`>= 0.90`), non-duplicate face angles into the person's profile gallery using 16×16 perceptual average hashing (`aHash`).
-- **Direct Database & Visual Attribute Photo Search**: Case- and spacing-insensitive identity lookup supporting count limits (*"3 photos only"*), photos-only rendering, and visual attribute filtering (*"photo that wear songkok"*, *"wearing glasses"*) in `0.00s` via per-profile `visual_index.json` + local VLM fallback.
-- **Public vs. Private Data Boundary**: Profile attributes are divided into **🌐 Public Data** (shown in chatbox Markdown tables) and **🔒 Private Data** (e.g., `license_no`, `dob`, `ic`, `nric`, `passport`, `exp`, `phone`, strictly hidden from chat and accessible only in the Admin Portal).
+- **100% Pure Rust Backend (`#![forbid(unsafe_code)]`, Zero Python Runtime)**: Compiles to a single lightweight native binary (`rojakface-server.exe`, ~9 MB) with instant startup, low memory footprint, true async multi-threading (`tokio` + `axum`), and compile-time memory safety.
+- **100% Air-Gapped Local AI (Single Vision-Language Model)**: Zero cloud API dependencies. Runs entirely on local hardware using **Ollama (`qwen3-vl:4b-instruct-16k`)**, native **ONNX Runtime (`ort`)** for **YuNet** face detection and **CLIP ViT-B/32 (768-D)** embeddings, and an embedded **Pure-Rust Cosine Vector Store** (`data/processed/rojakface_vectors.json`).
+- **Biometric Face Recognition & Auto-Gallery Capture**: Identifies enrolled individuals with an anti-false-positive cosine threshold (`>= 0.88`) and automatically captures new high-confidence (`>= 0.90`), non-duplicate face angles using 16×16 perceptual average hashing (`aHash`).
+- **Direct Database & Visual Attribute Photo Search**: Case- and spacing-insensitive identity lookup supporting count limits (*"3 photos only"*), photos-only rendering, and visual attribute filtering (*"photo that wear songkok"*, *"wearing glasses"*) via per-profile `visual_index.json` + async `reqwest` Ollama vision fallback.
+- **Public vs. Private Data Boundary**: Profile attributes are divided into **Public Data** (shown in chatbox Markdown tables) and **Private Data** (`license_no`, `dob`, `ic`, `nric`, `passport`, `exp`, `phone`, `email`, strictly hidden from chat and accessible only in the Admin Portal).
 - **Multilingual Document & Handwriting OCR with Visual Chunking**:
-  - **Adaptive Line-Valley Chunker** (`rojakface_ocr_document`): Projects horizontal edge energy in `< 50ms` to count exact text lines and slices tall/dense manuscripts along natural whitespace valleys (`Top`, `Middle`, `Bottom`) with `1.4×` sharpening and auto-contrast so small diacritics are never clipped and lines are never skipped.
-  - **Jawi-to-Rumi Orthographic & Phonetic Decoder** (`rojakface_decode_jawi`): Restores 3-dot Jawi letters (`ڤ`=`p`, `ڠ`=`ng`, `ݢ`=`g`, `چ`=`c`, `ڽ`=`ny`), applies classical Jawi vowel rules (`ى`→`-a`, `ي`→`e`, `ؤ`→`o`, `٢`→word reduplication), and matches Jawi phonetic skeletons against a Bahasa Melayu Rumi lexicon.
-  - Supports **Jawi**, **Sanskrit (Devanagari)**, **Tamil**, **Mandarin Chinese**, **Bahasa Melayu**, and **English** printed documents and handwriting.
-- **Role-Based Governance (Guest vs. Admin)**: Chatbox users operate as **Guests** (read-only search; new enrollments and ID card metadata updates are staged as `REQ-*` requests). **Admins** review, approve, or reject requests and manage profiles in the authenticated Admin Portal.
-- **Safe Rust Native Acceleration (`rust-anything` + PyO3)**: Compute-intensive hot paths — Jawi phonetic decoding (`jawi-decoder-rs`), adaptive OCR line-valley chunking & perceptual `aHash` (`vision-ops-rs`), and identity/time/metadata normalization (`metadata-utils-rs`) — are compiled as zero-`unsafe` (`#![forbid(unsafe_code)]`) PyO3 Rust extensions with automatic, transparent Python fallback.
+  - **Adaptive Line-Valley Chunker** (`rojakface_ocr_document`): Projects horizontal edge energy in microseconds to count exact text lines and slices tall/dense manuscripts along natural whitespace valleys (`Top`, `Middle`, `Bottom`) with auto-contrast and `1.4×` sharpening.
+  - **Jawi-to-Rumi Orthographic & Phonetic Decoder** (`rojakface_decode_jawi`): Restores 3-dot Jawi letters (`ڤ`=`p`, `ڠ`=`ng`, `ݢ`=`g`, `چ`=`c`, `ڽ`=`ny`), applies classical Jawi vowel rules, and matches phonetic skeletons against a Standard Bahasa Melayu Rumi lexicon.
+  - Supports **Jawi**, **Sanskrit (Devanagari)**, **Tamil**, **Mandarin Chinese**, **Bahasa Melayu**, and **English**.
+- **Role-Based Governance (Guest vs. Admin)**: Chatbox users operate as **Guests** (read-only search; enrollments and ID card metadata updates are staged as `REQ-*` requests). **Admins** review, approve, or reject requests and manage profiles in the authenticated Admin Portal.
 
 ---
 
-## 2. System Pipeline Architecture
+## 2. Pure-Rust Architecture
 
-```mermaid
-flowchart TD
-    %% Top Entry Layer
-    User(["User in LibreChat Chatbox (Port 3080)"])
-    Admin(["Admin in RojakFace Portal (Port 8005/admin)"])
-
-    User --> VLM["Local AI Engine (Ollama Port 11434)\nSingle Model: qwen3-vl:4b-instruct-16k (16K Context)"]
-    VLM --> Router{"RojakFace FastMCP Router\n(SSE Port 8005)"}
-
-    %% 4 Clean Parallel Vertical Pipelines (Zero Crossing Lines)
-    Router -->|"1. Attached Face Photo"| A1["Pipeline A: Face Identification\nrojakface_identify_faces"]
-    Router -->|"2. Name / Photo Query"| B1["Pipeline B: Profile & Photo Search\nrojakface_search_identity"]
-    Router -->|"3. Document / Handwriting"| C1["Pipeline C: Visual OCR Chunker\nrojakface_ocr_document"]
-    Router -->|"4. New Face / ID Card Data"| D1["Pipeline D: Guest Request Staging\nrojakface_request_enrollment / update"]
-
-    %% Pipeline A Vertical Chain
-    A1 --> A2["YuNet Face Detection\n+ CLIP ViT-B/32 (768-D)"]
-    A2 --> A3["Qdrant Cosine Match\n(Threshold >= 0.88)"]
-    A3 --> A4["Auto-Save New Photo (>= 0.90)\n+ Return Public Profile"]
-    A4 --> DB1[("Qdrant Vector DB\nenterprise_faces")]
-
-    %% Pipeline B Vertical Chain
-    B1 --> B2["Case-Insensitive Lookup\n+ Count Limit / Visual Filter"]
-    B2 --> B3["Privacy Filter (Public Only)\n+ 12-Hour AM/PM Time"]
-    B3 --> B4["Centered Markdown Tables\n(| Field | Value | & Photos)"]
-    B4 --> DB2[("Trusted Profile Store\nmetadata.json & visual_index.json")]
-
-    %% Pipeline C Vertical Chain
-    C1 --> C2["Horizontal Line-Valley Split\n(Top / Middle / Bottom Strips)"]
-    C2 --> C3["Auto-Contrast & 1.4x Sharpen\n(/images/ocr-chunks/)"]
-    C3 --> C4["Jawi-to-Rumi Phonetic Decoder\nrojakface_decode_jawi"]
-    C4 --> DB3[("Multilingual OCR Output\nJawi • Sanskrit • Tamil • Mandarin")]
-
-    %% Pipeline D Vertical Chain
-    D1 --> D2["Recover JSON & Classify\nPublic vs Private Fields"]
-    D2 --> D3[("Pending Approval Queue\nrequests.json (REQ-*)")]
-    Admin -->|"Approve / Reject"| D3
-    D3 --> D4["Write Vectors & Metadata\nPurge Temp Files & Log Audit"]
-    D4 --> DB4[("Updated Qdrant + Profiles\n+ history.jsonl")]
-
-    %% Styling for High Contrast Readability
-    classDef entry fill:#1E3A8A,stroke:#60A5FA,stroke-width:2px,color:#FFFFFF
-    classDef ai fill:#1D4ED8,stroke:#93C5FD,stroke-width:2px,color:#FFFFFF
-    classDef pipeA fill:#0F172A,stroke:#38BDF8,stroke-width:2px,color:#F8FAFC
-    classDef pipeB fill:#0F172A,stroke:#34D399,stroke-width:2px,color:#F8FAFC
-    classDef pipeC fill:#0F172A,stroke:#A78BFA,stroke-width:2px,color:#F8FAFC
-    classDef pipeD fill:#0F172A,stroke:#FBBF24,stroke-width:2px,color:#F8FAFC
-    classDef db fill:#1E293B,stroke:#94A3B8,stroke-width:2px,color:#E2E8F0
-
-    class User,Admin entry
-    class VLM,Router ai
-    class A1,A2,A3,A4 pipeA
-    class B1,B2,B3,B4 pipeB
-    class C1,C2,C3,C4 pipeC
-    class D1,D2,D3,D4 pipeD
-    class DB1,DB2,DB3,DB4 db
-```
+| Component | Rust Module / Crate | Responsibility |
+| :--- | :--- | :--- |
+| **HTTP & Admin Portal** | `src/admin.rs` (`axum` + `tokio`) | Serves `/admin`, form login, 8-hour HttpOnly sessions, multipart uploads, profile CRUD, approval queue, and recognition test bench. |
+| **MCP-over-SSE Server** | `src/mcp_sse.rs` (`axum` SSE + JSON-RPC 2.0) | Exposes all 14 MCP tools over `GET /sse` & `POST /messages/` for LibreChat (`host.docker.internal:8005/sse`). |
+| **Biometric ONNX Engine** | `src/biometrics.rs` (`ort` dynamic runtime) | Runs YuNet (`yunet_face_detector.onnx`) + NMS + CLIP ViT-B/32 (`patch32_v1.onnx`) 768-D embeddings natively in Rust. |
+| **Embedded Vector Store** | `src/vector_store.rs` | Thread-safe `RwLock` 768-D cosine similarity search with atomic JSON persistence (`rojakface_vectors.json`), zero file-lock conflicts. |
+| **Vision & OCR Chunker** | `src/vision_ops.rs` (`image` + `kamadak-exif`) | EXIF auto-orient, 16×16 perceptual `aHash`, horizontal edge-energy line-valley chunking, autocontrast, and sharpening. |
+| **Jawi Phonetic Decoder** | `src/jawi.rs` | 3-dot Jawi restoration, reduplication (`٢`), vowel inference, and Standard Bahasa Melayu Rumi skeleton matching. |
+| **Metadata & Privacy** | `src/metadata.rs` | URL/filesystem slugging, identity capitalization, 12-hour AM/PM time formatting, public/private classification, and truncated JSON recovery. |
+| **Orchestration Service** | `src/service.rs` (`reqwest`) | Implements all 14 MCP tools, LibreChat attachment resolution, perceptual ID cache, auto-gallery capture, staging queue, and Ollama visual filter. |
 
 ---
 
@@ -104,59 +56,42 @@ flowchart TD
 | Requirement | Minimum / Recommended Specification |
 | :--- | :--- |
 | **Operating System** | Windows 10/11 (64-bit), Linux, or macOS |
-| **Memory (RAM / VRAM)** | 16 GB RAM minimum (GPU with >= 6 GB VRAM recommended for faster VLM inference) |
-| **Python** | Python **3.11+** (tested on Python 3.13) |
-| **Docker** | **Docker Desktop** (with Docker Compose v2) for running LibreChat, MongoDB, Meilisearch, and pgvector RAG |
-| **Ollama** | **Ollama** (`http://127.0.0.1:11434`) installed and available on `PATH` |
-| **Sibling LibreChat Repo** | LibreChat cloned as a sibling folder at `../LibreChat` (or path configured via `LIBRECHAT_DIR`) |
+| **Rust Toolchain** | Rust **1.97+** (`cargo`, `rustc`) — *no Python required at runtime* |
+| **ONNX Runtime + Models** | `onnxruntime.dll` (or `.so`/`.dylib`), `yunet_face_detector.onnx`, and `patch32_v1.onnx` in `models/` (or cached under `~/.cache/`) |
+| **Docker** | **Docker Desktop** (Compose v2) for LibreChat (`http://localhost:3080`) |
+| **Ollama** | **Ollama** (`http://127.0.0.1:11434`) running `qwen3-vl:4b-instruct-16k` |
 
 ---
 
-## 4. Installation & Setup Guide
+## 4. Build & Setup Guide
 
-### Step 1 — Clone the Repository & Create the Python Virtual Environment
+### Step 1 — Clone & Compile the Pure-Rust Binary
 ```powershell
 git clone https://github.com/Hamzahxvi/rojakface-enterprise-vision.git
 cd rojakface-enterprise-vision
 
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install --upgrade pip
-pip install -r requirements.txt
-# Or install as an editable package:
-pip install -e .
+cargo build --release
 ```
+The compiled native binary is output to `target/release/rojakface-server.exe` (or `target/release/rojakface-server` on Linux/macOS).
 
 ### Step 2 — Pull & Build the Local Ollama Model
-Ensure Ollama is running (`ollama serve`), then pull `qwen3-vl:4b-instruct` and build the 16K-context vision model from `models/Modelfile` (only this single model is required):
 ```powershell
 ollama pull qwen3-vl:4b-instruct
 ollama create qwen3-vl:4b-instruct-16k -f models/Modelfile
 ```
 
-### Step 3 — Set Up Sibling LibreChat & Apply Configuration Snapshots
-If you do not already have LibreChat cloned as a sibling folder (`../LibreChat`), clone it and create its `.env` file first:
+### Step 3 — Configure Sibling LibreChat (`../LibreChat`)
 ```powershell
 if (-not (Test-Path ..\LibreChat)) {
     git clone https://github.com/danny-avila/LibreChat.git ..\LibreChat
     Copy-Item ..\LibreChat\.env.example ..\LibreChat\.env
 }
 New-Item -ItemType Directory -Force -Path ..\LibreChat\images | Out-Null
-```
-Then copy the provided LibreChat configuration and theme files from `config/librechat/` into `../LibreChat/`:
-```powershell
+
 Copy-Item config\librechat\librechat.yaml ..\LibreChat\librechat.yaml -Force
 Copy-Item config\librechat\docker-compose.override.yml ..\LibreChat\docker-compose.override.yml -Force
 Copy-Item config\librechat\custom-index.html ..\LibreChat\custom-index.html -Force
 Copy-Item config\librechat\royal-theme.css ..\LibreChat\images\royal-theme.css -Force
-```
-
-### Step 4 — Initialize the Enrolled Face Database & Profiles (Optional First-Time Seed)
-To seed the Qdrant vector database (`data/processed/rojakface_qdrant`) and build the initial profile folders (`data/processed/profiles/`) from `data/raw/staff_enroll/`:
-```powershell
-.\.venv\Scripts\python.exe src\data\prepare_default20.py
-.\.venv\Scripts\python.exe src\data\batch_enroll.py
-.\.venv\Scripts\python.exe src\data\build_profiles.py
 ```
 
 ---
@@ -164,204 +99,132 @@ To seed the Qdrant vector database (`data/processed/rojakface_qdrant`) and build
 ## 5. Running & Stopping the Platform
 
 ### One-Click Launch (Windows)
-Double-click **`start.bat`** or run from PowerShell/CMD:
 ```powershell
 cmd /c start.bat
 ```
-`start.bat` automatically:
-1. Checks and starts **Ollama** (`127.0.0.1:11434`).
-2. Starts the **RojakFace FastMCP & Admin Portal Service** (`0.0.0.0:8005`).
-3. Starts the **LibreChat Docker containers** (`localhost:3080`).
-4. Opens `http://localhost:3080` in your default browser once ready.
+`start.bat` builds `target\release\rojakface-server.exe` if needed, starts Ollama (`11434`), launches `rojakface-server.exe` (`8005`), starts LibreChat Docker (`3080`), and opens `http://localhost:3080`.
 
 ### One-Click Shutdown (Windows)
 ```powershell
 cmd /c stop.bat
 ```
-*(Note: Always stop `rojakface_mcp.py` via `stop.bat` before running offline Qdrant scripts so the embedded Qdrant storage lock is released cleanly.)*
 
-### Manual CLI Startup
+### Manual CLI Launch & Biometric Smoke-Test
 ```powershell
-.\.venv\Scripts\python.exe src\models\rojakface_mcp.py
+# Run the full MCP SSE + Admin Portal server
+.\target\release\rojakface-server.exe
+
+# Run an instant offline face identification check on any image
+.\target\release\rojakface-server.exe --verify-face path\to\portrait.jpg
 ```
 
 ---
 
-## 6. Core Processing Pipelines & MCP Tools
+## 6. Core Processing Pipelines & 14 MCP Tools
 
-The FastMCP server ([src/models/rojakface_mcp.py](src/models/rojakface_mcp.py)) exposes **14 MCP tools** over SSE (`http://host.docker.internal:8005/sse`):
+Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/messages/`):
 
 | Pipeline | MCP Tool | Description |
 | :--- | :--- | :--- |
-| **Pipeline A: Biometric Face ID** | `rojakface_identify_faces` | Detects faces via YuNet, extracts 768-D CLIP embeddings, queries Qdrant (`threshold >= 0.88`), auto-saves high-confidence (`>= 0.90`) new photos to the person's gallery, and returns `MATCHED` (with `matched_profiles`), `NOT_IN_DATABASE`, or `NO_FACE_DETECTED` (with `ocr_document_chunks`). |
+| **Pipeline A: Biometric Face ID** | `rojakface_identify_faces` | YuNet face detection + 768-D CLIP embeddings + cosine match (`>= 0.88`), auto-gallery capture (`>= 0.90`), returns `MATCHED`, `NOT_IN_DATABASE`, or `NO_FACE_DETECTED` (with `ocr_document_chunks`). |
 | | `rojakface_detect_faces` | Low-level YuNet bounding box `[x, y, w, h]` and confidence inspection. |
-| **Pipeline B: Database & Photo Search** | `rojakface_search_identity` | Case- and spacing-insensitive profile lookup supporting `limit` (*"3 photos only"*), `photos_only=True`, and `query` (*"wear songkok"*) via `visual_index.json` + local Ollama vision fallback. Filters out Private Data and formats per-photo `Time` in 12-hour AM/PM. |
-| | `rojakface_list_identities` | Lists all enrolled identities in Qdrant and their vector counts. |
-| **Pipeline C: Document Chunking & Jawi OCR** | `rojakface_ocr_document` | Projects horizontal edge energy (`< 50ms`) to count exact text lines and slices tall/dense documents along natural whitespace line valleys into contrast-enhanced strips (`/images/ocr-chunks/`). |
-| | `rojakface_decode_jawi` | Decodes Jawi script or rough VLM transliterations into corrected 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`) and natural Standard Bahasa Melayu (Rumi) via [src/utils/jawi_decoder.py](src/utils/jawi_decoder.py). |
-| **Pipeline D: Role-Based Governance** | `rojakface_request_enrollment` | Stages a Guest face enrollment request (`REQ-*`) for Admin review (auto-routes to metadata update if the face already matches an enrolled person). |
-| | `rojakface_request_update_metadata` | Stages a Guest metadata/ID-card update request (`REQ-*`), recovering truncated JSON and auto-classifying sensitive keys as `private`. |
-| | `rojakface_list_pending_requests` | Lists pending, approved, or rejected requests in the staging queue. |
+| **Pipeline B: Database & Photo Search** | `rojakface_search_identity` | Case/spacing-insensitive profile lookup supporting `limit`, `photos_only`, and visual `query` via `visual_index.json` + local Ollama vision fallback. Filters out Private Data and formats per-photo `Time` in 12-hour AM/PM. |
+| | `rojakface_list_identities` | Lists all enrolled identities and reference vector counts. |
+| **Pipeline C: Document Chunking & Jawi OCR** | `rojakface_ocr_document` | Adaptive horizontal edge-energy line-valley chunking with autocontrast & `1.4×` sharpening (`/images/ocr-chunks/`). |
+| | `rojakface_decode_jawi` | Decodes Jawi script or rough transliterations into corrected 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`) and Standard Bahasa Melayu (Rumi). |
+| **Pipeline D: Role-Based Governance** | `rojakface_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
+| | `rojakface_request_update_metadata` | Stages a Guest metadata/ID-card update request (`REQ-*`), auto-classifying sensitive keys as `private`. |
+| | `rojakface_list_pending_requests` | Lists pending, approved, or rejected staging requests. |
 | | `rojakface_review_pending_request` | Admin-key guarded approval/rejection tool. |
-| | `rojakface_enroll_named_identity` | Admin direct enrollment tool (falls back to staging queue for Guests). |
+| | `rojakface_enroll_named_identity` | Admin direct enrollment tool (auto-stages for Guests). |
 | | `rojakface_enroll_or_learn` | Admin batch learning tool. |
-| | `rojakface_rename_identity` | Admin tool to rename an identity across Qdrant and profile folders. |
-| | `rojakface_delete_identity` | Admin tool to delete an identity and purge its stored face crops/originals. |
+| | `rojakface_rename_identity` | Admin rename across vector store, profiles, and gallery. |
+| | `rojakface_delete_identity` | Admin delete across vector store and stored files. |
 
 ---
 
-## 7. Rust Acceleration (`rust-anything` + PyO3)
+## 7. Admin Portal & Public/Private Data Governance
 
-RojakFace uses a hybrid **Python orchestration + safe Rust compute** architecture migrated and verified with [`rust-anything`](https://github.com/erkamyaman/rust-anything):
-
-- **Thin Python Shell**: FastMCP SSE routing, Starlette/Uvicorn Admin Portal (`src/models/`), Qdrant client, and `RojakFace` ONNX/CLIP bindings remain in Python.
-- **Zero-`unsafe` Native Rust Crates (`#![forbid(unsafe_code)]`)**: All portable algorithmic hot paths run natively in compiled Rust via PyO3 (`abi3-py39`), verified with **100% differential parity**, **100% fuzz parity**, **0 Clippy warnings**, and **0% fallback**:
-
-| Rust Crate | Python Module | Recorded Diff | Fuzz Parity | Gate | Benchmark Speedup |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **`jawi-decoder-rs`** ([report](rust/jawi-decoder-rs/report/REPORT.md)) | `src/utils/jawi_decoder.py` | 669 / 669 (100%) | 415 / 415 (100%) | 12/12 PASS | **47×** geometric mean (`decode_jawi_text` **51×**) |
-| **`vision-ops-rs`** ([report](rust/vision-ops-rs/report/REPORT.md)) | `src/utils/vision_ops.py` | 652 / 652 (100%) | 520 / 520 (100%) | 12/12 PASS | **14.6×** on 1200px OCR line-valley chunking; **4.9×** on 16×16 `aHash` |
-| **`metadata-utils-rs`** ([report](rust/metadata-utils-rs/report/REPORT.md)) | `src/utils/metadata_utils.py` | 1115 / 1115 (100%) | 683 / 683 (100%) | 12/12 PASS | **2.7×** `profile_slug`, **2.3×** `format_time_12h` & visibility |
-
-### Graceful Python Fallback & Optional Rust Rebuild
-- **Zero Rust Required to Run**: If the compiled native `.pyd`/`.so` extensions are not present, every module transparently falls back to its pure-Python implementation.
-- **Force Python Mode for Debugging**: Set `RUST_ANYTHING_MODE=old` in your environment to bypass Rust extensions for a single run without modifying code.
-- **Rebuild Native Rust Extensions** (requires Rust toolchain + `maturin` + `rust-anything`):
-  ```powershell
-  rust-anything build rust/jawi-decoder-rs
-  rust-anything build rust/metadata-utils-rs
-  rust-anything build rust/vision-ops-rs
-  ```
+Open **`http://127.0.0.1:8005/admin`**:
+- **Form Login & Session Auth**: Constant-time credential verification with 8-hour `HttpOnly` session cookies (`ROJAKFACE_ADMIN_USER` / `ROJAKFACE_ADMIN_PASS`).
+- **Pending Approval Queue**: Inspect staged source photos, face crops, and extracted ID card fields, then **Approve** or **Reject** (logged to `data/interim/pending_requests/history.jsonl`).
+- **Trusted Profile Editor**: Edit Name, Address, Notes, per-photo metadata (`Description`, `Photograph by`, `Location`, `Date`, `Time`), upload/delete photos, and toggle custom attributes between **Public Data** and **Private Data**.
+- **Recognition Test Bench** (`http://127.0.0.1:8005/admin/test-recognition`): Upload test portraits and tune the cosine threshold (`0.88–0.98`) without modifying stored galleries.
 
 ---
 
-## 8. Admin Portal & Public/Private Data Governance
+## 8. Chatbox Usage & Example Prompts
 
-Open **`http://127.0.0.1:8005/admin`** in your browser:
-
-- **Authentication**: Protected by form login with an 8-hour server-side session TTL (default username: `admin`, password configured via `ROJAKFACE_ADMIN_PASS`).
-- **Pending Approval Queue**: View source photos, face crops, and extracted ID card fields for every pending `REQ-*` submission. Click **✅ Approve** or **❌ Reject** (staged temp images are automatically cleaned up and logged to `data/interim/pending_requests/history.jsonl`).
-- **Trusted Profile Editor**:
-  - Edit **Name**, **Address**, and **Notes**.
-  - Click any stored photo to edit its individual **Photo description**, **Photograph by**, **Location**, **Date**, and **Time**, or upload/delete reference photos.
-  - **Side-by-Side Data Privacy Split**:
-    - **🌐 Public Data (Left Panel)**: Visible in LibreChat responses when users search for a person's details.
-    - **🔒 Private Data (Right Panel)**: Hidden from LibreChat chat responses (e.g., `license_no`, `dob`, `exp`, `ic`, `nric`, `passport`, `phone`). Use the `←` / `→` button to move any field between Public and Private at any time.
-- **Recognition Test Bench** (`http://127.0.0.1:8005/admin/test-recognition`): Upload test images and tune the similarity threshold (`0.88–0.98`) without saving test images into production galleries.
+- **Face Identification** *(attach portrait)*: `who is this? show all his details and photos`
+- **Profile Lookup**: `show eula lawrence full details` / `show azhar idrus details`
+- **Photo Limits & Visual Search**: `show lando zawawi photos. 2 photos only.` / `show lando zawawi photo that wear songkok`
+- **Multilingual OCR** *(attach document/handwriting)*: `read this jawi text, convert to rumi, and explain the meaning` / `transcribe this sanskrit text chunk by chunk`
+- **Guest Staging**: `enroll this person as Ahmad Faizal` / `extract all details from this ID card and save them to Carl Johnson's profile`
 
 ---
 
-## 9. Chatbox Usage & Example Prompts
-
-### A. Retrieve Photos by Name, Count, or Visual Attribute (No Attachment Needed)
-- `show lando zawawi photos. 3 photos only.`
-- `show lando zawawi photo that wear songkok`
-- `show lando zawawi photo wearing glasses`
-- `show lando zawawi photo wearing plaid shirt`
-- `show lando zawawi photo wearing pirate hat`
-- `show carl johnson photos only`
-
-### B. Full Public Profile Details & Centered Per-Image Tables (Case-Insensitive)
-- `show lando zawawi all his details`
-- `show Lando Zawawi details`
-- `who is carl johnson? show all details`
-- `show details about Anwar Ibrahim`
-
-### C. Multilingual Handwriting & Document OCR (Attach Document / Handwriting Image)
-- **Jawi**: `read this jawi text, convert to rumi, and explain the meaning`
-- **Sanskrit**: `transcribe this sanskrit text chunk by chunk, provide romanized transliteration, and translate to english`
-- **Tamil**: `read this tamil handwriting line by line with romanization and english translation`
-- **Mandarin**: `read this mandarin handwriting and show chinese characters, pinyin, and english meaning`
-- **Structured Document / Form**: `OCR this document and extract all key fields in a table`
-
-### D. Face Identification, ID Card Ingestion & Enrollment (Attach Photo / ID Card)
-- *(Attach photo of enrolled person)* → `who is this? show his details`
-- *(Attach photo of unknown person)* → `who is this?`
-- *(Attach photo of unknown person)* → `enroll this person as Farid Azizan`
-- *(Attach driver's license / ID card)* → `save this data in his profile`
-- *(Check approval queue)* → `list pending requests`
-
----
-
-## 10. Project Structure
+## 9. Project Structure
 
 ```text
-├── config/                         # Service settings & LibreChat configuration snapshots
-│   ├── librechat/
-│   │   ├── custom-index.html       # Pre-boot ensureMcp script & theme loader (?v=4)
-│   │   ├── docker-compose.override.yml
-│   │   ├── librechat.yaml          # Enforced Enterprise Vision & Identity spec & pinned MCP
-│   │   └── royal-theme.css         # White/Royal Blue & Dark Slate theme + centered tables
+├── Cargo.toml                      # Pure-Rust package manifest (rojakface-server v2.0.0)
+├── Cargo.lock                      # Reproducible Rust dependency lockfile
+├── src/                            # 100% safe Rust (#![forbid(unsafe_code)])
+│   ├── main.rs                     # Tokio + Axum server entrypoint & CLI (--verify-face)
+│   ├── config.rs                   # Environment config, paths & ONNX/DLL auto-discovery
+│   ├── biometrics.rs               # Native YuNet ONNX face detector + CLIP ViT-B/32 embedder
+│   ├── vector_store.rs             # Embedded thread-safe 768-D cosine vector store
+│   ├── vision_ops.rs               # EXIF orientation, perceptual aHash, OCR line-valley chunker
+│   ├── jawi.rs                     # Jawi-to-Rumi orthographic & phonetic skeleton decoder
+│   ├── metadata.rs                 # Slugs, identity normalization, 12h time, privacy & JSON recovery
+│   ├── service.rs                  # Core business logic backing all 14 MCP tools & Admin APIs
+│   ├── mcp_sse.rs                  # MCP-over-SSE server (/sse & /messages/)
+│   └── admin.rs                    # Axum Admin Portal routes & session auth middleware
+├── templates/
+│   └── admin_portal/               # login.html, dashboard.html, test_recognition.html
+├── config/
+│   ├── librechat/                  # librechat.yaml, docker-compose.override.yml, custom-index.html, royal-theme.css
 │   ├── docker-compose.qdrant.yml
 │   └── settings.json
-├── data/
-│   ├── raw/                        # Immutable enrollment source portraits (staff_enroll/)
-│   ├── interim/                    # Git-ignored staging queue (pending_requests/) & store-faces/
-│   └── processed/                  # Git-ignored Qdrant DB (rojakface_qdrant/) & profiles/
-├── models/                         # Ollama Modelfile for qwen3-vl:4b-instruct-16k
-│   └── Modelfile
-├── reports/                        # Scalable vector pipeline architecture diagram
+├── models/
+│   └── Modelfile                   # Ollama Modelfile for qwen3-vl:4b-instruct-16k
+├── reports/
 │   └── pipeline_diagram.svg
-├── rust/                           # Safe Rust PyO3 crates migrated via rust-anything
-│   ├── jawi-decoder-rs/            # 47x faster Jawi-to-Rumi phonetic decoder + report card
-│   ├── metadata-utils-rs/          # Identity slug, 12h time, privacy & JSON metadata parser
-│   └── vision-ops-rs/              # Adaptive OCR line-valley chunker & 16x16 aHash ops
-├── src/
-│   ├── data/                       # Ingestion and batch enrollment scripts
-│   │   ├── batch_enroll.py
-│   │   ├── build_profiles.py
-│   │   └── prepare_default20.py
-│   ├── models/                     # FastMCP server & Admin Portal
-│   │   ├── admin_portal/           # login.html, dashboard.html, test_recognition.html
-│   │   ├── admin_routes.py         # Admin HTTP endpoints & session auth middleware
-│   │   └── rojakface_mcp.py        # FastMCP SSE server (14 tools)
-│   └── utils/                      # Shared utilities (Rust-accelerated with Python fallback)
-│       ├── face_utils.py           # Profile sync & face crop helpers
-│       ├── jawi_decoder.py         # Jawi-to-Rumi orthographic & phonetic skeleton decoder
-│       ├── metadata_utils.py       # Identity normalization, 12h time, visibility & JSON parse
-│       ├── paths.py                # Centralized project paths
-│       ├── qdrant_helper.py        # Qdrant client factory
-│       └── vision_ops.py           # Adaptive OCR line-valley chunking & perceptual aHash
-├── tests/                          # Unit and validation tests
-│   └── test_core.py
-├── .gitignore
-├── Dockerfile
-├── pyproject.toml
-├── requirements.txt
-├── start.bat                       # One-click launch (Ollama + RojakFace MCP + LibreChat)
-├── stop.bat                        # One-click shutdown for RojakFace MCP
+├── Dockerfile                      # Multi-stage Pure-Rust Docker image
+├── start.bat                       # One-click launch (Ollama + rojakface-server.exe + LibreChat)
+├── stop.bat                        # One-click shutdown for rojakface-server.exe
 └── README.md
 ```
 
 ---
 
-## 11. Configuration & Environment Variables
+## 10. Configuration & Environment Variables
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `ROJAKFACE_HOST` | `0.0.0.0` | Host address for the FastMCP & Admin Portal server |
-| `ROJAKFACE_PORT` | `8005` | Port for the FastMCP SSE endpoint (`/sse`) and Admin Portal (`/admin`) |
+| `ROJAKFACE_HOST` | `0.0.0.0` | Bind host for MCP SSE & Admin Portal |
+| `ROJAKFACE_PORT` | `8005` | Port for `/sse` and `/admin` |
 | `ROJAKFACE_ADMIN_USER` | `admin` | Admin Portal login username |
-| `ROJAKFACE_ADMIN_PASS` | *(auto/default)* | Admin Portal login password (set a strong password in production) |
+| `ROJAKFACE_ADMIN_PASS` | `admin123` | Admin Portal login password (override in production) |
 | `ROJAKFACE_ADMIN_KEY` | *(persisted in `.rojakface_admin_key`)* | Internal secret key for Admin-only MCP operations |
-| `ROJAKFACE_OLLAMA_URL` | `http://127.0.0.1:11434/api/chat` | Local Ollama chat endpoint used for visual attribute fallback |
-| `ROJAKFACE_VISION_MODEL` | `qwen3-vl:4b-instruct-16k` | Local Ollama vision model name |
-| `LIBRECHAT_DIR` | `../LibreChat` | Path to sibling LibreChat directory for shared static image mounts |
-| `LIBRECHAT_URL` | `http://localhost:3080` | Base URL used when constructing profile and OCR chunk image links |
+| `ROJAKFACE_OLLAMA_URL` | `http://127.0.0.1:11434/api/chat` | Local Ollama endpoint for visual attribute fallback |
+| `ROJAKFACE_VISION_MODEL` | `qwen3-vl:4b-instruct-16k` | Local Ollama vision model |
+| `ORT_DYLIB_PATH` | *(auto-discovered in `models/runtime/`)* | Path to `onnxruntime.dll` / `libonnxruntime.so` |
+| `ROJAKFACE_YUNET_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `yunet_face_detector.onnx` |
+| `ROJAKFACE_CLIP_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `patch32_v1.onnx` |
+| `LIBRECHAT_DIR` | `../LibreChat` | Path to sibling LibreChat directory |
+| `LIBRECHAT_URL` | `http://localhost:3080` | Base URL for profile gallery & OCR chunk links |
 
 ---
 
-## 12. Testing & Troubleshooting
+## 11. Testing & Verification
 
-### Run the Automated Test Suite
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-```
+# Lint with zero warnings
+cargo clippy --all-targets -- -D warnings
 
-### Common Troubleshooting
-1. **`portalocker.exceptions.AlreadyLocked` when running offline scripts**:
-   - Embedded Qdrant locks `data/processed/rojakface_qdrant` while `rojakface_mcp.py` is running. Run `cmd /c stop.bat` before running offline batch scripts, then run `cmd /c start.bat` again.
-2. **Changes to `librechat.yaml` or `custom-index.html` not appearing**:
-   - Copy updated files to `../LibreChat/`, run `docker compose restart api` inside `../LibreChat`, and perform a hard refresh (`Ctrl+F5`) in your browser.
-3. **Resetting or Re-seeding Profiles**:
-   - Stop the MCP server (`cmd /c stop.bat`), run `python src/data/build_profiles.py`, and restart (`cmd /c start.bat`).
+# Run all Rust unit tests
+cargo test
+
+# Build optimized release binary
+cargo build --release
+```

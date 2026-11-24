@@ -1,0 +1,33 @@
+[package]
+name = "rojakface-server"
+version = "2.0.0"
+edition = "2024"
+rust-version = "1.97"
+description = "100% Pure-Rust RojakFace Enterprise Vision, Biometric Identity, Multilingual OCR MCP Server & Admin Portal"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["clock"] }
+futures-util = "0.3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
+kamadak-exif = "0.6"
+mime_guess = "2"
+ort = { version = "2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-31"] }
+rand = "0.9"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "charset", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

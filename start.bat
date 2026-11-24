@@ -2,17 +2,27 @@
 setlocal
 cd /d "%~dp0"
 
-set "PYTHON_EXE=%~dp0.venv\Scripts\python.exe"
-if not exist "%PYTHON_EXE%" (
-    echo [ERROR] Virtual environment not found at "%PYTHON_EXE%".
-    echo Create it first or install dependencies from pyproject.toml.
-    pause
-    exit /b 1
+set "SERVER_EXE=%~dp0target\release\rojakface-server.exe"
+if not exist "%SERVER_EXE%" (
+    where cargo >nul 2>nul
+    if errorlevel 1 (
+        echo [ERROR] Rust server binary not found at "%SERVER_EXE%" and Cargo is not on PATH.
+        echo Install Rust from https://rustup.rs and run: cargo build --release
+        pause
+        exit /b 1
+    )
+    echo Building RojakFace Pure-Rust server ^(cargo build --release^)...
+    cargo build --release
+    if errorlevel 1 (
+        echo [ERROR] Cargo build failed.
+        pause
+        exit /b 1
+    )
 )
 
 for %%I in ("%~dp0..\LibreChat") do set "LIBRECHAT_DIR=%%~fI"
 
-echo Starting RojakFace MCP ^& LibreChat workspace...
+echo Starting RojakFace Pure-Rust MCP Server ^& LibreChat workspace...
 
 REM 1. Ensure Ollama is running
 powershell -NoProfile -Command "try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 11434); $c.Close(); exit 0 } catch { exit 1 }"
@@ -29,11 +39,11 @@ if errorlevel 1 (
     echo Ollama is already running on port 11434.
 )
 
-REM 2. Start RojakFace MCP Service (port 8005)
+REM 2. Start RojakFace Pure-Rust MCP & Admin Server (port 8005)
 powershell -NoProfile -Command "try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8005); $c.Close(); exit 0 } catch { exit 1 }"
 if errorlevel 1 (
-    echo Starting RojakFace MCP Service ^(port 8005^)...
-    powershell -NoProfile -Command "Start-Process -FilePath '%~dp0.venv\Scripts\python.exe' -ArgumentList '\"%~dp0src\models\rojakface_mcp.py\"' -WorkingDirectory '%~dp0.' -WindowStyle Minimized"
+    echo Starting RojakFace Pure-Rust MCP Service ^(port 8005^)...
+    powershell -NoProfile -Command "Start-Process -FilePath '%SERVER_EXE%' -WorkingDirectory '%~dp0.' -WindowStyle Minimized"
 ) else (
     echo RojakFace MCP Service is already running on port 8005.
 )
@@ -42,7 +52,7 @@ REM 3. Wait for RojakFace MCP (port 8005) before starting LibreChat
 echo Waiting for RojakFace MCP ^(port 8005^)...
 powershell -NoProfile -Command ^
   "for ($i = 0; $i -lt 30; $i++) {" ^
-  "  try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8005); $c.Close(); break } catch { Start-Sleep -Seconds 1 }" ^
+  "  try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8005); $c.Close(); break } catch { Start-Sleep -Milliseconds 300 }" ^
   "}"
 
 REM 4. Ensure LibreChat (port 3080) is running

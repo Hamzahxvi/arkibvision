@@ -2,17 +2,14 @@
 setlocal
 cd /d "%~dp0"
 
-echo Stopping RojakFace MCP service...
+echo Stopping RojakFace Pure-Rust MCP service...
 
 powershell -NoProfile -Command ^
-  "$root = [Regex]::Escape((Resolve-Path '%~dp0').Path.TrimEnd('\'));" ^
-  "$procs = Get-CimInstance Win32_Process | Where-Object {" ^
-  "  $_.CommandLine -and ($_.CommandLine -match $root) -and ($_.CommandLine -match 'rojakface_mcp\.py')" ^
-  "};" ^
-  "if (-not $procs) { Write-Host 'No running project processes found.' }" ^
+  "$procs = Get-Process -Name 'rojakface-server' -ErrorAction SilentlyContinue;" ^
+  "if (-not $procs) { Write-Host 'No running rojakface-server processes found.' }" ^
   "foreach ($p in $procs) {" ^
-  "  Write-Host ('Stopping PID ' + $p.ProcessId + ': ' + $p.Name);" ^
-  "  Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue" ^
+  "  Write-Host ('Stopping PID ' + $p.Id + ': ' + $p.ProcessName);" ^
+  "  Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue" ^
   "}"
 
 echo Project services stopped.

@@ -1,18 +1,21 @@
-FROM python:3.13-slim
+FROM rust:1.97-slim AS builder
 
 WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src/
+RUN cargo build --release
+
+FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 \
-    libglib2.0-0 \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+WORKDIR /app
+COPY --from=builder /app/target/release/rojakface-server /usr/local/bin/rojakface-server
 COPY config/ ./config/
-COPY src/ ./src/
-
-RUN pip install --no-cache-dir .
+COPY templates/ ./templates/
 
 EXPOSE 8005
 
-CMD ["python", "src/models/rojakface_mcp.py"]
+CMD ["rojakface-server"]
