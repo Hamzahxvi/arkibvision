@@ -244,6 +244,8 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
 struct LoginForm {
     username: Option<String>,
     password: Option<String>,
+    embed: Option<String>,
+    theme: Option<String>,
 }
 
 async fn admin_login_get(State(state): State<AdminState>) -> Html<String> {
@@ -273,7 +275,23 @@ async fn admin_login_post(
     let cookie = format!(
         "{ADMIN_SESSION_COOKIE}={token}; Max-Age={ADMIN_SESSION_TTL_SECS}; HttpOnly; SameSite=Lax; Path=/admin"
     );
-    let mut resp = Redirect::to("/admin").into_response();
+    let mut target = "/admin".to_string();
+    let is_embed = form.embed.as_deref() == Some("1");
+    let theme = form
+        .theme
+        .as_deref()
+        .filter(|t| matches!(*t, "dark" | "light"));
+    if is_embed {
+        target.push_str("?embed=1");
+        if let Some(t) = theme {
+            target.push_str("&theme=");
+            target.push_str(t);
+        }
+    } else if let Some(t) = theme {
+        target.push_str("?theme=");
+        target.push_str(t);
+    }
+    let mut resp = Redirect::to(&target).into_response();
     if let Ok(val) = HeaderValue::from_str(&cookie) {
         resp.headers_mut().append(header::SET_COOKIE, val);
     }
