@@ -2440,26 +2440,31 @@ impl RojakFaceService {
             Ok(x) => x,
             Err(reason) => return json!({ "status": "error", "reason": reason }),
         };
-        let stats = match self.learn_bytes(
-            &primary_bytes,
-            MIN_CLIP_IDENTIFY_THRESHOLD,
-            Some(&primary_fname),
-        ) {
+        // Use a high deduplication threshold (0.995) because cross-identity conflict was already checked above;
+        // this guarantees every distinct face angle/photo added by an Admin stores a new 768-D vector.
+        let stats = match self.learn_bytes(&primary_bytes, 0.995, Some(&primary_fname)) {
             Ok(s) => s,
             Err(reason) => return json!({ "status": "error", "reason": reason }),
         };
+        let mut vectors_added = 0usize;
         if let Some(arr) = stats.get("details").and_then(Value::as_array) {
             for d in arr {
-                if let Some(gen_id) = d.get("identity").and_then(Value::as_str) {
+                if d.get("status").and_then(Value::as_str) == Some("new")
+                    && let Some(gen_id) = d.get("identity").and_then(Value::as_str)
+                {
                     let _ = self.store.rename_identity(gen_id, &clean);
+                    vectors_added += 1;
                 }
             }
         }
         self.sync_profile_folder(&clean, Some(image_path));
         self.clear_identification_cache();
+        let total_vectors = self.store.count_by_identity(&clean);
         json!({
             "status": "image_added",
             "identity": clean,
+            "vectors_added": vectors_added,
+            "vector_count": total_vectors,
             "details": stats["details"],
         })
     }

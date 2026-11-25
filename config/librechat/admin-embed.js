@@ -38,6 +38,12 @@
     testFile: null,
     testFileName: '',
     testThresholdPct: '88',
+    testUnrecognized: false,
+    testEnrollMode: 'existing',
+    testEnrollFilter: '',
+    testEnrollSlug: '',
+    testEnrollNewName: '',
+    testEnrollNewGroup: '',
     railEl: null,
     pollTimer: null,
     editingProfile: null,
@@ -1660,6 +1666,8 @@
     state.testFileName = fname;
     state.testPreview = URL.createObjectURL(blobOrFile);
     state.testResultHtml = '';
+    state.testUnrecognized = false;
+    state.testEnrollSlug = '';
     if (state.open && state.authed && state.tab === 'test') {
       var body = document.getElementById('rf-main-body');
       if (body) renderTestFace(body);
@@ -1674,14 +1682,180 @@
     state.testFileName = '';
     state.testPreview = '';
     state.testResultHtml = '';
+    state.testUnrecognized = false;
+    state.testEnrollSlug = '';
     var body = document.getElementById('rf-main-body');
     if (body && state.tab === 'test') renderTestFace(body);
+  }
+
+  function renderTestEnrollPrompt(container, body) {
+    if (!container) return;
+    if (!state.testUnrecognized || !state.testFile) {
+      container.innerHTML = '';
+      return;
+    }
+    var fq = (state.testEnrollFilter || '').trim().toLowerCase();
+    var sortedProfiles = state.profiles.slice().sort(function (a, b) {
+      return String(a.identity || '').localeCompare(String(b.identity || ''));
+    });
+    var filteredProfiles = sortedProfiles.filter(function (p) {
+      return !fq || (String(p.identity || '') + ' ' + String(p.group || '')).toLowerCase().indexOf(fq) !== -1;
+    });
+    var selectedProfile = state.profiles.find(function (p) { return p.slug === state.testEnrollSlug; });
+    var grpOpts = '<option value=""' + (!state.testEnrollNewGroup ? ' selected' : '') + '>📂 Unassigned</option>' +
+      state.peopleGroups.map(function (g) {
+        var gs = String(g.slug || '').toLowerCase();
+        return '<option value="' + esc(gs) + '"' + (state.testEnrollNewGroup === gs ? ' selected' : '') + '>📁 ' + esc(g.name) + '</option>';
+      }).join('');
+
+    var existingHtml =
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<input class="rf-input" id="rf-te-filter" type="search" style="flex:1;min-width:200px" placeholder="🔍 Quick filter existing people (or just click a name below)…" value="' + esc(state.testEnrollFilter) + '"/>' +
+      '</div>' +
+      '<div class="rf-pick-list">' +
+      (filteredProfiles.length ? filteredProfiles.map(function (p) {
+        var av = p.images && p.images[0]
+          ? '<img class="rf-pick-av" src="' + esc(apiUrl(p.images[0].url)) + '" alt="' + esc(p.identity) + '"/>'
+          : '<div class="rf-pick-av">👤</div>';
+        var sub = (p.group ? p.group + ' · ' : '') + Number(p.vector_count || 0) + ' vector(s)';
+        return '<button type="button" class="rf-pick-item' + (state.testEnrollSlug === p.slug ? ' selected' : '') + '" data-rf-pick="' + esc(p.slug) + '">' +
+          av + '<div class="rf-pick-info"><div class="rf-pick-name" title="' + esc(p.identity) + '">' + esc(p.identity) + '</div><div class="rf-pick-meta">' + esc(sub) + '</div></div></button>';
+      }).join('') : '<div style="font-size:.8rem;color:rgb(var(--text-secondary));padding:8px">No enrolled people match "' + esc(state.testEnrollFilter) + '". Switch to "＋ New Person" to enroll them.</div>') +
+      '</div>' +
+      '<div class="rf-actions" style="margin-top:12px">' +
+      '<button type="button" class="rf-btn rf-btn-ok" id="rf-te-save-existing"' + (!selectedProfile ? ' disabled' : '') + '>💾 ' + (selectedProfile ? 'Save Image &amp; Vector to "' + esc(selectedProfile.identity) + '"' : 'Select a Person Above to Enroll') + '</button>' +
+      '</div>';
+
+    var newHtml =
+      '<div class="rf-form-grid">' +
+      '<div class="rf-field"><label>Full Name</label><input class="rf-input" id="rf-te-new-name" placeholder="e.g. Ahmad Faizal" value="' + esc(state.testEnrollNewName) + '"/></div>' +
+      '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-te-new-grp">' + grpOpts + '</select></div>' +
+      '</div>' +
+      '<div class="rf-actions" style="margin-top:12px">' +
+      '<button type="button" class="rf-btn rf-btn-ok" id="rf-te-save-new">＋ Enroll New Person &amp; Save Vector</button>' +
+      '</div>';
+
+    container.innerHTML =
+      '<div class="rf-enroll-box">' +
+      '<h3 style="margin:0 0 4px;font-size:.96rem">👤 Face Not Recognized — Declare Who Is In This Image?</h3>' +
+      '<p style="margin:0 0 12px;font-size:.82rem;color:rgb(var(--text-secondary))">Pick an existing enrolled person below (no need to type letter by letter) or create a new person. Proceeding saves both the photo and its 768-D face vector into the vector database.</p>' +
+      '<div class="rf-mode-tabs">' +
+      '<button type="button" class="rf-mode-tab' + (state.testEnrollMode === 'existing' ? ' active' : '') + '" data-rf-te-mode="existing">👥 Existing Person (' + state.profiles.length + ')</button>' +
+      '<button type="button" class="rf-mode-tab' + (state.testEnrollMode === 'new' ? ' active' : '') + '" data-rf-te-mode="new">＋ New Person</button>' +
+      '</div>' +
+      (state.testEnrollMode === 'existing' ? existingHtml : newHtml) +
+      '</div>';
+
+    container.querySelectorAll('[data-rf-te-mode]').forEach(function (btn) {
+      btn.onclick = function () {
+        state.testEnrollMode = btn.getAttribute('data-rf-te-mode');
+        renderTestEnrollPrompt(container, body);
+      };
+    });
+
+    if (state.testEnrollMode === 'existing') {
+      var filterEl = document.getElementById('rf-te-filter');
+      if (filterEl) {
+        filterEl.oninput = function (e) {
+          var pos = e.target.selectionStart;
+          state.testEnrollFilter = e.target.value;
+          renderTestEnrollPrompt(container, body);
+          restoreFocus('rf-te-filter', pos);
+        };
+      }
+      container.querySelectorAll('[data-rf-pick]').forEach(function (item) {
+        item.onclick = function () {
+          state.testEnrollSlug = item.getAttribute('data-rf-pick');
+          renderTestEnrollPrompt(container, body);
+        };
+      });
+      var saveEx = document.getElementById('rf-te-save-existing');
+      if (saveEx) {
+        saveEx.onclick = async function () {
+          var target = state.profiles.find(function (p) { return p.slug === state.testEnrollSlug; });
+          if (!target || !state.testFile) return;
+          saveEx.disabled = true;
+          saveEx.textContent = '⏳ Saving photo & vector…';
+          try {
+            var fd = new FormData();
+            fd.append('image', state.testFile, state.testFileName || ('enrolled.' + guessExtFromMime(state.testFile.type)));
+            var r = await api('/admin/api/profiles/' + encodeURIComponent(target.slug) + '/images', { method: 'POST', body: fd });
+            if (!r.ok) {
+              toast((r.data && r.data.reason) || 'Could not enroll image', false);
+              saveEx.disabled = false;
+              renderTestEnrollPrompt(container, body);
+              return;
+            }
+            var prof = r.data && r.data.profile;
+            var vc = prof ? Number(prof.vector_count || 0) : Number(r.data.vector_count || 0);
+            var pc = prof && prof.images ? prof.images.length : 0;
+            state.testUnrecognized = false;
+            state.testResultHtml =
+              '<div class="rf-box" style="margin-top:0;border-color:#059669">' +
+              '<div style="color:#059669;font-weight:600;margin-bottom:6px">✅ Enrolled into Vector Database!</div>' +
+              '<div>Saved image &amp; 768-D face vector for <b>' + esc(target.identity) + '</b> (' + vc + ' vector(s) · ' + pc + ' photo(s) now stored).</div>' +
+              '<div class="rf-actions" style="margin-top:10px"><button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-te-retest">🔄 Re-Test Recognition Now</button></div>' +
+              '</div>';
+            toast('Saved image & vector for ' + target.identity);
+            await refreshAll(false);
+            var b = document.getElementById('rf-main-body');
+            if (b && state.tab === 'test') renderTestFace(b);
+          } catch (err) {
+            toast('Error: ' + err.message, false);
+            saveEx.disabled = false;
+          }
+        };
+      }
+    } else {
+      var nameIn = document.getElementById('rf-te-new-name');
+      var grpIn = document.getElementById('rf-te-new-grp');
+      if (nameIn) nameIn.oninput = function (e) { state.testEnrollNewName = e.target.value; };
+      if (grpIn) grpIn.onchange = function (e) { state.testEnrollNewGroup = e.target.value; };
+      var saveNew = document.getElementById('rf-te-save-new');
+      if (saveNew) {
+        saveNew.onclick = async function () {
+          var newName = (state.testEnrollNewName || '').trim();
+          if (!newName) { toast('Enter a name for the new person', false); return; }
+          if (!state.testFile) return;
+          saveNew.disabled = true;
+          saveNew.textContent = '⏳ Enrolling person & vector…';
+          try {
+            var fd = new FormData();
+            fd.append('identity', newName);
+            fd.append('group_slug', state.testEnrollNewGroup || '');
+            fd.append('image', state.testFile, state.testFileName || ('enrolled.' + guessExtFromMime(state.testFile.type)));
+            var r = await api('/admin/api/profiles', { method: 'POST', body: fd });
+            if (!r.ok) {
+              toast((r.data && r.data.reason) || 'Enrollment failed', false);
+              saveNew.disabled = false;
+              renderTestEnrollPrompt(container, body);
+              return;
+            }
+            state.testUnrecognized = false;
+            state.testEnrollNewName = '';
+            state.testResultHtml =
+              '<div class="rf-box" style="margin-top:0;border-color:#059669">' +
+              '<div style="color:#059669;font-weight:600;margin-bottom:6px">✅ New Person Enrolled into Vector Database!</div>' +
+              '<div>Saved image &amp; 768-D face vector for <b>' + esc(newName) + '</b>.</div>' +
+              '<div class="rf-actions" style="margin-top:10px"><button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-te-retest">🔄 Re-Test Recognition Now</button></div>' +
+              '</div>';
+            toast('Enrolled ' + newName);
+            await refreshAll(false);
+            var b = document.getElementById('rf-main-body');
+            if (b && state.tab === 'test') renderTestFace(b);
+          } catch (err) {
+            toast('Error: ' + err.message, false);
+            saveNew.disabled = false;
+          }
+        };
+      }
+    }
   }
 
   function renderTestFace(body) {
     var sizeKb = state.testFile && state.testFile.size ? ' (' + Math.max(1, Math.round(state.testFile.size / 1024)) + ' KB)' : '';
     body.innerHTML =
-      '<div class="rf-section-head"><div><h2>🔍 Test Face Recognition</h2><p>Upload, drag &amp; drop, or paste a copied image (Ctrl+V) to test face matching and confidence scores without modifying enrolled records.</p></div></div>' +
+      '<div class="rf-section-head"><div><h2>🔍 Test Face Recognition</h2><p>Upload, drag &amp; drop, or paste a copied image (Ctrl+V) to test face matching and confidence scores. Unrecognized faces can be enrolled directly into the vector database.</p></div></div>' +
       '<div class="rf-box" style="margin-top:0">' +
       '<div class="rf-dropzone" id="rf-tf-drop">' +
       '<div class="rf-toolbar" style="margin-bottom:0">' +
@@ -1697,7 +1871,11 @@
         : '<div style="margin-top:10px;font-size:.8rem;color:rgb(var(--text-secondary))">Tip: Copy any image (screenshot or web photo) and press <b>Ctrl+V</b> anywhere here, click <b>Paste from Clipboard</b>, or drop an image file into this box.</div>') +
       (state.testPreview ? '<img src="' + esc(state.testPreview) + '" id="rf-tf-img" style="margin-top:12px;max-height:320px;border-radius:10px;border:1px solid rgb(var(--border-medium));display:block;cursor:pointer"/>' : '') +
       '</div>' +
-      '<div id="rf-tf-out" style="margin-top:14px">' + state.testResultHtml + '</div></div>';
+      '<div id="rf-tf-out" style="margin-top:14px">' + state.testResultHtml + '</div>' +
+      '<div id="rf-tf-enroll"></div></div>';
+
+    var enrollContainer = document.getElementById('rf-tf-enroll');
+    renderTestEnrollPrompt(enrollContainer, body);
 
     var fileInput = document.getElementById('rf-tf-file');
     fileInput.onchange = function (e) {
@@ -1751,7 +1929,7 @@
       }
     };
 
-    document.getElementById('rf-tf-run').onclick = async function () {
+    async function runRecognition() {
       var f = state.testFile || (fileInput.files && fileInput.files[0]);
       if (!f) { toast('Choose or paste a photo first', false); return; }
       var pct = Math.min(99, Math.max(50, Number(thrInput.value || state.testThresholdPct || 88)));
@@ -1761,6 +1939,8 @@
       fd.append('threshold', thrDecimal);
       var runBtn = document.getElementById('rf-tf-run');
       runBtn.disabled = true;
+      state.testUnrecognized = false;
+      renderTestEnrollPrompt(enrollContainer, body);
       document.getElementById('rf-tf-out').innerHTML = '⏳ Running face detection and vector matching…';
       try {
         var r = await api('/admin/api/test-recognition', { method: 'POST', body: fd });
@@ -1770,6 +1950,11 @@
           return;
         }
         var dets = r.data.matches || r.data.detections || [];
+        var hasUnknownFace = dets.some(function (x) {
+          return (!x.identity || x.identity === 'Unknown') && !x.reason;
+        }) || (dets.length > 0 && dets.every(function (x) { return !x.identity || x.identity === 'Unknown'; }));
+
+        state.testUnrecognized = hasUnknownFace;
         state.testResultHtml = dets.length ? '<div class="rf-grid">' + dets.map(function (x, i) {
           var ok = x.identity && x.identity !== 'Unknown';
           var confPct = (Number(x.confidence || 0) * 100).toFixed(1) + '%';
@@ -1778,13 +1963,18 @@
             '<div><b>Confidence:</b> ' + confPct + '</div></div>';
         }).join('') + '</div>' : '<div class="rf-empty">No face detected in this image.</div>';
         document.getElementById('rf-tf-out').innerHTML = state.testResultHtml;
+        renderTestEnrollPrompt(enrollContainer, body);
       } catch (err) {
         toast('Error: ' + err.message, false);
         document.getElementById('rf-tf-out').innerHTML = '<div class="rf-err-banner">' + esc(err.message) + '</div>';
       } finally {
         runBtn.disabled = false;
       }
-    };
+    }
+
+    document.getElementById('rf-tf-run').onclick = runRecognition;
+    var retestBtn = document.getElementById('rf-te-retest');
+    if (retestBtn) retestBtn.onclick = runRecognition;
   }
 
   // ─── Mount Button Directly Under MCP Settings in LibreChat Rail ───────────

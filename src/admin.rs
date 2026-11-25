@@ -497,6 +497,25 @@ async fn admin_serve_image(
     StatusCode::NOT_FOUND.into_response()
 }
 
+fn sniff_image_ext(filename: &str, bytes: &[u8]) -> Option<String> {
+    if is_image_ext(Path::new(filename))
+        && let Some(ext) = Path::new(filename).extension().and_then(|e| e.to_str())
+    {
+        return Some(ext.to_ascii_lowercase());
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        Some("png".to_string())
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg".to_string())
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("webp".to_string())
+    } else if bytes.starts_with(b"BM") {
+        Some("bmp".to_string())
+    } else {
+        None
+    }
+}
+
 async fn admin_test_recognition(
     State(state): State<AdminState>,
     mut multipart: Multipart,
@@ -527,29 +546,13 @@ async fn admin_test_recognition(
         )
             .into_response();
     };
-    let mut ext = Path::new(&upload_name)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if !is_image_ext(Path::new(&upload_name)) {
-        // Fallback to magic-byte sniffing so clipboard-pasted blobs without filenames work seamlessly.
-        ext = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-            "png".to_string()
-        } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-            "jpg".to_string()
-        } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-            "webp".to_string()
-        } else if bytes.starts_with(b"BM") {
-            "bmp".to_string()
-        } else {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "status": "error", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
-            )
-                .into_response();
-        };
-    }
+    let Some(ext) = sniff_image_ext(&upload_name, &bytes) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
+        )
+            .into_response();
+    };
 
     let temp_path = state.service.cfg.pending_images_dir.join(format!(
         "ADMIN-TEST-{}.{ext}",
@@ -616,18 +619,13 @@ async fn admin_create_profile(
         )
             .into_response();
     }
-    if !is_image_ext(Path::new(&upload_name)) {
+    let Some(ext) = sniff_image_ext(&upload_name, &bytes) else {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "status": "rejected", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
         )
             .into_response();
-    }
-
-    let ext = Path::new(&upload_name)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpg");
+    };
     let temp_path = state
         .service
         .cfg
@@ -859,17 +857,13 @@ async fn admin_add_profile_image(
         )
             .into_response();
     };
-    if !is_image_ext(Path::new(&upload_name)) {
+    let Some(ext) = sniff_image_ext(&upload_name, &bytes) else {
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "status": "rejected", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
         )
             .into_response();
-    }
-    let ext = Path::new(&upload_name)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpg");
+    };
     let temp_path = state
         .service
         .cfg
