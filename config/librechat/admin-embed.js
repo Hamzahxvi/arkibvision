@@ -37,7 +37,7 @@
     testPreview: '',
     testFile: null,
     testFileName: '',
-    testThreshold: '0.88',
+    testThresholdPct: '88',
     railEl: null,
     pollTimer: null,
     editingProfile: null,
@@ -1661,7 +1661,7 @@
     state.testPreview = URL.createObjectURL(blobOrFile);
     state.testResultHtml = '';
     if (state.open && state.authed && state.tab === 'test') {
-      var body = document.getElementById('rf-body');
+      var body = document.getElementById('rf-main-body');
       if (body) renderTestFace(body);
     }
   }
@@ -1674,7 +1674,7 @@
     state.testFileName = '';
     state.testPreview = '';
     state.testResultHtml = '';
-    var body = document.getElementById('rf-body');
+    var body = document.getElementById('rf-main-body');
     if (body && state.tab === 'test') renderTestFace(body);
   }
 
@@ -1688,7 +1688,7 @@
       '<label class="rf-btn" style="cursor:pointer" for="rf-tf-file">📂 Choose Photo</label>' +
       '<input id="rf-tf-file" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" style="display:none"/>' +
       '<button type="button" class="rf-btn" id="rf-tf-paste">📋 Paste from Clipboard</button>' +
-      '<input class="rf-input" id="rf-tf-thr" type="number" min="0.50" max="0.99" step="0.01" value="' + esc(state.testThreshold || '0.88') + '" style="width:96px" title="Minimum confidence"/>' +
+      '<label style="display:inline-flex;align-items:center;gap:6px;font-size:.82rem;color:rgb(var(--text-secondary))">Min confidence:<input class="rf-input" id="rf-tf-thr" type="number" min="50" max="99" step="1" value="' + esc(state.testThresholdPct || '88') + '" style="width:74px;padding:7px 9px" title="Minimum confidence (%)"/>%</label>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="rf-tf-run">🔍 Test Recognition</button>' +
       (state.testFile ? '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" id="rf-tf-clear">' + TRASH_SVG + '<span>Clear</span></button>' : '') +
       '</div>' +
@@ -1706,7 +1706,7 @@
       }
     };
     var thrInput = document.getElementById('rf-tf-thr');
-    thrInput.oninput = function (e) { state.testThreshold = e.target.value; };
+    thrInput.oninput = function (e) { state.testThresholdPct = e.target.value; };
 
     var clrBtn = document.getElementById('rf-tf-clear');
     if (clrBtn) clrBtn.onclick = clearTestFaceFile;
@@ -1754,9 +1754,11 @@
     document.getElementById('rf-tf-run').onclick = async function () {
       var f = state.testFile || (fileInput.files && fileInput.files[0]);
       if (!f) { toast('Choose or paste a photo first', false); return; }
+      var pct = Math.min(99, Math.max(50, Number(thrInput.value || state.testThresholdPct || 88)));
+      var thrDecimal = (pct / 100).toFixed(2);
       var fd = new FormData();
       fd.append('image', f, state.testFileName || f.name || ('pasted.' + guessExtFromMime(f.type)));
-      fd.append('threshold', thrInput.value || state.testThreshold || '0.88');
+      fd.append('threshold', thrDecimal);
       var runBtn = document.getElementById('rf-tf-run');
       runBtn.disabled = true;
       document.getElementById('rf-tf-out').innerHTML = '⏳ Running face detection and vector matching…';
@@ -1770,9 +1772,10 @@
         var dets = r.data.matches || r.data.detections || [];
         state.testResultHtml = dets.length ? '<div class="rf-grid">' + dets.map(function (x, i) {
           var ok = x.identity && x.identity !== 'Unknown';
+          var confPct = (Number(x.confidence || 0) * 100).toFixed(1) + '%';
           return '<div class="rf-card rf-card-col"><h3>Face ' + (i + 1) + ' <span class="rf-badge ' + (ok ? 'rf-badge-ok' : 'rf-badge-warn') + '">' + (ok ? 'MATCHED' : 'UNKNOWN') + '</span></h3>' +
             '<div><b>Identity:</b> ' + esc(x.identity || 'Unknown') + '</div>' +
-            '<div><b>Confidence:</b> ' + Number(x.confidence || 0).toFixed(3) + '</div></div>';
+            '<div><b>Confidence:</b> ' + confPct + '</div></div>';
         }).join('') + '</div>' : '<div class="rf-empty">No face detected in this image.</div>';
         document.getElementById('rf-tf-out').innerHTML = state.testResultHtml;
       } catch (err) {
