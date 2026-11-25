@@ -14,8 +14,8 @@ use crate::config::{
 };
 use crate::conservation::{analyze_image_quality_and_conservation, enhance_archival_image};
 use crate::forensics::{
-    analyze_authenticity, extract_file_metadata, register_checksum_entry, sha256_bytes,
-    verify_archive_integrity,
+    analyze_authenticity, extract_file_metadata, fuse_visual_audit, register_checksum_entry,
+    sha256_bytes, verify_archive_integrity,
 };
 use crate::jawi::decode_jawi_text;
 use crate::metadata::{
@@ -1156,18 +1156,113 @@ impl RojakFaceService {
         decode_ancient_script(text, script_hint)
     }
 
-    pub fn tool_analyze_image(&self, image_path: &str) -> Value {
+    /// Dedicated zero-temperature local Vision-AI forensic auditor.
+    /// Uses factual observation-first booleans (scene description, physical plausibility,
+    /// garbled AI text, visible watermarks, screenshot cues) so Rust computes the verdict deterministically.
+    async fn visual_forensic_audit(&self, image_path: &Path) -> Option<Value> {
+        let p = image_path.to_path_buf();
+        let b64 = tokio::task::spawn_blocking(move || encode_image_b64(&p, 384))
+            .await
+            .ok()?
+            .ok()?;
+
+        let prompt = concat!(
+            "Inspect this image carefully and reply ONLY with JSON (no markdown):\n",
+            "{\n",
+            "  \"scene_description\": \"one short sentence describing what is in the image\",\n",
+            "  \"physically_possible_in_real_life\": true or false,\n",
+            "  \"has_garbled_ai_text\": true or false,\n",
+            "  \"visible_watermark\": \"none\",\n",
+            "  \"is_screenshot_or_repost\": true or false,\n",
+            "  \"anomalies\": [],\n",
+            "  \"reason\": \"one short sentence\"\n",
+            "}\n",
+            "Rules:\n",
+            "- physically_possible_in_real_life is FALSE if the image shows something impossible in reality (such as a living human head fused onto a metal robot/cyborg/animal body, sci-fi hybrid, floating impossible objects, or surreal CGI). It is TRUE for ordinary real people, events, buildings, or documents (even if background is blurry or lighting is bright).\n",
+            "- has_garbled_ai_text is TRUE only if visible letters/numbers on chests, signs, or labels are distorted/nonsense AI gibberish.\n",
+            "- visible_watermark: put \"none\" if no watermark/logo is visible, otherwise put the exact name (e.g. \"Gemini\", \"Veo\", \"Sora\", \"TikTok\", \"Shutterstock\", \"Getty\")."
+        );
+
+        let body = json!({
+            "model": self.cfg.vision_model,
+            "stream": false,
+            "think": false,
+            "keep_alive": "30m",
+            "options": { "temperature": 0, "num_predict": 160 },
+            "messages": [{
+                "role": "user",
+                "content": prompt,
+                "images": [b64],
+            }],
+        });
+
+        let resp = self
+            .http
+            .post(&self.cfg.ollama_url)
+            .timeout(std::time::Duration::from_secs(90))
+            .json(&body)
+            .send()
+            .await
+            .ok()?;
+        let data = resp.json::<Value>().await.ok()?;
+        let raw = data
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if raw.is_empty() {
+            return None;
+        }
+        let parsed: Value = serde_json::from_str(raw).ok().or_else(|| {
+            let start = raw.find('{')?;
+            let end = raw.rfind('}')?;
+            (end > start).then(|| serde_json::from_str(&raw[start..=end]).ok())?
+        })?;
+        if !parsed.is_object() {
+            return None;
+        }
+        Some(parsed)
+    }
+
+    /// Multi-layer deep authenticity check:
+    /// Layer 1: Archive SHA-256 & perceptual hash duplicate check
+    /// Layer 2: Deep metadata, C2PA/JUMBF, IPTC DigitalSourceType, XMP, PNG chunks, JPEG structure
+    /// Layer 3: Pixel-level ELA splice check, local noise CV, 8x8 blockiness, LSB watermark probe
+    /// Layer 4: Dedicated zero-temperature local Vision-AI forensic audit fused into the verdict
+    pub async fn analyze_authenticity_deep(&self, path: &Path) -> Result<Value, String> {
+        let p = path.to_path_buf();
+        let profile_dir = self.cfg.profile_dir.clone();
+        let locations_dir = self.cfg.locations_dir.clone();
+        let documents_dir = self.cfg.documents_dir.clone();
+        let mut report = tokio::task::spawn_blocking(move || {
+            let roots = [
+                profile_dir.as_path(),
+                locations_dir.as_path(),
+                documents_dir.as_path(),
+            ];
+            analyze_authenticity(&p, &roots)
+        })
+        .await
+        .map_err(|e| format!("Forensics task failed: {e}"))??;
+
+        if is_image_ext(path)
+            && let Some(visual) = self.visual_forensic_audit(path).await
+        {
+            fuse_visual_audit(&mut report, visual);
+        }
+        Ok(report)
+    }
+
+    pub async fn tool_analyze_image(&self, image_path: &str) -> Value {
         let resolved = match self.resolve_image_path(image_path) {
             Ok(p) => p,
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
         let metadata = extract_file_metadata(&resolved).unwrap_or_else(|e| json!({ "error": e }));
-        let archive_roots = [
-            self.cfg.profile_dir.as_path(),
-            self.cfg.locations_dir.as_path(),
-            self.cfg.documents_dir.as_path(),
-        ];
-        let authenticity = analyze_authenticity(&resolved, &archive_roots)
+        let authenticity = self
+            .analyze_authenticity_deep(&resolved)
+            .await
             .unwrap_or_else(|e| json!({ "error": e }));
 
         // Match full image against enrolled Archival Locations / Buildings / Landmarks via CLIP 768-D!
@@ -1198,34 +1293,43 @@ impl RojakFaceService {
             "conservation_assessment": conservation,
             "matched_archival_locations": matched_locations,
             "faces_detected": faces_summary["faces_detected"],
-            "analysis_instruction": "Combine the extracted technical/EXIF metadata, authenticity/duplicate verdict (Original/Copy/AI-Generated/Edited), image quality & archival damage assessment (tear/faded/mold/aging + healing suggestions), and any matched archival location details with your own visual inspection of the attached image.",
+            "analysis_instruction": "Present the extracted metadata, the fused authenticity verdict (Original/Copy/AI-Generated/Manipulated — NEVER override a HIGH or MEDIUM risk verdict), image quality & archival damage assessment (tear/faded/mold/aging + healing suggestions), and any matched archival location details in clear, friendly language.",
         })
     }
 
-    pub fn tool_assess_conservation(&self, image_path: &str) -> Value {
+    pub async fn tool_assess_conservation(&self, image_path: &str) -> Value {
         let resolved = match self.resolve_image_path(image_path) {
             Ok(p) => p,
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
-        let mut report = match analyze_image_quality_and_conservation(&resolved) {
-            Ok(r) => r,
-            Err(reason) => return json!({ "status": "error", "reason": reason }),
-        };
-        let archive_roots = [
-            self.cfg.profile_dir.as_path(),
-            self.cfg.locations_dir.as_path(),
-            self.cfg.documents_dir.as_path(),
-        ];
-        if let Ok(auth) = analyze_authenticity(&resolved, &archive_roots)
+        let rp = resolved.clone();
+        let mut report =
+            match tokio::task::spawn_blocking(move || analyze_image_quality_and_conservation(&rp))
+                .await
+            {
+                Ok(Ok(r)) => r,
+                Ok(Err(reason)) => return json!({ "status": "error", "reason": reason }),
+                Err(e) => return json!({ "status": "error", "reason": e.to_string() }),
+            };
+        if let Ok(auth) = self.analyze_authenticity_deep(&resolved).await
             && let Some(obj) = report.as_object_mut()
         {
             obj.insert(
                 "authenticity_summary".to_string(),
                 json!({
                     "verdict": auth["verdict"],
+                    "plain_language_verdict": auth["plain_language_verdict"],
                     "fraud_risk": auth["fraud_risk"],
+                    "confidence": auth["confidence"],
                     "is_exact_copy": auth["is_exact_copy"],
                     "is_near_duplicate_copy": auth["is_near_duplicate_copy"],
+                    "c2pa_present": auth["c2pa_present"],
+                    "camera_exif_present": auth["camera_exif_present"],
+                    "watermark_and_provenance": auth["watermark_and_provenance"],
+                    "jpeg_structure": auth["jpeg_structure"],
+                    "pixel_forensics": auth["pixel_forensics"],
+                    "visual_forensic_audit": auth["visual_forensic_audit"],
+                    "forensic_signals": auth["forensic_signals"],
                     "sha256": auth["metadata"]["sha256"],
                 }),
             );
@@ -1313,17 +1417,12 @@ impl RojakFaceService {
         })
     }
 
-    pub fn tool_detect_authenticity(&self, file_path: &str) -> Value {
+    pub async fn tool_detect_authenticity(&self, file_path: &str) -> Value {
         let resolved = match self.resolve_image_path(file_path) {
             Ok(p) => p,
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
-        let archive_roots = [
-            self.cfg.profile_dir.as_path(),
-            self.cfg.locations_dir.as_path(),
-            self.cfg.documents_dir.as_path(),
-        ];
-        match analyze_authenticity(&resolved, &archive_roots) {
+        match self.analyze_authenticity_deep(&resolved).await {
             Ok(report) => report,
             Err(reason) => json!({ "status": "error", "reason": reason }),
         }
@@ -1359,12 +1458,10 @@ impl RojakFaceService {
                 }
             };
             file_meta = summarize_file_info(&resolved).unwrap_or(Value::Null);
-            let archive_roots = [
-                self.cfg.profile_dir.as_path(),
-                self.cfg.locations_dir.as_path(),
-                self.cfg.documents_dir.as_path(),
-            ];
-            authenticity = analyze_authenticity(&resolved, &archive_roots).unwrap_or(Value::Null);
+            authenticity = self
+                .analyze_authenticity_deep(&resolved)
+                .await
+                .unwrap_or(Value::Null);
             if is_image_ext(&resolved) {
                 ocr_chunks =
                     build_ocr_document_chunks(&self.cfg, &resolved, 3).unwrap_or(Value::Null);

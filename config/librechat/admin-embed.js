@@ -1393,11 +1393,28 @@
       var sugg = (j.conservation_healing_suggestions || []).map(function (s) {
         return '<li><b>' + esc(s.treatment) + '</b> (' + dmgBadge(s.severity) + '): ' + (s.actions || []).map(esc).join(' ') + '</li>';
       }).join('');
+      var riskCls = au.fraud_risk === 'HIGH' ? 'rf-badge-crit' : au.fraud_risk === 'MEDIUM' ? 'rf-badge-warn' : 'rf-badge-ok';
+      var wp = au.watermark_and_provenance || {}, js = au.jpeg_structure || {}, px = au.pixel_forensics || {}, va = au.visual_forensic_audit || {};
+      var sigHtml = (au.forensic_signals || []).length
+        ? '<ul style="margin:6px 0 0 18px">' + au.forensic_signals.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>'
+        : '';
+      var authHtml = au.verdict
+        ? '<div class="rf-box" style="margin-top:4px;padding:12px">' +
+          '<div><b>🛡️ Deep Authenticity &amp; Watermark Check:</b> <span class="rf-badge ' + riskCls + '">' + esc(au.fraud_risk) + ' RISK</span> <b>' + esc(au.verdict) + '</b></div>' +
+          (au.plain_language_verdict ? '<div style="margin-top:4px">' + esc(au.plain_language_verdict) + '</div>' : '') +
+          '<div style="font-size:.76rem;color:rgb(var(--text-secondary));margin-top:6px">' +
+          'Camera EXIF: <b>' + (au.camera_exif_present ? 'Present' : 'Missing') + '</b> · ' +
+          'C2PA: <b>' + (au.c2pa_present ? 'Present' : 'None') + '</b> · ' +
+          'Visible Watermark: <b>' + esc(wp.visible_watermark_detected || (va.visible_watermark || 'none')) + '</b>' +
+          (js.is_bare_stripped_jpeg ? ' · <b style="color:#f59e0b">Bare Stripped JPEG (0 APP/EXIF headers)</b>' : '') +
+          (px.ela_p95_to_median_ratio != null ? ' · ELA ratio: <b>' + px.ela_p95_to_median_ratio + '</b> · Noise CV: <b>' + px.noise_variation_cv + '</b> · 8×8 Blockiness: <b>' + px.jpeg_blockiness_ratio + '</b>' : '') +
+          '</div>' + sigHtml + '</div>'
+        : '';
       state.labHtml =
         '<div style="display:grid;gap:8px;margin-top:8px">' +
         '<div><b>📐 Image Quality:</b> <b>' + (q.overall_score || 0) + '/100 (' + esc(q.overall_grade) + ')</b> · Resolution: ' + (q.resolution ? q.resolution.width + '×' + q.resolution.height : '') + ' · Lighting: ' + (q.lighting ? q.lighting.score + '/100 (' + esc(q.lighting.condition) + ')' : '') + ' · Readability: ' + (q.readability ? q.readability.score + '/100' : '') + '</div>' +
         '<div><b>🩹 Damage (Overall ' + dmgBadge(dm.overall_severity) + '):</b> Tear ' + dmgBadge(dm.tear && dm.tear.level) + ' · Faded ' + dmgBadge(dm.faded && dm.faded.level) + ' · Mold ' + dmgBadge(dm.mold && dm.mold.level) + ' · Aging ' + dmgBadge(dm.aging && dm.aging.level) + '</div>' +
-        (au.verdict ? '<div><b>🛡️ Authenticity:</b> <b>' + esc(au.verdict) + '</b> (Fraud Risk: ' + esc(au.fraud_risk) + ')</div>' : '') +
+        authHtml +
         '<div><b>💊 Conservation &amp; Healing Recommendations:</b><ul>' + sugg + '</ul></div></div>';
       document.getElementById('rf-lab-out').innerHTML = state.labHtml;
     };

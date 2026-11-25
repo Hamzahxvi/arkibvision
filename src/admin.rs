@@ -1671,15 +1671,11 @@ async fn admin_conservation_analyze(
         )
             .into_response();
     }
-    let svc = state.service.clone();
-    let tp = temp_path.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let res = svc.tool_assess_conservation(&tp.to_string_lossy());
-        let _ = fs::remove_file(&tp);
-        res
-    })
-    .await
-    .unwrap_or_else(|e| json!({ "status": "error", "reason": e.to_string() }));
+    let result = state
+        .service
+        .tool_assess_conservation(&temp_path.to_string_lossy())
+        .await;
+    let _ = fs::remove_file(&temp_path);
     (StatusCode::OK, Json(result)).into_response()
 }
 

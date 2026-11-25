@@ -267,6 +267,18 @@ async fn dispatch_tool(
                 .await)
         }
         "rojakface_system_health" => Ok(service.tool_system_health().await),
+        "rojakface_analyze_image" => {
+            let image_path = arg_str(&args, "image_path");
+            Ok(service.tool_analyze_image(&image_path).await)
+        }
+        "rojakface_detect_authenticity" => {
+            let file_path = arg_str(&args, "file_path");
+            Ok(service.tool_detect_authenticity(&file_path).await)
+        }
+        "rojakface_assess_conservation" => {
+            let image_path = arg_str(&args, "image_path");
+            Ok(service.tool_assess_conservation(&image_path).await)
+        }
         other => {
             let svc = service.clone();
             let tool = other.to_string();
@@ -283,15 +295,6 @@ async fn dispatch_tool(
                     &arg_str(&args, "text"),
                     &arg_str(&args, "script"),
                 )),
-                "rojakface_analyze_image" => {
-                    Ok(svc.tool_analyze_image(&arg_str(&args, "image_path")))
-                }
-                "rojakface_detect_authenticity" => {
-                    Ok(svc.tool_detect_authenticity(&arg_str(&args, "file_path")))
-                }
-                "rojakface_assess_conservation" => {
-                    Ok(svc.tool_assess_conservation(&arg_str(&args, "image_path")))
-                }
                 "rojakface_enhance_image" => {
                     Ok(svc
                         .tool_enhance_image(&arg_str(&args, "image_path"), &arg_str(&args, "mode")))
@@ -558,7 +561,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_detect_authenticity",
-            "description": "Check if an uploaded photo or file is real/original, fake, AI-generated, edited, or already exists as a copy/duplicate in the system ('is this real or fake?', 'is this AI?', 'do we already have this?', 'gambar ini tulen atau palsu?', 'sudah ada dalam sistem?'). Always leave file_path empty (\"\") for chat uploads.",
+            "description": "Deep multi-layer authenticity, AI watermark, and fraud check: inspects C2PA/JUMBF Content Credentials, IPTC DigitalSourceType, XMP/EXIF/PNG metadata, bare stripped JPEG headers, pixel-level ELA splicing/noise/blockiness/LSB watermark probes, archive duplicates, AND runs a dedicated local visual AI audit for visible AI/stock watermarks, impossible composites, and garbled text ('is this real or fake?', 'is this AI?', 'check watermark/metadata', 'do we already have this?', 'gambar ini tulen atau palsu?'). Always leave file_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
