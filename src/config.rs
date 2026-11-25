@@ -32,6 +32,7 @@ pub struct AppConfig {
     pub vectors_file: PathBuf,
     pub location_vectors_file: PathBuf,
     pub checksum_manifest_file: PathBuf,
+    pub people_groups_file: PathBuf,
     pub librechat_dir: PathBuf,
     pub profile_web_dir: PathBuf,
     pub location_web_dir: PathBuf,
@@ -227,6 +228,7 @@ impl AppConfig {
         let vectors_file = processed_dir.join("rojakface_vectors.json");
         let location_vectors_file = processed_dir.join("location_vectors.json");
         let checksum_manifest_file = processed_dir.join("checksum_manifest.json");
+        let people_groups_file = processed_dir.join("people_groups.json");
 
         let default_lc = project_root
             .parent()
@@ -288,6 +290,7 @@ impl AppConfig {
             vectors_file,
             location_vectors_file,
             checksum_manifest_file,
+            people_groups_file,
             librechat_dir,
             profile_web_dir,
             location_web_dir,

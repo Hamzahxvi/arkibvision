@@ -14,6 +14,8 @@
     search: '',
     requests: [],
     profiles: [],
+    peopleGroups: [],
+    selectedGroup: 'all',
     locations: [],
     documents: [],
     health: null,
@@ -114,15 +116,17 @@
       var res = await Promise.all([
         api('/admin/api/requests?ts=' + Date.now()),
         api('/admin/api/profiles?ts=' + Date.now()),
+        api('/admin/api/people-groups?ts=' + Date.now()),
         api('/admin/api/locations?ts=' + Date.now()),
         api('/admin/api/documents?ts=' + Date.now()),
         api('/admin/api/system/health?ts=' + Date.now())
       ]);
       if (res[0].ok && Array.isArray(res[0].data)) state.requests = res[0].data;
       if (res[1].ok && Array.isArray(res[1].data)) state.profiles = res[1].data;
-      if (res[2].ok && Array.isArray(res[2].data)) state.locations = res[2].data;
-      if (res[3].ok && Array.isArray(res[3].data)) state.documents = res[3].data;
-      if (res[4].ok) state.health = res[4].data;
+      if (res[2].ok && Array.isArray(res[2].data)) state.peopleGroups = res[2].data;
+      if (res[3].ok && Array.isArray(res[3].data)) state.locations = res[3].data;
+      if (res[4].ok && Array.isArray(res[4].data)) state.documents = res[4].data;
+      if (res[5].ok) state.health = res[5].data;
       render();
       if (manual) toast('Admin data refreshed');
     } catch (e) {}
@@ -372,47 +376,178 @@
     });
   }
 
-  // ─── Tab 2: Enrolled People ───────────────────────────────────────────────
+  // ─── Tab 2: Enrolled People (with Maintainable Group Folders) ─────────────
+  function personGroupSlug(p) {
+    return String(p.group_slug || '').trim().toLowerCase();
+  }
+
   function renderPeople(body) {
     var q = state.search.toLowerCase();
+    var validSlugs = {};
+    state.peopleGroups.forEach(function (g) { validSlugs[String(g.slug || '').toLowerCase()] = true; });
+    if (state.selectedGroup !== 'all' && state.selectedGroup !== 'unassigned' && !validSlugs[state.selectedGroup]) {
+      state.selectedGroup = 'all';
+    }
+
+    var unassignedCnt = state.profiles.filter(function (p) { return !personGroupSlug(p); }).length;
+    var activeGroupObj = state.peopleGroups.find(function (g) { return String(g.slug || '').toLowerCase() === state.selectedGroup; });
+
     var list = state.profiles.filter(function (p) {
-      return !q || (p.identity + ' ' + (p.address || '') + ' ' + (p.notes || '') + ' ' + (p.description || '')).toLowerCase().indexOf(q) !== -1;
+      var gs = personGroupSlug(p);
+      if (state.selectedGroup === 'unassigned' && gs) return false;
+      if (state.selectedGroup !== 'all' && state.selectedGroup !== 'unassigned' && gs !== state.selectedGroup) return false;
+      return !q || (p.identity + ' ' + (p.group || '') + ' ' + (p.address || '') + ' ' + (p.notes || '') + ' ' + (p.description || '')).toLowerCase().indexOf(q) !== -1;
     });
+
+    var folderChips =
+      '<div class="rf-folder-chip' + (state.selectedGroup === 'all' ? ' active' : '') + '" data-rf-grp="all">📂 All <span class="rf-fcnt">' + state.profiles.length + '</span></div>' +
+      state.peopleGroups.map(function (g) {
+        var gs = String(g.slug || '').toLowerCase();
+        var cnt = state.profiles.filter(function (p) { return personGroupSlug(p) === gs; }).length;
+        return '<div class="rf-folder-chip' + (state.selectedGroup === gs ? ' active' : '') + '" data-rf-grp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
+          '<span>📁 ' + esc(g.name) + '</span>' +
+          '<span class="rf-fcnt">' + cnt + '</span>' +
+          '<button type="button" class="rf-folder-act" data-rf-ren-grp="' + esc(gs) + '" title="Rename group folder">✎</button>' +
+          '<button type="button" class="rf-folder-act" data-rf-del-grp="' + esc(gs) + '" title="Delete group folder">×</button>' +
+          '</div>';
+      }).join('') +
+      '<div class="rf-folder-chip' + (state.selectedGroup === 'unassigned' ? ' active' : '') + '" data-rf-grp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
+
+    var groupOpts = function (curSlug) {
+      return '<option value=""' + (!curSlug ? ' selected' : '') + '>📂 Unassigned</option>' +
+        state.peopleGroups.map(function (g) {
+          var gs = String(g.slug || '').toLowerCase();
+          return '<option value="' + esc(gs) + '"' + (curSlug === gs ? ' selected' : '') + '>📁 ' + esc(g.name) + '</option>';
+        }).join('');
+    };
+
     body.innerHTML =
-      '<div class="rf-section-head"><div><h2>👥 Enrolled People</h2><p>Manage trusted face profiles, public/private attributes, and reference photos.</p></div>' +
-      '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-person-btn">＋ Add Person</button></div>' +
-      '<div class="rf-toolbar"><input class="rf-input" id="rf-ppl-search" style="flex:1;min-width:220px" type="search" placeholder="Search enrolled people…" value="' + esc(state.search) + '"/></div>' +
+      '<div class="rf-section-head"><div><h2>👥 Enrolled People' + (activeGroupObj ? ' — 📁 ' + esc(activeGroupObj.name) : state.selectedGroup === 'unassigned' ? ' — Unassigned' : '') + '</h2>' +
+      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize enrolled people into maintainable group folders (e.g. Staff, External Entity). Create, rename, or move people between folders anytime.') + '</p></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button type="button" class="rf-btn" id="rf-add-group-btn">📁＋ New Group Folder</button>' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-person-btn">＋ Add Person</button>' +
+      '</div></div>' +
+      '<div class="rf-folder-bar">' + folderChips + '</div>' +
+      '<div class="rf-toolbar"><input class="rf-input" id="rf-ppl-search" style="flex:1;min-width:220px" type="search" placeholder="Search enrolled people in this folder…" value="' + esc(state.search) + '"/></div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (p) {
         var img = p.images && p.images[0] ? '<img class="rf-thumb" src="' + esc(apiUrl(p.images[0].url)) + '" alt="' + esc(p.identity) + '"/>' : '<div class="rf-thumb">👤</div>';
+        var curGs = personGroupSlug(p);
+        var grpBadge = p.group ? '<span class="rf-pill" style="margin-left:6px">📁 ' + esc(p.group) + '</span>' : '';
         return '<article class="rf-card">' + img + '<div class="rf-card-body">' +
-          '<h3 title="' + esc(p.identity) + '">' + esc(p.identity) + '</h3>' +
+          '<h3 title="' + esc(p.identity) + '">' + esc(p.identity) + grpBadge + '</h3>' +
           '<p class="rf-desc">' + esc(p.notes || p.address || p.description || 'No notes') + '</p>' +
           '<div class="rf-meta">' + Number(p.vector_count || 0) + ' vector(s) · ' + (p.images ? p.images.length : 0) + ' photo(s)</div>' +
           '<div class="rf-actions">' +
+          '<select class="rf-move-sel" data-rf-move-p="' + esc(p.slug) + '" title="Assign or move to group folder">' + groupOpts(curGs) + '</select>' +
           '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-p="' + esc(p.slug) + '">✎ Edit</button>' +
           '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-p="' + esc(p.slug) + '">Delete</button>' +
           '</div></div></article>';
-      }).join('') : '<div class="rf-empty">No enrolled people found.</div>') +
+      }).join('') : '<div class="rf-empty">No enrolled people in this folder yet. Move someone here using the folder dropdown or click "＋ Add Person".</div>') +
       '</div>';
 
-    document.getElementById('rf-add-person-btn').addEventListener('click', function () { openPersonModal(null); });
-    document.getElementById('rf-ppl-search').addEventListener('input', function (e) { state.search = e.target.value; renderPeople(body); });
+    document.getElementById('rf-add-group-btn').onclick = function () { openGroupModal(null); };
+    document.getElementById('rf-add-person-btn').onclick = function () { openPersonModal(null); };
+    document.getElementById('rf-ppl-search').oninput = function (e) { state.search = e.target.value; renderPeople(body); };
+
+    body.querySelectorAll('[data-rf-grp]').forEach(function (chip) {
+      chip.onclick = function (ev) {
+        if (ev.target.closest('.rf-folder-act')) return;
+        state.selectedGroup = chip.getAttribute('data-rf-grp');
+        renderPeople(body);
+      };
+    });
+    body.querySelectorAll('[data-rf-ren-grp]').forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var gs = btn.getAttribute('data-rf-ren-grp');
+        var g = state.peopleGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
+        if (g) openGroupModal(g);
+      };
+    });
+    body.querySelectorAll('[data-rf-del-grp]').forEach(function (btn) {
+      btn.onclick = async function (ev) {
+        ev.stopPropagation();
+        var gs = btn.getAttribute('data-rf-del-grp');
+        var g = state.peopleGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
+        if (!g || !window.confirm('Delete group folder "' + g.name + '"?\n\nEnrolled people inside will NOT be deleted — they will move to Unassigned.')) return;
+        var r = await api('/admin/api/people-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
+        if (r.ok) {
+          if (state.selectedGroup === gs) state.selectedGroup = 'all';
+          toast('Deleted folder "' + g.name + '"');
+          await refreshAll(false);
+        } else toast((r.data && r.data.reason) || 'Delete failed', false);
+      };
+    });
+    body.querySelectorAll('[data-rf-move-p]').forEach(function (sel) {
+      sel.onchange = async function () {
+        var slug = sel.getAttribute('data-rf-move-p');
+        var nextGrp = sel.value;
+        var r = await api('/admin/api/profiles/' + encodeURIComponent(slug), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_slug: nextGrp })
+        });
+        if (r.ok) {
+          toast(nextGrp ? 'Moved to folder' : 'Moved to Unassigned');
+          await refreshAll(false);
+        } else {
+          toast((r.data && r.data.reason) || 'Move failed', false);
+          renderPeople(body);
+        }
+      };
+    });
     body.querySelectorAll('[data-rf-edit-p]').forEach(function (b) {
-      b.addEventListener('click', function () {
+      b.onclick = function () {
         var p = state.profiles.find(function (x) { return x.slug === b.getAttribute('data-rf-edit-p'); });
         openPersonModal(p || null);
-      });
+      };
     });
     body.querySelectorAll('[data-rf-del-p]').forEach(function (b) {
-      b.addEventListener('click', async function () {
+      b.onclick = async function () {
         var p = state.profiles.find(function (x) { return x.slug === b.getAttribute('data-rf-del-p'); });
         if (!p || !window.confirm('Delete "' + p.identity + '" and all photos/vectors?')) return;
         var r = await api('/admin/api/profiles/' + encodeURIComponent(p.slug), { method: 'DELETE' });
         if (r.ok) { toast('Deleted ' + p.identity); await refreshAll(false); }
         else toast(r.data.reason || 'Delete failed', false);
-      });
+      };
     });
+  }
+
+  function openGroupModal(group) {
+    var wrap = document.createElement('div');
+    wrap.className = 'rf-modal-backdrop';
+    wrap.innerHTML =
+      '<div class="rf-modal" style="width:min(520px,100%)"><h2>' + (group ? 'Rename Group Folder' : 'New People Group Folder') + '</h2>' +
+      '<form id="rf-g-form"><div class="rf-form-grid">' +
+      '<div class="rf-field full"><label>Group Folder Name</label><input class="rf-input" id="rf-g-name" required placeholder="e.g. Staff, External Entity, VIP Guests, Researchers" value="' + esc(group ? group.name || '' : '') + '"/></div>' +
+      '<div class="rf-field full"><label>Description</label><textarea class="rf-textarea" id="rf-g-desc" placeholder="Optional description of who belongs in this folder…">' + esc(group ? group.description || '' : '') + '</textarea></div>' +
+      '</div><div class="rf-actions" style="justify-content:flex-end;margin-top:16px">' +
+      '<button type="button" class="rf-btn" id="rf-g-cancel">Cancel</button>' +
+      '<button type="submit" class="rf-btn rf-btn-primary">' + (group ? 'Save Rename' : 'Create Folder') + '</button>' +
+      '</div></form></div>';
+    document.body.appendChild(wrap);
+    wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
+    document.getElementById('rf-g-cancel').onclick = function () { wrap.remove(); };
+    document.getElementById('rf-g-form').onsubmit = async function (ev) {
+      ev.preventDefault();
+      var name = document.getElementById('rf-g-name').value.trim();
+      var description = document.getElementById('rf-g-desc').value.trim();
+      var r = await api(group ? '/admin/api/people-groups/' + encodeURIComponent(group.slug) : '/admin/api/people-groups', {
+        method: group ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, description: description })
+      });
+      if (r.ok) {
+        if (group && state.selectedGroup === String(group.slug || '').toLowerCase() && r.data && r.data.group) {
+          state.selectedGroup = String(r.data.group.slug || '').toLowerCase();
+        }
+        wrap.remove();
+        toast(group ? 'Renamed group folder to "' + name + '"' : 'Created group folder "' + name + '"');
+        await refreshAll(false);
+      } else toast((r.data && r.data.reason) || 'Could not save group folder', false);
+    };
   }
 
   function openPersonModal(profile) {
@@ -437,10 +572,19 @@
         '<button type="button" class="rf-btn rf-btn-sm rf-kv-rm" title="Remove">×</button></div>';
     };
 
+    var defaultGrp = profile ? personGroupSlug(profile) : (state.selectedGroup !== 'all' && state.selectedGroup !== 'unassigned' ? state.selectedGroup : '');
+    var grpSelectHtml =
+      '<option value=""' + (!defaultGrp ? ' selected' : '') + '>Unassigned</option>' +
+      state.peopleGroups.map(function (g) {
+        var gs = String(g.slug || '').toLowerCase();
+        return '<option value="' + esc(gs) + '"' + (defaultGrp === gs ? ' selected' : '') + '>' + esc(g.name) + '</option>';
+      }).join('');
+
     wrap.innerHTML =
       '<div class="rf-modal"><h2>' + (profile ? 'Edit Person — ' + esc(profile.identity) : 'Add Enrolled Person') + '</h2>' +
       '<form id="rf-p-form"><div class="rf-form-grid">' +
-      '<div class="rf-field full"><label>Name</label><input class="rf-input" id="rf-p-name" required value="' + esc(profile ? profile.identity : '') + '"/></div>' +
+      '<div class="rf-field"><label>Name</label><input class="rf-input" id="rf-p-name" required value="' + esc(profile ? profile.identity : '') + '"/></div>' +
+      '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-p-group">' + grpSelectHtml + '</select></div>' +
       (!profile ? '<div class="rf-field full"><label>Face Photo (required)</label><input class="rf-input" id="rf-p-img" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" required/></div>' : '') +
       (profile ? '<div class="rf-field full"><label>Stored Photos (click to view/edit details; hover for × delete)</label><div class="rf-gallery" id="rf-p-gal"></div>' +
         '<div id="rf-photo-meta" class="rf-box" style="display:none;margin-top:8px"></div>' +
@@ -590,6 +734,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               identity: document.getElementById('rf-p-name').value,
+              group_slug: document.getElementById('rf-p-group').value,
               address: document.getElementById('rf-p-addr').value,
               notes: document.getElementById('rf-p-notes').value,
               other_details: other
@@ -598,6 +743,7 @@
         } else {
           var fd = new FormData();
           fd.append('identity', document.getElementById('rf-p-name').value);
+          fd.append('group_slug', document.getElementById('rf-p-group').value);
           fd.append('address', document.getElementById('rf-p-addr').value);
           fd.append('notes', document.getElementById('rf-p-notes').value);
           if (Object.keys(other).length) fd.append('other_details', JSON.stringify(other));

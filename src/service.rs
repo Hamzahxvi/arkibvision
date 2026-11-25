@@ -2,9 +2,9 @@
 
 use crate::ancient_scripts::decode_ancient_script;
 use crate::archives::{
-    ensure_default_locations, extract_document_structure, extract_text_from_file, list_documents,
-    list_locations, load_location, search_documents, search_locations, summarize_file_info,
-    summarize_with_ollama,
+    ensure_default_locations, ensure_default_people_groups, extract_document_structure,
+    extract_text_from_file, list_documents, list_locations, list_people_groups, load_location,
+    search_documents, search_locations, summarize_file_info, summarize_with_ollama,
 };
 use crate::biometrics::FaceEngine;
 use crate::config::{
@@ -122,6 +122,7 @@ fn find_docker_binary() -> Option<PathBuf> {
 impl RojakFaceService {
     pub fn new(cfg: AppConfig) -> Result<Self, String> {
         ensure_default_locations(&cfg);
+        ensure_default_people_groups(&cfg);
         let engine = Arc::new(FaceEngine::load(&cfg)?);
         let store = Arc::new(VectorStore::load_or_create(&cfg.vectors_file)?);
         let location_store = Arc::new(VectorStore::load_or_create(&cfg.location_vectors_file)?);
@@ -563,6 +564,14 @@ impl RojakFaceService {
             .to_string();
 
         let mut public_fields = vec![json!({ "field": "Name", "value": identity_name })];
+        if let Some(grp) = profile
+            .get("group")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            public_fields.push(json!({ "field": "Group", "value": grp }));
+        }
         for (k, v) in &public_details {
             public_fields.push(json!({ "field": k, "value": v }));
         }
@@ -1995,9 +2004,25 @@ impl RojakFaceService {
     pub fn tool_list_identities(&self) -> Value {
         let counts: BTreeMap<String, usize> = self.store.list_counts();
         let total: usize = counts.values().sum();
+        let mut by_group: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for name in counts.keys() {
+            let slug = profile_slug(name);
+            let meta_path = self.cfg.profile_dir.join(&slug).join("metadata.json");
+            let grp = fs::read_to_string(&meta_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .and_then(|v| v.get("group").and_then(Value::as_str).map(String::from))
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "Unassigned".to_string());
+            by_group.entry(grp).or_default().push(name.clone());
+        }
+        let groups = list_people_groups(&self.cfg);
         json!({
             "total_vectors": total,
             "identities": counts,
+            "people_groups": groups,
+            "identities_by_group": by_group,
         })
     }
 
@@ -2250,6 +2275,8 @@ impl RojakFaceService {
         json!({
             "slug": slug,
             "identity": identity,
+            "group": get_str("group"),
+            "group_slug": get_str("group_slug"),
             "description": get_str("description"),
             "photograph_by": get_str("photograph_by"),
             "location": get_str("location"),

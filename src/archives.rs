@@ -1024,6 +1024,321 @@ pub fn summarize_file_info(path: &Path) -> Result<Value, String> {
     extract_file_metadata(path)
 }
 
+// ─── Maintainable Enrolled People Group Folders (e.g. Staff, External Entity) ─
+
+fn group_slug(name: &str) -> String {
+    profile_slug(name).to_ascii_lowercase()
+}
+
+fn load_raw_people_groups(path: &Path) -> Vec<Map<String, Value>> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|v| v.as_object().cloned())
+        .collect()
+}
+
+fn save_raw_people_groups(path: &Path, groups: &[Map<String, Value>]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let val = Value::Array(groups.iter().cloned().map(Value::Object).collect());
+    let pretty = serde_json::to_string_pretty(&val).map_err(|e| format!("JSON error: {e}"))?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, pretty).map_err(|e| format!("Write groups failed: {e}"))?;
+    fs::rename(&tmp, path).map_err(|e| format!("Rename groups failed: {e}"))
+}
+
+pub fn ensure_default_people_groups(cfg: &AppConfig) {
+    if cfg.people_groups_file.is_file() {
+        return;
+    }
+    let now = Utc::now().to_rfc3339();
+    let defaults = [
+        (
+            "Staff",
+            "Internal staff, archivists, officers, and organization personnel.",
+        ),
+        (
+            "External Entity",
+            "External stakeholders, public figures, partners, visitors, and third-party entities.",
+        ),
+    ];
+    let mut list = Vec::new();
+    for (name, desc) in defaults {
+        let mut m = Map::new();
+        m.insert("slug".to_string(), Value::String(group_slug(name)));
+        m.insert("name".to_string(), Value::String(name.to_string()));
+        m.insert("description".to_string(), Value::String(desc.to_string()));
+        m.insert("created_at".to_string(), Value::String(now.clone()));
+        m.insert("updated_at".to_string(), Value::String(now.clone()));
+        list.push(m);
+    }
+    let _ = save_raw_people_groups(&cfg.people_groups_file, &list);
+}
+
+fn count_members_by_group(profile_dir: &Path) -> HashMap<String, usize> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    if let Ok(entries) = fs::read_dir(profile_dir) {
+        for entry in entries.flatten() {
+            let meta_path = entry.path().join("metadata.json");
+            if let Ok(text) = fs::read_to_string(&meta_path)
+                && let Ok(val) = serde_json::from_str::<Value>(&text)
+            {
+                let gs = val
+                    .get("group_slug")
+                    .and_then(Value::as_str)
+                    .map(|s| s.trim().to_ascii_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        val.get("group")
+                            .and_then(Value::as_str)
+                            .map(group_slug)
+                            .filter(|s| !s.is_empty())
+                    })
+                    .unwrap_or_default();
+                if !gs.is_empty() {
+                    *counts.entry(gs).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    counts
+}
+
+pub fn list_people_groups(cfg: &AppConfig) -> Vec<Value> {
+    ensure_default_people_groups(cfg);
+    let counts = count_members_by_group(&cfg.profile_dir);
+    let mut groups = load_raw_people_groups(&cfg.people_groups_file);
+    for g in &mut groups {
+        let slug = g
+            .get("slug")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let cnt = counts.get(&slug).copied().unwrap_or(0);
+        g.insert("member_count".to_string(), json!(cnt));
+    }
+    groups.into_iter().map(Value::Object).collect()
+}
+
+pub fn resolve_people_group(cfg: &AppConfig, group_or_slug: &str) -> Option<(String, String)> {
+    let clean = group_or_slug.trim();
+    if clean.is_empty() {
+        return None;
+    }
+    let target_slug = group_slug(clean);
+    let groups = load_raw_people_groups(&cfg.people_groups_file);
+    for g in groups {
+        let s = g.get("slug").and_then(Value::as_str).unwrap_or("");
+        let n = g.get("name").and_then(Value::as_str).unwrap_or("");
+        if s.eq_ignore_ascii_case(clean)
+            || s.eq_ignore_ascii_case(&target_slug)
+            || n.eq_ignore_ascii_case(clean)
+        {
+            return Some((s.to_string(), n.to_string()));
+        }
+    }
+    None
+}
+
+pub fn create_people_group(
+    cfg: &AppConfig,
+    name: &str,
+    description: &str,
+) -> Result<Value, String> {
+    ensure_default_people_groups(cfg);
+    let clean_name = name.trim();
+    if clean_name.is_empty() {
+        return Err("Group folder name is required.".to_string());
+    }
+    let slug = group_slug(clean_name);
+    if slug.is_empty() || slug == "all" || slug == "unassigned" {
+        return Err(format!(
+            "'{clean_name}' is a reserved or invalid group name."
+        ));
+    }
+    let mut groups = load_raw_people_groups(&cfg.people_groups_file);
+    if groups.iter().any(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(&slug))
+    }) {
+        return Err(format!("Group folder '{clean_name}' already exists."));
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut m = Map::new();
+    m.insert("slug".to_string(), Value::String(slug));
+    m.insert("name".to_string(), Value::String(clean_name.to_string()));
+    m.insert(
+        "description".to_string(),
+        Value::String(description.trim().to_string()),
+    );
+    m.insert("created_at".to_string(), Value::String(now.clone()));
+    m.insert("updated_at".to_string(), Value::String(now));
+    groups.push(m.clone());
+    save_raw_people_groups(&cfg.people_groups_file, &groups)?;
+    m.insert("member_count".to_string(), json!(0));
+    Ok(Value::Object(m))
+}
+
+fn cascade_profile_group_update(
+    profile_dir: &Path,
+    old_slug: &str,
+    old_name: &str,
+    new_slug: &str,
+    new_name: &str,
+) -> usize {
+    let mut updated = 0usize;
+    let Ok(entries) = fs::read_dir(profile_dir) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let meta_path = entry.path().join("metadata.json");
+        let Ok(text) = fs::read_to_string(&meta_path) else {
+            continue;
+        };
+        let Ok(mut val) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let Some(obj) = val.as_object_mut() else {
+            continue;
+        };
+        let cur_slug = obj
+            .get("group_slug")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let cur_name = obj
+            .get("group")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if cur_slug == old_slug.to_ascii_lowercase() || cur_name.eq_ignore_ascii_case(old_name) {
+            obj.insert(
+                "group_slug".to_string(),
+                Value::String(new_slug.to_string()),
+            );
+            obj.insert("group".to_string(), Value::String(new_name.to_string()));
+            if let Ok(pretty) = serde_json::to_string_pretty(&Value::Object(obj.clone())) {
+                let _ = fs::write(&meta_path, pretty);
+                updated += 1;
+            }
+        }
+    }
+    updated
+}
+
+pub fn rename_people_group(
+    cfg: &AppConfig,
+    old_slug: &str,
+    new_name: &str,
+    description: Option<&str>,
+) -> Result<Value, String> {
+    ensure_default_people_groups(cfg);
+    let clean_name = new_name.trim();
+    if clean_name.is_empty() {
+        return Err("New group folder name is required.".to_string());
+    }
+    let new_slug = group_slug(clean_name);
+    if new_slug.is_empty() || new_slug == "all" || new_slug == "unassigned" {
+        return Err(format!(
+            "'{clean_name}' is a reserved or invalid group name."
+        ));
+    }
+
+    let mut groups = load_raw_people_groups(&cfg.people_groups_file);
+    let Some(pos) = groups.iter().position(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(old_slug))
+    }) else {
+        return Err("Group folder not found.".to_string());
+    };
+    if groups.iter().enumerate().any(|(i, g)| {
+        i != pos
+            && g.get("slug")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.eq_ignore_ascii_case(&new_slug))
+    }) {
+        return Err(format!(
+            "Another group folder named '{clean_name}' already exists."
+        ));
+    }
+
+    let old_name = groups[pos]
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let old_slug_actual = groups[pos]
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or(old_slug)
+        .to_string();
+
+    groups[pos].insert("slug".to_string(), Value::String(new_slug.clone()));
+    groups[pos].insert("name".to_string(), Value::String(clean_name.to_string()));
+    if let Some(desc) = description {
+        groups[pos].insert(
+            "description".to_string(),
+            Value::String(desc.trim().to_string()),
+        );
+    }
+    groups[pos].insert(
+        "updated_at".to_string(),
+        Value::String(Utc::now().to_rfc3339()),
+    );
+    save_raw_people_groups(&cfg.people_groups_file, &groups)?;
+
+    let migrated = cascade_profile_group_update(
+        &cfg.profile_dir,
+        &old_slug_actual,
+        &old_name,
+        &new_slug,
+        clean_name,
+    );
+    let mut out = groups[pos].clone();
+    out.insert("migrated_profiles".to_string(), json!(migrated));
+    Ok(Value::Object(out))
+}
+
+pub fn delete_people_group(cfg: &AppConfig, slug: &str) -> Result<Value, String> {
+    ensure_default_people_groups(cfg);
+    let mut groups = load_raw_people_groups(&cfg.people_groups_file);
+    let Some(pos) = groups.iter().position(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(slug))
+    }) else {
+        return Err("Group folder not found.".to_string());
+    };
+    let removed = groups.remove(pos);
+    let old_name = removed
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let old_slug = removed
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or(slug)
+        .to_string();
+    save_raw_people_groups(&cfg.people_groups_file, &groups)?;
+    let unassigned = cascade_profile_group_update(&cfg.profile_dir, &old_slug, &old_name, "", "");
+    Ok(json!({
+        "status": "deleted",
+        "slug": old_slug,
+        "name": old_name,
+        "unassigned_profiles": unassigned,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1050,5 +1365,50 @@ mod tests {
 
         let xml = "<w:p><w:r><w:t>Arkib Negara</w:t></w:r></w:p><w:p><w:r><w:t>Malaysia &amp; Warisan</w:t></w:r></w:p>";
         assert_eq!(strip_xml_tags(xml), "Arkib Negara\nMalaysia & Warisan");
+    }
+
+    #[test]
+    fn test_people_group_create_rename_and_delete() {
+        let base =
+            std::env::temp_dir().join(format!("rojakface_groups_test_{}", Uuid::new_v4().simple()));
+        let pdir = base.join("profiles");
+        let p1 = pdir.join("Ali_Bin_Abu");
+        fs::create_dir_all(&p1).unwrap();
+        let gfile = base.join("people_groups.json");
+
+        let mut cfg = AppConfig::load();
+        cfg.profile_dir = pdir.clone();
+        cfg.people_groups_file = gfile;
+
+        ensure_default_people_groups(&cfg);
+        let initial = list_people_groups(&cfg);
+        assert_eq!(initial.len(), 2);
+
+        let created = create_people_group(&cfg, "VIP Guests", "Visiting dignitaries").unwrap();
+        assert_eq!(created["slug"], "vip_guests");
+
+        fs::write(
+            p1.join("metadata.json"),
+            r#"{"identity":"Ali Bin Abu","group":"VIP Guests","group_slug":"vip_guests"}"#,
+        )
+        .unwrap();
+
+        let renamed = rename_people_group(&cfg, "vip_guests", "Royal Guests", None).unwrap();
+        assert_eq!(renamed["slug"], "royal_guests");
+        assert_eq!(renamed["migrated_profiles"], 1);
+
+        let after_rename: Value =
+            serde_json::from_str(&fs::read_to_string(p1.join("metadata.json")).unwrap()).unwrap();
+        assert_eq!(after_rename["group"], "Royal Guests");
+        assert_eq!(after_rename["group_slug"], "royal_guests");
+
+        let deleted = delete_people_group(&cfg, "royal_guests").unwrap();
+        assert_eq!(deleted["unassigned_profiles"], 1);
+
+        let after_del: Value =
+            serde_json::from_str(&fs::read_to_string(p1.join("metadata.json")).unwrap()).unwrap();
+        assert_eq!(after_del["group"], "");
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

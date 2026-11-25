@@ -176,6 +176,15 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
             "/admin/api/profiles",
             get(admin_api_profiles).post(admin_create_profile),
         )
+        // Maintainable Enrolled People Group Folders (e.g. Staff, External Entity)
+        .route(
+            "/admin/api/people-groups",
+            get(admin_api_people_groups).post(admin_create_people_group),
+        )
+        .route(
+            "/admin/api/people-groups/{slug}",
+            patch(admin_rename_people_group).delete(admin_delete_people_group),
+        )
         .route("/admin/api/test-recognition", post(admin_test_recognition))
         .route(
             "/admin/api/profiles/{profile_slug}",
@@ -621,6 +630,22 @@ async fn admin_create_profile(
             proposed.insert(k.to_string(), Value::String(v.clone()));
         }
     }
+    if let Some(raw_group) = fields
+        .get("group_slug")
+        .or_else(|| fields.get("group"))
+        .map(String::as_str)
+        && !raw_group.trim().is_empty()
+    {
+        if let Some((gs, gn)) = archives::resolve_people_group(&state.service.cfg, raw_group) {
+            proposed.insert("group_slug".to_string(), Value::String(gs));
+            proposed.insert("group".to_string(), Value::String(gn));
+        } else {
+            proposed.insert(
+                "group".to_string(),
+                Value::String(raw_group.trim().to_string()),
+            );
+        }
+    }
     if let Some(raw_other) = fields.get("other_details")
         && !raw_other.is_empty()
         && let Ok(Value::Object(obj)) = serde_json::from_str::<Value>(raw_other)
@@ -697,6 +722,22 @@ async fn admin_update_profile(
     for (k, v) in &payload {
         if allowed.contains(&k.as_str()) && !v.is_null() {
             metadata.insert(k.clone(), Value::String(value_to_trimmed_string(v)));
+        }
+    }
+    if payload.contains_key("group_slug") || payload.contains_key("group") {
+        let raw = payload
+            .get("group_slug")
+            .or_else(|| payload.get("group"))
+            .map(value_to_trimmed_string)
+            .unwrap_or_default();
+        if raw.is_empty() {
+            metadata.insert("group_slug".to_string(), Value::String(String::new()));
+            metadata.insert("group".to_string(), Value::String(String::new()));
+        } else if let Some((gs, gn)) = archives::resolve_people_group(&state.service.cfg, &raw) {
+            metadata.insert("group_slug".to_string(), Value::String(gs));
+            metadata.insert("group".to_string(), Value::String(gn));
+        } else {
+            metadata.insert("group".to_string(), Value::String(raw));
         }
     }
     if let Some(Value::Object(other)) = payload.get("other_details") {
@@ -1723,4 +1764,123 @@ async fn admin_enhanced_image(
         return StatusCode::NOT_FOUND.into_response();
     }
     serve_file_bytes(&path)
+}
+
+// ─── Maintainable People Group Folder Endpoints ──────────────────────────────
+
+async fn admin_api_people_groups(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let list = tokio::task::spawn_blocking(move || archives::list_people_groups(&cfg))
+        .await
+        .unwrap_or_default();
+    Json(Value::Array(list))
+}
+
+async fn admin_create_people_group(
+    State(state): State<AdminState>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let name = payload
+        .get("name")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let description = payload
+        .get("description")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::create_people_group(&cfg, &name, &description)
+    })
+    .await
+    {
+        Ok(Ok(group)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "created", "group": group })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_rename_people_group(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid group slug." })),
+        )
+            .into_response();
+    };
+    let name = payload
+        .get("name")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let desc = payload
+        .get("description")
+        .filter(|v| !v.is_null())
+        .map(value_to_trimmed_string);
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::rename_people_group(&cfg, &clean_slug, &name, desc.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(group)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "updated", "group": group })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_people_group(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid group slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || archives::delete_people_group(&cfg, &clean_slug))
+        .await
+    {
+        Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
 }

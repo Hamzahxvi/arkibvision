@@ -30,7 +30,7 @@ pub const PRIVATE_KEYS: [&str; 23] = [
     "tamat_tempoh",
 ];
 
-pub const STANDARD_META_FIELDS: [&str; 7] = [
+pub const STANDARD_META_FIELDS: [&str; 9] = [
     "description",
     "photograph_by",
     "location",
@@ -38,6 +38,8 @@ pub const STANDARD_META_FIELDS: [&str; 7] = [
     "time",
     "address",
     "notes",
+    "group",
+    "group_slug",
 ];
 
 pub const PROTECTED_META_FIELDS: [&str; 6] = [
@@ -285,7 +287,7 @@ pub fn merge_profile_metadata(meta: &mut Map<String, Value>, proposed_meta: &Map
         } else if STANDARD_META_FIELDS.contains(&k.as_str()) {
             if !v.is_null() {
                 let val = value_to_trimmed_string(&v);
-                if !val.is_empty() || replace_other {
+                if !val.is_empty() || replace_other || k == "group" || k == "group_slug" {
                     meta.insert(k, Value::String(val));
                 }
             }

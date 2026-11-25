@@ -721,6 +721,71 @@ html.dark .rf-badge-crit { color: #fca5a5; }
 }
 .rf-toast.ok { background: #059669; }
 .rf-toast.err { background: #dc2626; }
+.rf-folder-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.rf-folder-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--border-medium));
+  background: rgb(var(--surface-card));
+  color: rgb(var(--text-primary));
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s;
+}
+.rf-folder-chip:hover {
+  background: rgb(var(--surface-hover));
+  border-color: rgb(var(--accent-primary));
+}
+.rf-folder-chip.active {
+  background: rgb(var(--accent-primary));
+  border-color: rgb(var(--accent-primary));
+  color: #ffffff;
+}
+.rf-folder-chip .rf-fcnt {
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.22);
+}
+.rf-folder-chip.active .rf-fcnt {
+  background: rgba(255, 255, 255, 0.22);
+}
+.rf-folder-act {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.72;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 5px;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+.rf-folder-act:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
+}
+.rf-move-sel {
+  background: rgb(var(--field-fill));
+  color: rgb(var(--field-text));
+  border: 1px solid rgb(var(--border-medium));
+  border-radius: 7px;
+  padding: 4px 7px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 155px;
+}
 .rf-viewer {
   position: fixed;
   inset: 0;
