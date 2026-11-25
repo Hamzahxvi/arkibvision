@@ -201,20 +201,41 @@ main table td img {
 .rf-rail-tooltip {
   position: fixed;
   left: 60px;
-  padding: 5px 10px;
-  border-radius: 7px;
-  background: #0f172a;
-  color: #f8fafc !important;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgb(var(--surface-primary, 15 23 42));
+  color: rgb(var(--text-primary, 241 245 249)) !important;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.25;
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity 0.14s ease;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
-  border: 1px solid #334155;
+  transition: opacity 0.12s ease;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  border: 1px solid rgb(var(--border-light, 51 65 85));
   z-index: 60;
+}
+html.dark .rf-rail-tooltip {
+  background: #0b1120;
+  color: #f1f5f9 !important;
+  border-color: rgba(51, 65, 85, 0.75);
+}
+.rf-rail-tooltip::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  border-left: 1px solid rgb(var(--border-light, 51 65 85));
+  border-bottom: 1px solid rgb(var(--border-light, 51 65 85));
+  transform: translateY(-50%) rotate(45deg);
+}
+html.dark .rf-rail-tooltip::before {
+  border-left-color: rgba(51, 65, 85, 0.75);
+  border-bottom-color: rgba(51, 65, 85, 0.75);
 }
 .rf-admin-rail-btn:hover .rf-rail-tooltip {
   opacity: 1;
@@ -230,7 +251,32 @@ main table td img {
   background: rgb(var(--surface-primary));
   color: rgb(var(--text-primary));
   border-left: 1px solid rgb(var(--border-light));
-  font-family: inherit;
+}
+#rf-admin-stage,
+#rf-admin-stage button,
+#rf-admin-stage input,
+#rf-admin-stage select,
+#rf-admin-stage textarea,
+.rf-modal-backdrop,
+.rf-modal-backdrop button,
+.rf-modal-backdrop input,
+.rf-modal-backdrop select,
+.rf-modal-backdrop textarea,
+.rf-menu-pop,
+.rf-menu-pop button,
+.rf-toast,
+.rf-rail-tooltip {
+  font-family: var(--theme-font-family, var(--default-font-family, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif)) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+#rf-admin-stage h1,
+#rf-admin-stage h2,
+#rf-admin-stage h3,
+.rf-modal h2 {
+  font-family: var(--theme-display-font-family, var(--theme-font-family, var(--default-font-family, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif))) !important;
+  font-weight: 600;
+  letter-spacing: -0.012em;
 }
 
 /* Native LibreChat-Themed Admin Portal UI */
@@ -256,14 +302,14 @@ main table td img {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-weight: 700;
-  font-size: 0.95rem;
+  font-weight: 600;
+  font-size: 0.94rem;
   color: rgb(var(--text-primary));
 }
 .rf-pill {
   font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   padding: 2px 8px;
   border-radius: 999px;
   background: rgb(var(--surface-active));
@@ -283,7 +329,7 @@ main table td img {
   padding: 7px 12px;
   border-radius: 8px;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 500;
   color: rgb(var(--text-secondary));
   background: transparent;
   border: 1px solid transparent;
@@ -367,8 +413,8 @@ html.dark .rf-err-banner {
   margin-bottom: 18px;
 }
 .rf-section-head h2 {
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.2rem;
+  font-weight: 600;
   color: rgb(var(--text-primary));
   margin: 0 0 4px;
 }
@@ -415,7 +461,7 @@ html.dark .rf-err-banner {
   padding: 8px 13px;
   border-radius: 8px;
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   border: 1px solid rgb(var(--border-medium));
   background: rgb(var(--surface-card));
@@ -744,7 +790,50 @@ html.dark .rf-badge-crit { color: #fca5a5; }
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
+}
+.rf-folder-search-wrap {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
+.rf-folder-search {
+  background: rgb(var(--field-fill));
+  color: rgb(var(--field-text));
+  border: 1px solid rgb(var(--border-medium));
+  border-radius: 9px;
+  padding: 6px 11px;
+  font-size: 0.8rem;
+  outline: none;
+  width: 210px;
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+.rf-folder-search:focus {
+  border-color: rgb(var(--border-field-focus));
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+.rf-dropzone {
+  border: 1.5px dashed rgb(var(--border-medium));
+  border-radius: 12px;
+  padding: 16px;
+  background: rgb(var(--surface-primary));
+  transition: border-color 0.15s, background 0.15s;
+}
+.rf-dropzone.dragover {
+  border-color: rgb(var(--accent-primary));
+  background: rgba(37, 99, 235, 0.08);
+}
+.rf-file-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgb(var(--surface-active));
+  color: rgb(var(--badge-label));
+  border: 1px solid rgb(var(--border-light));
+  font-size: 0.78rem;
+  font-weight: 500;
 }
 .rf-folder-chip {
   display: inline-flex;
@@ -756,7 +845,7 @@ html.dark .rf-badge-crit { color: #fca5a5; }
   background: rgb(var(--surface-card));
   color: rgb(var(--text-primary));
   font-size: 0.82rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.14s, border-color 0.14s;
 }

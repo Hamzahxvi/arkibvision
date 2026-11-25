@@ -48,8 +48,8 @@ An **air-gapped, 100% on-premise multimodal AI & archival governance platform** 
 - **Administration System Performance & Overload Monitoring (`rojakface_system_health`)**:
   - Live telemetry (`sysinfo`) of CPU %, RAM GB/%, Disk GB/%, Server Process RSS MB, Ollama ping latency, request throughput, error rates, and RAII-guarded in-flight concurrency — detects abnormalities and overload (`HEALTHY` / `WARNING` / `CRITICAL_OVERLOAD`) with concrete recommended actions plus one-click integrity check and temp cache cleanup.
 - **Native LibreChat-Embedded Admin Portal with Maintainable Group Folders**:
-  - Embedded natively inside LibreChat (`http://localhost:3080`) via the Shield-Check icon directly under **MCP Settings** (same Light/Dark theme and layout; standalone `http://127.0.0.1:8005/admin` redirects straight into `http://localhost:3080/#rojakface-admin`).
-  - Organizes **Enrolled People** (`Staff`, `External Entity`, plus custom folders) and **Archival Documents** (`Historical Manuscripts`, `Official Records`, plus custom folders) with safe **⋮ Three-Dot Menus**, **Trash Can icons**, **Custom Confirmation Modals**, and **Ghost Red Delete buttons**.
+  - Embedded natively inside LibreChat (`http://localhost:3080`) via the Shield-Check icon directly under **MCP Settings** (exact LibreChat font family, floating tooltip, and Light/Dark CSS variables; standalone `http://127.0.0.1:8005/admin` redirects straight into `http://localhost:3080/#rojakface-admin`).
+  - Organizes **Enrolled People** (`Staff`, `External Entity`), **Archival Locations** (`Arkib Negara Malaysia`, `Historical Landmarks`), and **Archival Documents** (`Historical Manuscripts`, `Official Records`) into searchable, maintainable group folders with safe **⋮ Three-Dot Menus**, **Trash Can icons**, **Custom Confirmation Modals**, and **Ghost Red Delete buttons**.
 
 ---
 
@@ -231,19 +231,18 @@ Open **LibreChat (`http://localhost:3080`)** and click the **Admin Portal** shie
 
 - **Native LibreChat Theme & Layout**: Rendered directly inside LibreChat using LibreChat's exact Light/Dark CSS variables (no separate standalone `:8005/admin` page or iframe; visiting `http://127.0.0.1:8005/admin` automatically redirects `307` to `http://localhost:3080/#rojakface-admin`).
 - **Session Auth**: Constant-time credential verification (`POST /admin/api/login`) with 8-hour `HttpOnly; SameSite=Lax` session cookies (`ROJAKFACE_ADMIN_USER` / `ROJAKFACE_ADMIN_PASS`).
-- **Maintainable Group Folders**:
-  - **Enrolled People Group Folders** (`Staff`, `External Entity`, plus custom folders): create, rename, assign via dropdown-chevron selector on each card, or delete safely (deleting a group moves members to `Unassigned` without deleting their profiles).
-  - **Document Group Folders** (`Historical Manuscripts`, `Official Records`, plus custom folders): create, rename, assign per document, or delete safely.
+- **Maintainable Group Folders (with Instant Folder Search)**:
+  - **Enrolled People Group Folders** (`Staff`, `External Entity`, plus custom folders), **Location Group Folders** (`Arkib Negara Malaysia`, `Historical Landmarks`, plus custom folders), and **Document Group Folders** (`Historical Manuscripts`, `Official Records`, plus custom folders): search folders instantly, create, rename, assign via dropdown-chevron selector on each card, or delete safely (deleting a folder moves items to `Unassigned` without deleting records).
 - **Misclick-Safe Destructive UX**:
-  - Group folder actions use a **⋮ Three-Dot Menu** (`Rename Group` / `Delete Group`) instead of exposed inline `×` buttons.
+  - Group folder actions use a **⋮ Three-Dot Menu** (`Rename folder` / `Delete folder`) instead of exposed inline `×` buttons.
   - All destructive actions use **Trash Can SVG icons**, **ghost/outline red Delete buttons** (`border: 1px solid #ef4444; color: #ef4444`, filling solid red only on hover), and **Custom Confirmation Modals** specifying exact impact before deletion (e.g., *"Delete Ahmad Zahid Hamidi and their 2 vector(s) / photo(s)?"*).
 - **6 Integrated Tabs**:
   1. **📋 Approvals**: Review, approve, or reject Guest enrollment and metadata update requests.
   2. **👥 People**: Manage group folders, Public vs. Private custom fields, and per-photo metadata/galleries.
-  3. **📍 Locations**: Manage CLIP-indexed halls/wings/landmarks with duplicate upload guard.
+  3. **📍 Locations**: Manage location group folders and CLIP-indexed halls/wings/landmarks with duplicate upload guard.
   4. **📁 Documents**: Manage document group folders, multi-format uploads with duplicate guard, and one-click Auto-Summarize.
   5. **📊 System & Lab**: Live CPU/RAM/Disk/Ollama telemetry, SHA-256 archive integrity audit, temp cache cleanup, and the **Archival Quality, Damage, Deep Authenticity & Enhancement Lab**.
-  6. **🔍 Test Face**: Dry-run face recognition with custom confidence threshold without altering records.
+  6. **🔍 Test Face**: Dry-run face recognition via file upload, drag-and-drop, or **Ctrl+V / clipboard paste** with custom confidence threshold without altering records.
 
 ---
 

@@ -204,7 +204,15 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
         )
         .route("/admin/api/approve/{request_id}", post(admin_approve))
         .route("/admin/api/reject/{request_id}", post(admin_reject))
-        // Managed Archival Location Folders
+        // Managed Archival Location Folders & Location Group Folders
+        .route(
+            "/admin/api/location-groups",
+            get(admin_api_location_groups).post(admin_create_location_group),
+        )
+        .route(
+            "/admin/api/location-groups/{slug}",
+            patch(admin_rename_location_group).delete(admin_delete_location_group),
+        )
         .route(
             "/admin/api/locations",
             get(admin_api_locations).post(admin_create_location),
@@ -519,17 +527,28 @@ async fn admin_test_recognition(
         )
             .into_response();
     };
-    let ext = Path::new(&upload_name)
+    let mut ext = Path::new(&upload_name)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
     if !is_image_ext(Path::new(&upload_name)) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "status": "error", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
-        )
-            .into_response();
+        // Fallback to magic-byte sniffing so clipboard-pasted blobs without filenames work seamlessly.
+        ext = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+            "png".to_string()
+        } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            "jpg".to_string()
+        } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            "webp".to_string()
+        } else if bytes.starts_with(b"BM") {
+            "bmp".to_string()
+        } else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "status": "error", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
+            )
+                .into_response();
+        };
     }
 
     let temp_path = state.service.cfg.pending_images_dir.join(format!(
@@ -1992,6 +2011,125 @@ async fn admin_delete_document_group(
     };
     let cfg = state.service.cfg.clone();
     match tokio::task::spawn_blocking(move || archives::delete_document_group(&cfg, &clean_slug))
+        .await
+    {
+        Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+// ─── Maintainable Location Group Folder Endpoints ────────────────────────────
+
+async fn admin_api_location_groups(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let list = tokio::task::spawn_blocking(move || archives::list_location_groups(&cfg))
+        .await
+        .unwrap_or_default();
+    Json(Value::Array(list))
+}
+
+async fn admin_create_location_group(
+    State(state): State<AdminState>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let name = payload
+        .get("name")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let description = payload
+        .get("description")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::create_location_group(&cfg, &name, &description)
+    })
+    .await
+    {
+        Ok(Ok(group)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "created", "group": group })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_rename_location_group(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid group slug." })),
+        )
+            .into_response();
+    };
+    let name = payload
+        .get("name")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let desc = payload
+        .get("description")
+        .filter(|v| !v.is_null())
+        .map(value_to_trimmed_string);
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::rename_location_group(&cfg, &clean_slug, &name, desc.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(group)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "updated", "group": group })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_location_group(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid group slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || archives::delete_location_group(&cfg, &clean_slug))
         .await
     {
         Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),

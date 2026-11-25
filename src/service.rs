@@ -2,10 +2,10 @@
 
 use crate::ancient_scripts::decode_ancient_script;
 use crate::archives::{
-    ensure_default_document_groups, ensure_default_locations, ensure_default_people_groups,
-    extract_document_structure, extract_text_from_file, list_documents, list_locations,
-    list_people_groups, load_location, search_documents, search_locations, summarize_file_info,
-    summarize_with_ollama,
+    ensure_default_document_groups, ensure_default_location_groups, ensure_default_locations,
+    ensure_default_people_groups, extract_document_structure, extract_text_from_file,
+    list_documents, list_locations, list_people_groups, load_location, search_documents,
+    search_locations, summarize_file_info, summarize_with_ollama,
 };
 use crate::biometrics::FaceEngine;
 use crate::config::{
@@ -122,6 +122,7 @@ fn find_docker_binary() -> Option<PathBuf> {
 
 impl RojakFaceService {
     pub fn new(cfg: AppConfig) -> Result<Self, String> {
+        ensure_default_location_groups(&cfg);
         ensure_default_locations(&cfg);
         ensure_default_people_groups(&cfg);
         ensure_default_document_groups(&cfg);

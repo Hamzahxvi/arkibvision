@@ -21,15 +21,23 @@
     profiles: [],
     peopleGroups: [],
     selectedGroup: 'all',
+    peopleGroupSearch: '',
     locations: [],
+    locationGroups: [],
+    selectedLocGroup: 'all',
+    locGroupSearch: '',
     documents: [],
     documentGroups: [],
     selectedDocGroup: 'all',
+    docGroupSearch: '',
     health: null,
     integrity: null,
     labHtml: '',
     testResultHtml: '',
     testPreview: '',
+    testFile: null,
+    testFileName: '',
+    testThreshold: '0.88',
     railEl: null,
     pollTimer: null,
     editingProfile: null,
@@ -37,6 +45,17 @@
     editingLoc: null,
     editingDoc: null
   };
+
+  function restoreFocus(id, pos) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.focus();
+    try {
+      if (typeof pos === 'number' && typeof el.setSelectionRange === 'function') {
+        el.setSelectionRange(pos, pos);
+      }
+    } catch (e) {}
+  }
 
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
@@ -185,6 +204,7 @@
         api('/admin/api/profiles?ts=' + Date.now()),
         api('/admin/api/people-groups?ts=' + Date.now()),
         api('/admin/api/locations?ts=' + Date.now()),
+        api('/admin/api/location-groups?ts=' + Date.now()),
         api('/admin/api/documents?ts=' + Date.now()),
         api('/admin/api/document-groups?ts=' + Date.now()),
         api('/admin/api/system/health?ts=' + Date.now())
@@ -193,9 +213,10 @@
       if (res[1].ok && Array.isArray(res[1].data)) state.profiles = res[1].data;
       if (res[2].ok && Array.isArray(res[2].data)) state.peopleGroups = res[2].data;
       if (res[3].ok && Array.isArray(res[3].data)) state.locations = res[3].data;
-      if (res[4].ok && Array.isArray(res[4].data)) state.documents = res[4].data;
-      if (res[5].ok && Array.isArray(res[5].data)) state.documentGroups = res[5].data;
-      if (res[6].ok) state.health = res[6].data;
+      if (res[4].ok && Array.isArray(res[4].data)) state.locationGroups = res[4].data;
+      if (res[5].ok && Array.isArray(res[5].data)) state.documents = res[5].data;
+      if (res[6].ok && Array.isArray(res[6].data)) state.documentGroups = res[6].data;
+      if (res[7].ok) state.health = res[7].data;
       render();
       if (manual) toast('Admin data refreshed');
     } catch (e) {}
@@ -481,9 +502,15 @@
       return !q || (p.identity + ' ' + (p.group || '') + ' ' + (p.address || '') + ' ' + (p.notes || '') + ' ' + (p.description || '')).toLowerCase().indexOf(q) !== -1;
     });
 
+    var gq = state.peopleGroupSearch.trim().toLowerCase();
+    var visibleGroups = state.peopleGroups.filter(function (g) {
+      return !gq || (String(g.name || '') + ' ' + String(g.description || '')).toLowerCase().indexOf(gq) !== -1;
+    });
+
     var folderChips =
+      '<div class="rf-folder-search-wrap"><input class="rf-folder-search" id="rf-ppl-grp-search" type="search" placeholder="🔍 Search group folders…" value="' + esc(state.peopleGroupSearch) + '"/></div>' +
       '<div class="rf-folder-chip' + (state.selectedGroup === 'all' ? ' active' : '') + '" data-rf-grp="all">📂 All <span class="rf-fcnt">' + state.profiles.length + '</span></div>' +
-      state.peopleGroups.map(function (g) {
+      visibleGroups.map(function (g) {
         var gs = String(g.slug || '').toLowerCase();
         var cnt = state.profiles.filter(function (p) { return personGroupSlug(p) === gs; }).length;
         return '<div class="rf-folder-chip' + (state.selectedGroup === gs ? ' active' : '') + '" data-rf-grp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
@@ -492,6 +519,7 @@
           '<button type="button" class="rf-folder-act" data-rf-grp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
           '</div>';
       }).join('') +
+      (!visibleGroups.length && gq ? '<span style="font-size:.78rem;color:rgb(var(--text-secondary))">No matching folders</span>' : '') +
       '<div class="rf-folder-chip' + (state.selectedGroup === 'unassigned' ? ' active' : '') + '" data-rf-grp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
 
     var groupOpts = function (curSlug) {
@@ -529,7 +557,18 @@
 
     document.getElementById('rf-add-group-btn').onclick = function () { openGroupModal('people', null); };
     document.getElementById('rf-add-person-btn').onclick = function () { openPersonModal(null); };
-    document.getElementById('rf-ppl-search').oninput = function (e) { state.search = e.target.value; renderPeople(body); };
+    document.getElementById('rf-ppl-grp-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.peopleGroupSearch = e.target.value;
+      renderPeople(body);
+      restoreFocus('rf-ppl-grp-search', pos);
+    };
+    document.getElementById('rf-ppl-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.search = e.target.value;
+      renderPeople(body);
+      restoreFocus('rf-ppl-search', pos);
+    };
 
     body.querySelectorAll('[data-rf-grp]').forEach(function (chip) {
       chip.onclick = function (ev) {
@@ -611,14 +650,26 @@
 
   function openGroupModal(kind, group) {
     var isDoc = kind === 'document';
-    var endpoint = isDoc ? '/admin/api/document-groups' : '/admin/api/people-groups';
+    var isLoc = kind === 'location';
+    var endpoint = isDoc
+      ? '/admin/api/document-groups'
+      : isLoc
+        ? '/admin/api/location-groups'
+        : '/admin/api/people-groups';
     var placeholder = isDoc
       ? 'e.g. Historical Manuscripts, Official Records, Treaties, Letters'
-      : 'e.g. Staff, External Entity, VIP Guests, Researchers';
+      : isLoc
+        ? 'e.g. Arkib Negara Malaysia, Historical Landmarks, State Branches'
+        : 'e.g. Staff, External Entity, VIP Guests, Researchers';
+    var newTitle = isDoc
+      ? 'New Document Group Folder'
+      : isLoc
+        ? 'New Location Group Folder'
+        : 'New People Group Folder';
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
     wrap.innerHTML =
-      '<div class="rf-modal" style="width:min(520px,100%)"><h2>' + (group ? 'Rename Group Folder' : (isDoc ? 'New Document Group Folder' : 'New People Group Folder')) + '</h2>' +
+      '<div class="rf-modal" style="width:min(520px,100%)"><h2>' + (group ? 'Rename Group Folder' : newTitle) + '</h2>' +
       '<form id="rf-g-form"><div class="rf-form-grid">' +
       '<div class="rf-field full"><label>Group Folder Name</label><input class="rf-input" id="rf-g-name" required placeholder="' + placeholder + '" value="' + esc(group ? group.name || '' : '') + '"/></div>' +
       '<div class="rf-field full"><label>Description</label><textarea class="rf-textarea" id="rf-g-desc" placeholder="Optional description of what belongs in this folder…">' + esc(group ? group.description || '' : '') + '</textarea></div>' +
@@ -641,8 +692,10 @@
       if (r.ok) {
         if (group && r.data && r.data.group) {
           var nextSlug = String(r.data.group.slug || '').toLowerCase();
-          if (isDoc && state.selectedDocGroup === String(group.slug || '').toLowerCase()) state.selectedDocGroup = nextSlug;
-          if (!isDoc && state.selectedGroup === String(group.slug || '').toLowerCase()) state.selectedGroup = nextSlug;
+          var oldSlug = String(group.slug || '').toLowerCase();
+          if (isDoc && state.selectedDocGroup === oldSlug) state.selectedDocGroup = nextSlug;
+          if (isLoc && state.selectedLocGroup === oldSlug) state.selectedLocGroup = nextSlug;
+          if (!isDoc && !isLoc && state.selectedGroup === oldSlug) state.selectedGroup = nextSlug;
         }
         wrap.remove();
         toast(group ? 'Renamed group folder to "' + name + '"' : 'Created group folder "' + name + '"');
@@ -868,32 +921,152 @@
     };
   }
 
-  // ─── Tab 3: Archival Locations ────────────────────────────────────────────
+  // ─── Tab 3: Archival Locations (with Maintainable Group Folders) ──────────
+  function locGroupSlug(l) {
+    return String(l.group_slug || '').trim().toLowerCase();
+  }
+
   function renderLocations(body) {
+    closeMenus();
     var q = state.search.toLowerCase();
-    var list = state.locations.filter(function (l) { return !q || JSON.stringify(l).toLowerCase().indexOf(q) !== -1; });
+    var validSlugs = {};
+    state.locationGroups.forEach(function (g) { validSlugs[String(g.slug || '').toLowerCase()] = true; });
+    if (state.selectedLocGroup !== 'all' && state.selectedLocGroup !== 'unassigned' && !validSlugs[state.selectedLocGroup]) {
+      state.selectedLocGroup = 'all';
+    }
+
+    var unassignedCnt = state.locations.filter(function (l) { return !locGroupSlug(l); }).length;
+    var activeGroupObj = state.locationGroups.find(function (g) { return String(g.slug || '').toLowerCase() === state.selectedLocGroup; });
+
+    var list = state.locations.filter(function (l) {
+      var gs = locGroupSlug(l);
+      if (state.selectedLocGroup === 'unassigned' && gs) return false;
+      if (state.selectedLocGroup !== 'all' && state.selectedLocGroup !== 'unassigned' && gs !== state.selectedLocGroup) return false;
+      return !q || JSON.stringify(l).toLowerCase().indexOf(q) !== -1;
+    });
+
+    var gq = state.locGroupSearch.trim().toLowerCase();
+    var visibleGroups = state.locationGroups.filter(function (g) {
+      return !gq || (String(g.name || '') + ' ' + String(g.description || '')).toLowerCase().indexOf(gq) !== -1;
+    });
+
+    var folderChips =
+      '<div class="rf-folder-search-wrap"><input class="rf-folder-search" id="rf-loc-grp-search" type="search" placeholder="🔍 Search group folders…" value="' + esc(state.locGroupSearch) + '"/></div>' +
+      '<div class="rf-folder-chip' + (state.selectedLocGroup === 'all' ? ' active' : '') + '" data-rf-lgrp="all">📂 All <span class="rf-fcnt">' + state.locations.length + '</span></div>' +
+      visibleGroups.map(function (g) {
+        var gs = String(g.slug || '').toLowerCase();
+        var cnt = state.locations.filter(function (l) { return locGroupSlug(l) === gs; }).length;
+        return '<div class="rf-folder-chip' + (state.selectedLocGroup === gs ? ' active' : '') + '" data-rf-lgrp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
+          '<span>📁 ' + esc(g.name) + '</span>' +
+          '<span class="rf-fcnt">' + cnt + '</span>' +
+          '<button type="button" class="rf-folder-act" data-rf-lgrp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
+          '</div>';
+      }).join('') +
+      (!visibleGroups.length && gq ? '<span style="font-size:.78rem;color:rgb(var(--text-secondary))">No matching folders</span>' : '') +
+      '<div class="rf-folder-chip' + (state.selectedLocGroup === 'unassigned' ? ' active' : '') + '" data-rf-lgrp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
+
+    var groupOpts = function (curSlug) {
+      return '<option value=""' + (!curSlug ? ' selected' : '') + '>📂 Unassigned</option>' +
+        state.locationGroups.map(function (g) {
+          var gs = String(g.slug || '').toLowerCase();
+          return '<option value="' + esc(gs) + '"' + (curSlug === gs ? ' selected' : '') + '>📁 ' + esc(g.name) + '</option>';
+        }).join('');
+    };
+
     body.innerHTML =
-      '<div class="rf-section-head"><div><h2>📍 Archival Locations &amp; Landmarks</h2><p>Manage specific halls, wings, rooms, and buildings (e.g. Arkib Negara Malaysia). Reference photos are automatically indexed for visual recognition.</p></div>' +
-      '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-loc-btn">＋ Add Location</button></div>' +
-      '<div class="rf-toolbar"><input class="rf-input" id="rf-loc-search" style="flex:1;min-width:220px" type="search" placeholder="Search locations, wings, halls, or addresses…" value="' + esc(state.search) + '"/></div>' +
+      '<div class="rf-section-head"><div><h2>📍 Archival Locations &amp; Landmarks' + (activeGroupObj ? ' — 📁 ' + esc(activeGroupObj.name) : state.selectedLocGroup === 'unassigned' ? ' — Unassigned' : '') + '</h2>' +
+      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize halls, wings, rooms, and buildings into maintainable group folders (e.g. Arkib Negara Malaysia, Historical Landmarks). Use the ⋮ menu on any folder to rename or delete it.') + '</p></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button type="button" class="rf-btn" id="rf-add-lgrp-btn">📁＋ New Group Folder</button>' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-loc-btn">＋ Add Location</button>' +
+      '</div></div>' +
+      '<div class="rf-folder-bar">' + folderChips + '</div>' +
+      '<div class="rf-toolbar"><input class="rf-input" id="rf-loc-search" style="flex:1;min-width:220px" type="search" placeholder="Search locations in this folder by name, wing, hall, or address…" value="' + esc(state.search) + '"/></div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (l) {
         var thumb = l.images && l.images[0] ? '<img class="rf-thumb" src="' + esc(apiUrl(l.images[0].admin_url)) + '" alt="' + esc(l.name) + '"/>' : '<div class="rf-thumb">📍</div>';
         var sub = [l.building_or_wing, l.floor_or_room].filter(Boolean).join(' · ') || l.parent_institution || l.category || 'Archival Location';
+        var curGs = locGroupSlug(l);
         return '<article class="rf-card">' + thumb + '<div class="rf-card-body">' +
           '<h3 title="' + esc(l.name) + '">' + esc(l.name) + '</h3>' +
           '<div class="rf-sub" title="' + esc(sub) + '">' + esc(sub) + '</div>' +
           '<p class="rf-desc">' + esc(l.description || l.historical_significance || 'No description yet.') + '</p>' +
           '<div class="rf-meta">' + (l.image_count || 0) + ' photo(s)' + (l.coordinates ? ' · ' + esc(l.coordinates) : '') + '</div>' +
           '<div class="rf-actions">' +
+          '<select class="rf-move-sel" data-rf-move-l="' + esc(l.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
           '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-l="' + esc(l.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
           '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-l="' + esc(l.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
-      }).join('') : '<div class="rf-empty">No archival locations yet.</div>') +
+      }).join('') : '<div class="rf-empty">No archival locations in this folder yet. Move one here using the folder dropdown or click "＋ Add Location".</div>') +
       '</div>';
 
+    document.getElementById('rf-add-lgrp-btn').onclick = function () { openGroupModal('location', null); };
     document.getElementById('rf-add-loc-btn').onclick = function () { openLocationModal(null); };
-    document.getElementById('rf-loc-search').oninput = function (e) { state.search = e.target.value; renderLocations(body); };
+    document.getElementById('rf-loc-grp-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.locGroupSearch = e.target.value;
+      renderLocations(body);
+      restoreFocus('rf-loc-grp-search', pos);
+    };
+    document.getElementById('rf-loc-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.search = e.target.value;
+      renderLocations(body);
+      restoreFocus('rf-loc-search', pos);
+    };
+
+    body.querySelectorAll('[data-rf-lgrp]').forEach(function (chip) {
+      chip.onclick = function (ev) {
+        if (ev.target.closest('.rf-folder-act')) return;
+        state.selectedLocGroup = chip.getAttribute('data-rf-lgrp');
+        renderLocations(body);
+      };
+    });
+    body.querySelectorAll('[data-rf-lgrp-menu]').forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var gs = btn.getAttribute('data-rf-lgrp-menu');
+        var g = state.locationGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
+        if (!g) return;
+        var memberCnt = state.locations.filter(function (l) { return locGroupSlug(l) === gs; }).length;
+        openFolderMenu(btn, {
+          onRename: function () { openGroupModal('location', g); },
+          onDelete: function () {
+            openConfirmModal({
+              title: 'Delete Group Folder "' + g.name + '"?',
+              message: 'This removes the "' + g.name + '" folder. The ' + memberCnt + ' location' + (memberCnt === 1 ? '' : 's') + ' inside will NOT be deleted — they will move safely to Unassigned.',
+              confirmLabel: 'Delete Folder',
+              onConfirm: async function () {
+                var r = await api('/admin/api/location-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
+                if (r.ok) {
+                  if (state.selectedLocGroup === gs) state.selectedLocGroup = 'all';
+                  toast('Deleted folder "' + g.name + '"');
+                  await refreshAll(false);
+                } else toast((r.data && r.data.reason) || 'Delete failed', false);
+              }
+            });
+          }
+        });
+      };
+    });
+    body.querySelectorAll('[data-rf-move-l]').forEach(function (sel) {
+      sel.onchange = async function () {
+        var slug = sel.getAttribute('data-rf-move-l');
+        var nextGrp = sel.value;
+        var r = await api('/admin/api/locations/' + encodeURIComponent(slug), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_slug: nextGrp })
+        });
+        if (r.ok) {
+          toast(nextGrp ? 'Moved to folder' : 'Moved to Unassigned');
+          await refreshAll(false);
+        } else {
+          toast((r.data && r.data.reason) || 'Move failed', false);
+          renderLocations(body);
+        }
+      };
+    });
     body.querySelectorAll('[data-rf-edit-l]').forEach(function (b) {
       b.onclick = function () {
         var l = state.locations.find(function (x) { return x.slug === b.getAttribute('data-rf-edit-l'); });
@@ -921,10 +1094,18 @@
   function openLocationModal(loc) {
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
+    var defaultGrp = loc ? locGroupSlug(loc) : (state.selectedLocGroup !== 'all' && state.selectedLocGroup !== 'unassigned' ? state.selectedLocGroup : '');
+    var grpSelectHtml =
+      '<option value=""' + (!defaultGrp ? ' selected' : '') + '>Unassigned</option>' +
+      state.locationGroups.map(function (g) {
+        var gs = String(g.slug || '').toLowerCase();
+        return '<option value="' + esc(gs) + '"' + (defaultGrp === gs ? ' selected' : '') + '>' + esc(g.name) + '</option>';
+      }).join('');
     wrap.innerHTML =
       '<div class="rf-modal"><h2>' + (loc ? 'Edit Location' : 'Add Archival Location') + '</h2>' +
       '<form id="rf-l-form"><div class="rf-form-grid">' +
-      '<div class="rf-field full"><label>Location Name</label><input class="rf-input" id="rf-l-name" required value="' + esc(loc ? loc.name || '' : '') + '"/></div>' +
+      '<div class="rf-field"><label>Location Name</label><input class="rf-input" id="rf-l-name" required value="' + esc(loc ? loc.name || '' : '') + '"/></div>' +
+      '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-l-group">' + grpSelectHtml + '</select></div>' +
       '<div class="rf-field"><label>Parent Institution</label><input class="rf-input" id="rf-l-inst" value="' + esc(loc ? loc.parent_institution || '' : '') + '"/></div>' +
       '<div class="rf-field"><label>Category</label><input class="rf-input" id="rf-l-cat" value="' + esc(loc ? loc.category || '' : '') + '"/></div>' +
       '<div class="rf-field"><label>Building / Wing</label><input class="rf-input" id="rf-l-bld" value="' + esc(loc ? loc.building_or_wing || '' : '') + '"/></div>' +
@@ -996,6 +1177,7 @@
       ev.preventDefault();
       var payload = {
         name: document.getElementById('rf-l-name').value,
+        group_slug: document.getElementById('rf-l-group').value,
         parent_institution: document.getElementById('rf-l-inst').value,
         category: document.getElementById('rf-l-cat').value,
         building_or_wing: document.getElementById('rf-l-bld').value,
@@ -1040,9 +1222,15 @@
       return !q || JSON.stringify(d).toLowerCase().indexOf(q) !== -1;
     });
 
+    var gq = state.docGroupSearch.trim().toLowerCase();
+    var visibleGroups = state.documentGroups.filter(function (g) {
+      return !gq || (String(g.name || '') + ' ' + String(g.description || '')).toLowerCase().indexOf(gq) !== -1;
+    });
+
     var folderChips =
+      '<div class="rf-folder-search-wrap"><input class="rf-folder-search" id="rf-doc-grp-search" type="search" placeholder="🔍 Search group folders…" value="' + esc(state.docGroupSearch) + '"/></div>' +
       '<div class="rf-folder-chip' + (state.selectedDocGroup === 'all' ? ' active' : '') + '" data-rf-dgrp="all">📂 All <span class="rf-fcnt">' + state.documents.length + '</span></div>' +
-      state.documentGroups.map(function (g) {
+      visibleGroups.map(function (g) {
         var gs = String(g.slug || '').toLowerCase();
         var cnt = state.documents.filter(function (d) { return docGroupSlug(d) === gs; }).length;
         return '<div class="rf-folder-chip' + (state.selectedDocGroup === gs ? ' active' : '') + '" data-rf-dgrp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
@@ -1051,6 +1239,7 @@
           '<button type="button" class="rf-folder-act" data-rf-dgrp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
           '</div>';
       }).join('') +
+      (!visibleGroups.length && gq ? '<span style="font-size:.78rem;color:rgb(var(--text-secondary))">No matching folders</span>' : '') +
       '<div class="rf-folder-chip' + (state.selectedDocGroup === 'unassigned' ? ' active' : '') + '" data-rf-dgrp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
 
     var groupOpts = function (curSlug) {
@@ -1090,7 +1279,18 @@
 
     document.getElementById('rf-add-dgrp-btn').onclick = function () { openGroupModal('document', null); };
     document.getElementById('rf-add-doc-btn').onclick = function () { openDocumentModal(null); };
-    document.getElementById('rf-doc-search').oninput = function (e) { state.search = e.target.value; renderDocuments(body); };
+    document.getElementById('rf-doc-grp-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.docGroupSearch = e.target.value;
+      renderDocuments(body);
+      restoreFocus('rf-doc-grp-search', pos);
+    };
+    document.getElementById('rf-doc-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.search = e.target.value;
+      renderDocuments(body);
+      restoreFocus('rf-doc-search', pos);
+    };
 
     body.querySelectorAll('[data-rf-dgrp]').forEach(function (chip) {
       chip.onclick = function (ev) {
@@ -1439,43 +1639,148 @@
     };
   }
 
-  // ─── Tab 6: Test Face Recognition ─────────────────────────────────────────
+  // ─── Tab 6: Test Face Recognition (Upload, Drag & Drop, or Clipboard Paste) ─
+  function guessExtFromMime(mime) {
+    var m = String(mime || '').toLowerCase();
+    if (m.indexOf('jpeg') !== -1 || m.indexOf('jpg') !== -1) return 'jpg';
+    if (m.indexOf('webp') !== -1) return 'webp';
+    if (m.indexOf('bmp') !== -1) return 'bmp';
+    return 'png';
+  }
+
+  function setTestFaceFile(blobOrFile, label) {
+    if (!blobOrFile) return;
+    if (state.testPreview) {
+      try { URL.revokeObjectURL(state.testPreview); } catch (e) {}
+    }
+    var fname = (blobOrFile.name && /\.(jpe?g|png|webp|bmp)$/i.test(blobOrFile.name))
+      ? blobOrFile.name
+      : ((label || 'pasted-image') + '.' + guessExtFromMime(blobOrFile.type));
+    state.testFile = blobOrFile;
+    state.testFileName = fname;
+    state.testPreview = URL.createObjectURL(blobOrFile);
+    state.testResultHtml = '';
+    if (state.open && state.authed && state.tab === 'test') {
+      var body = document.getElementById('rf-body');
+      if (body) renderTestFace(body);
+    }
+  }
+
+  function clearTestFaceFile() {
+    if (state.testPreview) {
+      try { URL.revokeObjectURL(state.testPreview); } catch (e) {}
+    }
+    state.testFile = null;
+    state.testFileName = '';
+    state.testPreview = '';
+    state.testResultHtml = '';
+    var body = document.getElementById('rf-body');
+    if (body && state.tab === 'test') renderTestFace(body);
+  }
+
   function renderTestFace(body) {
+    var sizeKb = state.testFile && state.testFile.size ? ' (' + Math.max(1, Math.round(state.testFile.size / 1024)) + ' KB)' : '';
     body.innerHTML =
-      '<div class="rf-section-head"><div><h2>🔍 Test Face Recognition</h2><p>Upload any photo to test face matching and confidence scores without modifying enrolled records.</p></div></div>' +
+      '<div class="rf-section-head"><div><h2>🔍 Test Face Recognition</h2><p>Upload, drag &amp; drop, or paste a copied image (Ctrl+V) to test face matching and confidence scores without modifying enrolled records.</p></div></div>' +
       '<div class="rf-box" style="margin-top:0">' +
+      '<div class="rf-dropzone" id="rf-tf-drop">' +
       '<div class="rf-toolbar" style="margin-bottom:0">' +
-      '<input class="rf-input" id="rf-tf-file" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp"/>' +
-      '<input class="rf-input" id="rf-tf-thr" type="number" min="0.50" max="0.99" step="0.01" value="0.88" style="width:110px" title="Minimum confidence"/>' +
-      '<button type="button" class="rf-btn rf-btn-primary" id="rf-tf-run">Test Recognition</button>' +
+      '<label class="rf-btn" style="cursor:pointer" for="rf-tf-file">📂 Choose Photo</label>' +
+      '<input id="rf-tf-file" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" style="display:none"/>' +
+      '<button type="button" class="rf-btn" id="rf-tf-paste">📋 Paste from Clipboard</button>' +
+      '<input class="rf-input" id="rf-tf-thr" type="number" min="0.50" max="0.99" step="0.01" value="' + esc(state.testThreshold || '0.88') + '" style="width:96px" title="Minimum confidence"/>' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="rf-tf-run">🔍 Test Recognition</button>' +
+      (state.testFile ? '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" id="rf-tf-clear">' + TRASH_SVG + '<span>Clear</span></button>' : '') +
       '</div>' +
-      (state.testPreview ? '<img src="' + esc(state.testPreview) + '" style="margin-top:14px;max-height:320px;border-radius:10px;border:1px solid rgb(var(--border-medium));display:block"/>' : '') +
+      (state.testFile
+        ? '<div style="margin-top:10px"><span class="rf-file-pill">🖼️ ' + esc(state.testFileName) + esc(sizeKb) + '</span></div>'
+        : '<div style="margin-top:10px;font-size:.8rem;color:rgb(var(--text-secondary))">Tip: Copy any image (screenshot or web photo) and press <b>Ctrl+V</b> anywhere here, click <b>Paste from Clipboard</b>, or drop an image file into this box.</div>') +
+      (state.testPreview ? '<img src="' + esc(state.testPreview) + '" id="rf-tf-img" style="margin-top:12px;max-height:320px;border-radius:10px;border:1px solid rgb(var(--border-medium));display:block;cursor:pointer"/>' : '') +
+      '</div>' +
       '<div id="rf-tf-out" style="margin-top:14px">' + state.testResultHtml + '</div></div>';
 
-    document.getElementById('rf-tf-file').onchange = function (e) {
-      if (e.target.files[0]) {
-        state.testPreview = URL.createObjectURL(e.target.files[0]);
-        state.testResultHtml = '';
-        renderTestFace(body);
+    var fileInput = document.getElementById('rf-tf-file');
+    fileInput.onchange = function (e) {
+      if (e.target.files && e.target.files[0]) {
+        setTestFaceFile(e.target.files[0]);
       }
     };
+    var thrInput = document.getElementById('rf-tf-thr');
+    thrInput.oninput = function (e) { state.testThreshold = e.target.value; };
+
+    var clrBtn = document.getElementById('rf-tf-clear');
+    if (clrBtn) clrBtn.onclick = clearTestFaceFile;
+
+    var prevImg = document.getElementById('rf-tf-img');
+    if (prevImg) prevImg.onclick = function () { openViewer(state.testPreview); };
+
+    var drop = document.getElementById('rf-tf-drop');
+    drop.ondragover = function (e) { e.preventDefault(); drop.classList.add('dragover'); };
+    drop.ondragleave = function () { drop.classList.remove('dragover'); };
+    drop.ondrop = function (e) {
+      e.preventDefault();
+      drop.classList.remove('dragover');
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f && (!f.type || f.type.indexOf('image/') === 0)) {
+        setTestFaceFile(f);
+        toast('Image loaded');
+      } else {
+        toast('Drop a valid JPG, PNG, WEBP, or BMP image', false);
+      }
+    };
+
+    document.getElementById('rf-tf-paste').onclick = async function () {
+      if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+        toast('Press Ctrl+V to paste a copied image from your clipboard', true);
+        return;
+      }
+      try {
+        var items = await navigator.clipboard.read();
+        for (var i = 0; i < items.length; i++) {
+          var imgType = items[i].types.find(function (t) { return t.indexOf('image/') === 0; });
+          if (imgType) {
+            var blob = await items[i].getType(imgType);
+            setTestFaceFile(blob, 'clipboard-image');
+            toast('Image pasted from clipboard');
+            return;
+          }
+        }
+        toast('No image found in clipboard. Copy an image first or press Ctrl+V.', false);
+      } catch (err) {
+        toast('Clipboard permission needed — press Ctrl+V directly to paste your image', true);
+      }
+    };
+
     document.getElementById('rf-tf-run').onclick = async function () {
-      var f = document.getElementById('rf-tf-file').files[0];
-      if (!f) { toast('Choose a photo first', false); return; }
+      var f = state.testFile || (fileInput.files && fileInput.files[0]);
+      if (!f) { toast('Choose or paste a photo first', false); return; }
       var fd = new FormData();
-      fd.append('image', f);
-      fd.append('threshold', document.getElementById('rf-tf-thr').value);
+      fd.append('image', f, state.testFileName || f.name || ('pasted.' + guessExtFromMime(f.type)));
+      fd.append('threshold', thrInput.value || state.testThreshold || '0.88');
+      var runBtn = document.getElementById('rf-tf-run');
+      runBtn.disabled = true;
       document.getElementById('rf-tf-out').innerHTML = '⏳ Running face detection and vector matching…';
-      var r = await api('/admin/api/test-recognition', { method: 'POST', body: fd });
-      if (!r.ok) { toast(r.data.reason || 'Test failed', false); return; }
-      var dets = r.data.matches || r.data.detections || [];
-      state.testResultHtml = dets.length ? '<div class="rf-grid">' + dets.map(function (x, i) {
-        var ok = x.identity && x.identity !== 'Unknown';
-        return '<div class="rf-card rf-card-col"><h3>Face ' + (i + 1) + ' <span class="rf-badge ' + (ok ? 'rf-badge-ok' : 'rf-badge-warn') + '">' + (ok ? 'MATCHED' : 'UNKNOWN') + '</span></h3>' +
-          '<div><b>Identity:</b> ' + esc(x.identity || 'Unknown') + '</div>' +
-          '<div><b>Confidence:</b> ' + Number(x.confidence || 0).toFixed(3) + '</div></div>';
-      }).join('') + '</div>' : '<div class="rf-empty">No face detected in this image.</div>';
-      document.getElementById('rf-tf-out').innerHTML = state.testResultHtml;
+      try {
+        var r = await api('/admin/api/test-recognition', { method: 'POST', body: fd });
+        if (!r.ok) {
+          toast((r.data && r.data.reason) || 'Test failed', false);
+          document.getElementById('rf-tf-out').innerHTML = '<div class="rf-err-banner">' + esc((r.data && r.data.reason) || 'Recognition test failed.') + '</div>';
+          return;
+        }
+        var dets = r.data.matches || r.data.detections || [];
+        state.testResultHtml = dets.length ? '<div class="rf-grid">' + dets.map(function (x, i) {
+          var ok = x.identity && x.identity !== 'Unknown';
+          return '<div class="rf-card rf-card-col"><h3>Face ' + (i + 1) + ' <span class="rf-badge ' + (ok ? 'rf-badge-ok' : 'rf-badge-warn') + '">' + (ok ? 'MATCHED' : 'UNKNOWN') + '</span></h3>' +
+            '<div><b>Identity:</b> ' + esc(x.identity || 'Unknown') + '</div>' +
+            '<div><b>Confidence:</b> ' + Number(x.confidence || 0).toFixed(3) + '</div></div>';
+        }).join('') + '</div>' : '<div class="rf-empty">No face detected in this image.</div>';
+        document.getElementById('rf-tf-out').innerHTML = state.testResultHtml;
+      } catch (err) {
+        toast('Error: ' + err.message, false);
+        document.getElementById('rf-tf-out').innerHTML = '<div class="rf-err-banner">' + esc(err.message) + '</div>';
+      } finally {
+        runBtn.disabled = false;
+      }
     };
   }
 
@@ -1487,7 +1792,6 @@
     btn.setAttribute('data-testid', 'nav-panel-rojakface-admin');
     btn.setAttribute('aria-label', 'Admin Portal');
     btn.setAttribute('aria-pressed', state.open ? 'true' : 'false');
-    btn.setAttribute('title', 'Admin Portal');
     btn.className = 'rf-admin-rail-btn flex h-9 w-9 items-center justify-center rounded-lg transition-colors' + (state.open ? ' rf-active' : '');
     btn.innerHTML =
       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">' +
@@ -1499,8 +1803,8 @@
       var tip = btn.querySelector('.rf-rail-tooltip');
       if (!tip) return;
       var rect = btn.getBoundingClientRect();
-      tip.style.top = Math.round(rect.top + rect.height / 2 - 14) + 'px';
-      tip.style.left = Math.round(rect.right + 10) + 'px';
+      tip.style.top = Math.round(rect.top + rect.height / 2 - (tip.offsetHeight || 28) / 2) + 'px';
+      tip.style.left = Math.round(rect.right + 12) + 'px';
     });
     btn.addEventListener('click', function (ev) {
       ev.preventDefault();
@@ -1543,6 +1847,25 @@
       var modals = document.querySelectorAll('.rf-modal-backdrop');
       if (modals.length) { modals[modals.length - 1].remove(); return; }
       if (state.open) closeAdmin();
+    }
+  });
+
+  document.addEventListener('paste', function (ev) {
+    if (!state.open || !state.authed || state.tab !== 'test') return;
+    if (document.querySelector('.rf-modal-backdrop')) return;
+    var cd = ev.clipboardData || window.clipboardData;
+    if (!cd || !cd.items) return;
+    for (var i = 0; i < cd.items.length; i++) {
+      var item = cd.items[i];
+      if (item && item.type && item.type.indexOf('image/') === 0) {
+        var f = item.getAsFile();
+        if (f) {
+          ev.preventDefault();
+          setTestFaceFile(f, 'clipboard-image');
+          toast('Image pasted from clipboard');
+          return;
+        }
+      }
     }
   });
 

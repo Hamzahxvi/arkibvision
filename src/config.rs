@@ -33,6 +33,7 @@ pub struct AppConfig {
     pub location_vectors_file: PathBuf,
     pub checksum_manifest_file: PathBuf,
     pub people_groups_file: PathBuf,
+    pub location_groups_file: PathBuf,
     pub document_groups_file: PathBuf,
     pub librechat_dir: PathBuf,
     pub profile_web_dir: PathBuf,
@@ -230,6 +231,7 @@ impl AppConfig {
         let location_vectors_file = processed_dir.join("location_vectors.json");
         let checksum_manifest_file = processed_dir.join("checksum_manifest.json");
         let people_groups_file = processed_dir.join("people_groups.json");
+        let location_groups_file = processed_dir.join("location_groups.json");
         let document_groups_file = processed_dir.join("document_groups.json");
 
         let default_lc = project_root
@@ -293,6 +295,7 @@ impl AppConfig {
             location_vectors_file,
             checksum_manifest_file,
             people_groups_file,
+            location_groups_file,
             document_groups_file,
             librechat_dir,
             profile_web_dir,

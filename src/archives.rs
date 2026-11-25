@@ -39,6 +39,8 @@ pub fn ensure_default_locations(cfg: &AppConfig) {
     let samples = [
         json!({
             "name": "Arkib Negara Malaysia — Dewan Penyelidikan",
+            "group_slug": "arkib_negara_malaysia",
+            "group": "Arkib Negara Malaysia",
             "parent_institution": "Arkib Negara Malaysia (National Archives of Malaysia)",
             "building_or_wing": "Bangunan Utama (Wisma Warisan)",
             "floor_or_room": "Tingkat 1, Dewan Penyelidikan",
@@ -51,6 +53,8 @@ pub fn ensure_default_locations(cfg: &AppConfig) {
         }),
         json!({
             "name": "Arkib Negara Malaysia — Galeri Pameran Tetap",
+            "group_slug": "arkib_negara_malaysia",
+            "group": "Arkib Negara Malaysia",
             "parent_institution": "Arkib Negara Malaysia (National Archives of Malaysia)",
             "building_or_wing": "Blok Pameran & Memorial",
             "floor_or_room": "Aras Bawah, Galeri Utama",
@@ -217,6 +221,28 @@ pub fn save_location(
                 .or_insert_with(|| Value::String(String::new()));
         }
     }
+    if payload.contains_key("group_slug") || payload.contains_key("group") {
+        let raw = payload
+            .get("group_slug")
+            .or_else(|| payload.get("group"))
+            .map(value_to_trimmed_string)
+            .unwrap_or_default();
+        if raw.is_empty() {
+            meta.insert("group_slug".to_string(), Value::String(String::new()));
+            meta.insert("group".to_string(), Value::String(String::new()));
+        } else if let Some((gs, gn)) = resolve_location_group(cfg, &raw) {
+            meta.insert("group_slug".to_string(), Value::String(gs));
+            meta.insert("group".to_string(), Value::String(gn));
+        } else {
+            meta.insert("group_slug".to_string(), Value::String(group_slug(&raw)));
+            meta.insert("group".to_string(), Value::String(raw));
+        }
+    } else {
+        meta.entry("group_slug".to_string())
+            .or_insert_with(|| Value::String(String::new()));
+        meta.entry("group".to_string())
+            .or_insert_with(|| Value::String(String::new()));
+    }
     meta.insert("slug".to_string(), Value::String(target_slug.clone()));
     meta.insert(
         "updated_at".to_string(),
@@ -348,6 +374,7 @@ pub fn search_locations(cfg: &AppConfig, query: &str) -> Vec<Value> {
                 "building_or_wing",
                 "floor_or_room",
                 "category",
+                "group",
                 "address",
                 "historical_significance",
                 "description",
@@ -1574,6 +1601,219 @@ pub fn delete_document_group(cfg: &AppConfig, slug: &str) -> Result<Value, Strin
     }))
 }
 
+// ─── Maintainable Location Group Folders (e.g. Arkib Negara Malaysia, Historical Landmarks) ─
+
+pub fn ensure_default_location_groups(cfg: &AppConfig) {
+    if cfg.location_groups_file.is_file() {
+        return;
+    }
+    let now = Utc::now().to_rfc3339();
+    let defaults = [
+        (
+            "Arkib Negara Malaysia",
+            "Halls, wings, exhibition galleries, and rooms at the National Archives of Malaysia.",
+        ),
+        (
+            "Historical Landmarks",
+            "Heritage buildings, monuments, memorials, and historical sites.",
+        ),
+    ];
+    let mut list = Vec::new();
+    for (name, desc) in defaults {
+        let mut m = Map::new();
+        m.insert("slug".to_string(), Value::String(group_slug(name)));
+        m.insert("name".to_string(), Value::String(name.to_string()));
+        m.insert("description".to_string(), Value::String(desc.to_string()));
+        m.insert("created_at".to_string(), Value::String(now.clone()));
+        m.insert("updated_at".to_string(), Value::String(now.clone()));
+        list.push(m);
+    }
+    let _ = save_raw_people_groups(&cfg.location_groups_file, &list);
+}
+
+pub fn list_location_groups(cfg: &AppConfig) -> Vec<Value> {
+    ensure_default_location_groups(cfg);
+    let counts = count_members_by_group(&cfg.locations_dir);
+    let mut groups = load_raw_people_groups(&cfg.location_groups_file);
+    for g in &mut groups {
+        let slug = g
+            .get("slug")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let cnt = counts.get(&slug).copied().unwrap_or(0);
+        g.insert("member_count".to_string(), json!(cnt));
+    }
+    groups.into_iter().map(Value::Object).collect()
+}
+
+pub fn resolve_location_group(cfg: &AppConfig, group_or_slug: &str) -> Option<(String, String)> {
+    let clean = group_or_slug.trim();
+    if clean.is_empty() {
+        return None;
+    }
+    let target_slug = group_slug(clean);
+    let groups = load_raw_people_groups(&cfg.location_groups_file);
+    for g in groups {
+        let s = g.get("slug").and_then(Value::as_str).unwrap_or("");
+        let n = g.get("name").and_then(Value::as_str).unwrap_or("");
+        if s.eq_ignore_ascii_case(clean)
+            || s.eq_ignore_ascii_case(&target_slug)
+            || n.eq_ignore_ascii_case(clean)
+        {
+            return Some((s.to_string(), n.to_string()));
+        }
+    }
+    None
+}
+
+pub fn create_location_group(
+    cfg: &AppConfig,
+    name: &str,
+    description: &str,
+) -> Result<Value, String> {
+    ensure_default_location_groups(cfg);
+    let clean_name = name.trim();
+    if clean_name.is_empty() {
+        return Err("Location group folder name is required.".to_string());
+    }
+    let slug = group_slug(clean_name);
+    if slug.is_empty() || slug == "all" || slug == "unassigned" {
+        return Err(format!(
+            "'{clean_name}' is a reserved or invalid folder name."
+        ));
+    }
+    let mut groups = load_raw_people_groups(&cfg.location_groups_file);
+    if groups.iter().any(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(&slug))
+    }) {
+        return Err(format!(
+            "Location group folder '{clean_name}' already exists."
+        ));
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut m = Map::new();
+    m.insert("slug".to_string(), Value::String(slug));
+    m.insert("name".to_string(), Value::String(clean_name.to_string()));
+    m.insert(
+        "description".to_string(),
+        Value::String(description.trim().to_string()),
+    );
+    m.insert("created_at".to_string(), Value::String(now.clone()));
+    m.insert("updated_at".to_string(), Value::String(now));
+    groups.push(m.clone());
+    save_raw_people_groups(&cfg.location_groups_file, &groups)?;
+    m.insert("member_count".to_string(), json!(0));
+    Ok(Value::Object(m))
+}
+
+pub fn rename_location_group(
+    cfg: &AppConfig,
+    old_slug: &str,
+    new_name: &str,
+    description: Option<&str>,
+) -> Result<Value, String> {
+    ensure_default_location_groups(cfg);
+    let clean_name = new_name.trim();
+    if clean_name.is_empty() {
+        return Err("New location group folder name is required.".to_string());
+    }
+    let new_slug = group_slug(clean_name);
+    if new_slug.is_empty() || new_slug == "all" || new_slug == "unassigned" {
+        return Err(format!(
+            "'{clean_name}' is a reserved or invalid folder name."
+        ));
+    }
+
+    let mut groups = load_raw_people_groups(&cfg.location_groups_file);
+    let Some(pos) = groups.iter().position(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(old_slug))
+    }) else {
+        return Err("Location group folder not found.".to_string());
+    };
+    if groups.iter().enumerate().any(|(i, g)| {
+        i != pos
+            && g.get("slug")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.eq_ignore_ascii_case(&new_slug))
+    }) {
+        return Err(format!(
+            "Another location group folder named '{clean_name}' already exists."
+        ));
+    }
+
+    let old_name = groups[pos]
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let old_slug_actual = groups[pos]
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or(old_slug)
+        .to_string();
+
+    groups[pos].insert("slug".to_string(), Value::String(new_slug.clone()));
+    groups[pos].insert("name".to_string(), Value::String(clean_name.to_string()));
+    if let Some(desc) = description {
+        groups[pos].insert(
+            "description".to_string(),
+            Value::String(desc.trim().to_string()),
+        );
+    }
+    groups[pos].insert(
+        "updated_at".to_string(),
+        Value::String(Utc::now().to_rfc3339()),
+    );
+    save_raw_people_groups(&cfg.location_groups_file, &groups)?;
+
+    let migrated = cascade_profile_group_update(
+        &cfg.locations_dir,
+        &old_slug_actual,
+        &old_name,
+        &new_slug,
+        clean_name,
+    );
+    let mut out = groups[pos].clone();
+    out.insert("migrated_locations".to_string(), json!(migrated));
+    Ok(Value::Object(out))
+}
+
+pub fn delete_location_group(cfg: &AppConfig, slug: &str) -> Result<Value, String> {
+    ensure_default_location_groups(cfg);
+    let mut groups = load_raw_people_groups(&cfg.location_groups_file);
+    let Some(pos) = groups.iter().position(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(slug))
+    }) else {
+        return Err("Location group folder not found.".to_string());
+    };
+    let removed = groups.remove(pos);
+    let old_name = removed
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let old_slug = removed
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or(slug)
+        .to_string();
+    save_raw_people_groups(&cfg.location_groups_file, &groups)?;
+    let unassigned = cascade_profile_group_update(&cfg.locations_dir, &old_slug, &old_name, "", "");
+    Ok(json!({
+        "status": "deleted",
+        "slug": old_slug,
+        "name": old_name,
+        "unassigned_locations": unassigned,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1665,6 +1905,29 @@ mod tests {
         assert_eq!(d_ren["migrated_documents"], 1);
         let d_del = delete_document_group(&cfg, "national_treaties").unwrap();
         assert_eq!(d_del["unassigned_documents"], 1);
+
+        // Also test Location Group Folders CRUD & cascade
+        let ldir = base.join("locations");
+        let l1 = ldir.join("dewan_penyelidikan");
+        fs::create_dir_all(&l1).unwrap();
+        cfg.locations_dir = ldir;
+        cfg.location_groups_file = base.join("location_groups.json");
+
+        ensure_default_location_groups(&cfg);
+        assert_eq!(list_location_groups(&cfg).len(), 2);
+        let lg =
+            create_location_group(&cfg, "State Branches", "Regional archive branches").unwrap();
+        assert_eq!(lg["slug"], "state_branches");
+        fs::write(
+            l1.join("metadata.json"),
+            r#"{"name":"Dewan Penyelidikan","group":"State Branches","group_slug":"state_branches"}"#,
+        )
+        .unwrap();
+        let l_ren =
+            rename_location_group(&cfg, "state_branches", "Regional Branches", None).unwrap();
+        assert_eq!(l_ren["migrated_locations"], 1);
+        let l_del = delete_location_group(&cfg, "regional_branches").unwrap();
+        assert_eq!(l_del["unassigned_locations"], 1);
 
         let _ = fs::remove_dir_all(&base);
     }
