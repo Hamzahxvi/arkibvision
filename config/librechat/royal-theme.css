@@ -178,6 +178,11 @@ main table td img {
   margin-right: auto;
 }
 
+/* Hide legacy external Admin Portal link from user avatar dropdown (now native under MCP Settings) */
+[data-testid="nav-admin-portal"] {
+  display: none !important;
+}
+
 /* Integrated RojakFace Admin Portal button (under MCP Settings in LibreChat rail) & stage */
 .rf-admin-rail-btn {
   position: relative;
