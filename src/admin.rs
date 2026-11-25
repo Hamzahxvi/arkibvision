@@ -8,7 +8,7 @@ use crate::config::{
 use crate::metadata::value_to_trimmed_string;
 use crate::service::RojakFaceService;
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Form, Multipart, Path as AxumPath, Request, State};
+use axum::extract::{DefaultBodyLimit, Form, Multipart, Path as AxumPath, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Redirect, Response};
@@ -98,6 +98,7 @@ async fn auth_middleware(State(state): State<AdminState>, req: Request, next: Ne
             || path.starts_with("/admin/profile-images/")
             || path.starts_with("/admin/location-images/")
             || path.starts_with("/admin/document-files/")
+            || path.starts_with("/admin/enhanced-images/")
         {
             return (
                 StatusCode::UNAUTHORIZED,
@@ -209,6 +210,25 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
         .route(
             "/admin/document-files/{slug}/{*filename}",
             get(admin_document_file),
+        )
+        // System Performance Monitor, Integrity Audit & Archival Conservation Lab
+        .route("/admin/api/system/health", get(admin_system_health))
+        .route("/admin/api/system/integrity", post(admin_system_integrity))
+        .route(
+            "/admin/api/system/clear-cache",
+            post(admin_system_clear_cache),
+        )
+        .route(
+            "/admin/api/conservation/analyze",
+            post(admin_conservation_analyze),
+        )
+        .route(
+            "/admin/api/conservation/enhance",
+            post(admin_conservation_enhance),
+        )
+        .route(
+            "/admin/enhanced-images/{*filename}",
+            get(admin_enhanced_image),
         )
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
@@ -1096,9 +1116,21 @@ async fn admin_delete_location(
     }
 }
 
+#[derive(Deserialize, Default)]
+struct ForceQuery {
+    force: Option<String>,
+}
+
+fn is_force(q: &ForceQuery) -> bool {
+    q.force
+        .as_deref()
+        .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+}
+
 async fn admin_add_location_image(
     State(state): State<AdminState>,
     AxumPath(slug): AxumPath<String>,
+    Query(q): Query<ForceQuery>,
     mut multipart: Multipart,
 ) -> Response {
     let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
@@ -1132,6 +1164,7 @@ async fn admin_add_location_image(
         )
             .into_response();
     }
+    let force = is_force(&q);
     let svc = state.service.clone();
     match tokio::task::spawn_blocking(move || {
         archives::add_location_image(
@@ -1141,6 +1174,7 @@ async fn admin_add_location_image(
             &clean_slug,
             &upload_name,
             &bytes,
+            force,
         )
     })
     .await
@@ -1150,11 +1184,14 @@ async fn admin_add_location_image(
             Json(json!({ "status": "image_added", "location": loc })),
         )
             .into_response(),
-        Ok(Err(reason)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "status": "error", "reason": reason })),
-        )
-            .into_response(),
+        Ok(Err(reason)) => {
+            let code = if reason.starts_with("Duplicate item detected") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (code, Json(json!({ "status": "error", "reason": reason }))).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "status": "error", "reason": e.to_string() })),
@@ -1310,6 +1347,7 @@ async fn admin_delete_document(
 async fn admin_add_document_file(
     State(state): State<AdminState>,
     AxumPath(slug): AxumPath<String>,
+    Query(q): Query<ForceQuery>,
     mut multipart: Multipart,
 ) -> Response {
     let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
@@ -1339,9 +1377,10 @@ async fn admin_add_document_file(
     if !is_document_ext(Path::new(&upload_name)) {
         return (StatusCode::BAD_REQUEST, Json(json!({ "status": "rejected", "reason": "Supported formats: TXT, MD, CSV, JSON, HTML, XML, PDF, DOCX, JPG, PNG, WEBP, BMP." }))).into_response();
     }
+    let force = is_force(&q);
     let cfg = state.service.cfg.clone();
     match tokio::task::spawn_blocking(move || {
-        archives::add_document_file(&cfg, &clean_slug, &upload_name, &bytes)
+        archives::add_document_file(&cfg, &clean_slug, &upload_name, &bytes, force)
     })
     .await
     {
@@ -1350,11 +1389,14 @@ async fn admin_add_document_file(
             Json(json!({ "status": "file_added", "document": doc })),
         )
             .into_response(),
-        Ok(Err(reason)) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "status": "error", "reason": reason })),
-        )
-            .into_response(),
+        Ok(Err(reason)) => {
+            let code = if reason.starts_with("Duplicate item detected") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (code, Json(json!({ "status": "error", "reason": reason }))).into_response()
+        }
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "status": "error", "reason": e.to_string() })),
@@ -1457,4 +1499,172 @@ async fn admin_summarize_document(
         )
             .into_response(),
     }
+}
+
+// ─── System Performance Monitor, Checksum Integrity & Conservation Endpoints ─
+
+async fn admin_system_health(State(state): State<AdminState>) -> Json<Value> {
+    Json(state.service.tool_system_health().await)
+}
+
+async fn admin_system_integrity(State(state): State<AdminState>) -> Json<Value> {
+    let svc = state.service.clone();
+    let res = tokio::task::spawn_blocking(move || svc.tool_verify_integrity(true))
+        .await
+        .unwrap_or_else(|e| json!({ "status": "error", "reason": e.to_string() }));
+    Json(res)
+}
+
+async fn admin_system_clear_cache(State(state): State<AdminState>) -> Json<Value> {
+    let svc = state.service.clone();
+    let res = tokio::task::spawn_blocking(move || svc.clear_temp_image_caches())
+        .await
+        .unwrap_or_else(|e| json!({ "status": "error", "reason": e.to_string() }));
+    Json(res)
+}
+
+async fn admin_conservation_analyze(
+    State(state): State<AdminState>,
+    mut multipart: Multipart,
+) -> Response {
+    let mut upload_bytes: Option<Vec<u8>> = None;
+    let mut upload_name = String::new();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() == Some("image") || field.name() == Some("file") {
+            upload_name = field.file_name().unwrap_or("scan.jpg").to_string();
+            if let Ok(bytes) = field.bytes().await {
+                upload_bytes = Some(bytes.to_vec());
+            }
+        }
+    }
+    let Some(bytes) = upload_bytes else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Choose an image to analyze." })),
+        )
+            .into_response();
+    };
+    if !is_image_ext(Path::new(&upload_name)) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
+        )
+            .into_response();
+    }
+    let ext = Path::new(&upload_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg");
+    let temp_path = state.service.cfg.pending_images_dir.join(format!(
+        "ADMIN-CONS-{}.{ext}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    if let Err(e) = fs::write(&temp_path, &bytes) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response();
+    }
+    let svc = state.service.clone();
+    let tp = temp_path.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let res = svc.tool_assess_conservation(&tp.to_string_lossy());
+        let _ = fs::remove_file(&tp);
+        res
+    })
+    .await
+    .unwrap_or_else(|e| json!({ "status": "error", "reason": e.to_string() }));
+    (StatusCode::OK, Json(result)).into_response()
+}
+
+async fn admin_conservation_enhance(
+    State(state): State<AdminState>,
+    mut multipart: Multipart,
+) -> Response {
+    let mut upload_bytes: Option<Vec<u8>> = None;
+    let mut upload_name = String::new();
+    let mut mode = "auto".to_string();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "image" || name == "file" {
+            upload_name = field.file_name().unwrap_or("scan.jpg").to_string();
+            if let Ok(bytes) = field.bytes().await {
+                upload_bytes = Some(bytes.to_vec());
+            }
+        } else if name == "mode"
+            && let Ok(text) = field.text().await
+            && !text.trim().is_empty()
+        {
+            mode = text.trim().to_string();
+        }
+    }
+    let Some(bytes) = upload_bytes else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Choose an image to enhance." })),
+        )
+            .into_response();
+    };
+    if !is_image_ext(Path::new(&upload_name)) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Use JPG, PNG, WEBP, or BMP images." })),
+        )
+            .into_response();
+    }
+    let ext = Path::new(&upload_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpg");
+    let temp_path = state
+        .service
+        .cfg
+        .pending_images_dir
+        .join(format!("ADMIN-ENH-{}.{ext}", uuid::Uuid::new_v4().simple()));
+    if let Err(e) = fs::write(&temp_path, &bytes) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response();
+    }
+    let svc = state.service.clone();
+    let tp = temp_path.clone();
+    let mut result = tokio::task::spawn_blocking(move || {
+        let res = svc.tool_enhance_image(&tp.to_string_lossy(), &mode);
+        let _ = fs::remove_file(&tp);
+        res
+    })
+    .await
+    .unwrap_or_else(|e| json!({ "status": "error", "reason": e.to_string() }));
+    if let Some(fname) = result["enhanced_filename"].as_str().map(String::from)
+        && let Some(obj) = result.as_object_mut()
+    {
+        obj.insert(
+            "admin_preview_url".to_string(),
+            Value::String(format!("/admin/enhanced-images/{fname}")),
+        );
+    }
+    (StatusCode::OK, Json(result)).into_response()
+}
+
+async fn admin_enhanced_image(
+    State(state): State<AdminState>,
+    AxumPath(filename): AxumPath<String>,
+) -> Response {
+    let Some(clean_name) = safe_filename(&filename) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let path = state
+        .service
+        .cfg
+        .librechat_dir
+        .join("images")
+        .join("enhanced")
+        .join(clean_name);
+    if !path.is_file() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    serve_file_bytes(&path)
 }

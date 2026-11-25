@@ -6,7 +6,11 @@
 use crate::ancient_scripts::detect_script;
 use crate::biometrics::FaceEngine;
 use crate::config::{AppConfig, is_document_ext, is_image_ext};
-use crate::forensics::{analyze_authenticity, extract_file_metadata};
+use crate::conservation::analyze_image_quality_and_conservation;
+use crate::forensics::{
+    analyze_authenticity, extract_file_metadata, find_duplicate_in_archives,
+    register_checksum_entry, sha256_bytes,
+};
 use crate::metadata::{profile_slug, value_to_trimmed_string};
 use crate::vector_store::{FacePoint, VectorStore};
 use chrono::Utc;
@@ -235,9 +239,25 @@ pub fn add_location_image(
     slug: &str,
     orig_filename: &str,
     bytes: &[u8],
+    force: bool,
 ) -> Result<Value, String> {
     let loc = load_location(cfg, slug).ok_or_else(|| "Location not found.".to_string())?;
     let loc_name = loc["name"].as_str().unwrap_or(slug).to_string();
+
+    if !force {
+        let roots = [
+            cfg.profile_dir.as_path(),
+            cfg.locations_dir.as_path(),
+            cfg.documents_dir.as_path(),
+        ];
+        if let Some(dup) = find_duplicate_in_archives(bytes, orig_filename, &roots) {
+            let kind = dup["duplicate_type"].as_str().unwrap_or("duplicate");
+            let existing = dup["existing_file"].as_str().unwrap_or("");
+            return Err(format!(
+                "Duplicate item detected ({kind}): this image already exists in the archive at '{existing}'. Pass force=1 to override."
+            ));
+        }
+    }
 
     let safe_stem = profile_slug(
         Path::new(orig_filename)
@@ -268,6 +288,12 @@ pub fn add_location_image(
     let disk_path = img_dir.join(&final_name);
     fs::write(&disk_path, bytes).map_err(|e| format!("Write image failed: {e}"))?;
     let _ = fs::write(web_dir.join(&final_name), bytes);
+    register_checksum_entry(
+        &cfg.checksum_manifest_file,
+        &disk_path,
+        &sha256_bytes(bytes),
+        bytes.len() as u64,
+    );
 
     // Index full photo with CLIP ViT-B/32 (768-D) for automatic landmark/location recognition!
     if let Ok(embedding) = engine.embed_full_image_from_path(&disk_path) {
@@ -512,6 +538,9 @@ pub fn save_document(
     if let Some(auth) = payload.get("authenticity_report") {
         meta.insert("authenticity_report".to_string(), auth.clone());
     }
+    if let Some(cons) = payload.get("conservation_report") {
+        meta.insert("conservation_report".to_string(), cons.clone());
+    }
 
     // Auto-extract key metadata whenever extracted_text is provided and summary/topics are empty.
     let extracted_text = meta
@@ -575,8 +604,22 @@ pub fn add_document_file(
     slug: &str,
     orig_filename: &str,
     bytes: &[u8],
+    force: bool,
 ) -> Result<Value, String> {
     let _doc = load_document(cfg, slug).ok_or_else(|| "Document folder not found.".to_string())?;
+    let roots = [
+        cfg.profile_dir.as_path(),
+        cfg.locations_dir.as_path(),
+        cfg.documents_dir.as_path(),
+    ];
+    if !force && let Some(dup) = find_duplicate_in_archives(bytes, orig_filename, &roots) {
+        let kind = dup["duplicate_type"].as_str().unwrap_or("duplicate");
+        let existing = dup["existing_file"].as_str().unwrap_or("");
+        return Err(format!(
+            "Duplicate item detected ({kind}): this file already exists in the archive at '{existing}'. Pass force=1 to override."
+        ));
+    }
+
     let safe_stem = profile_slug(
         Path::new(orig_filename)
             .file_stem()
@@ -606,19 +649,28 @@ pub fn add_document_file(
     let disk_path = files_dir.join(&final_name);
     fs::write(&disk_path, bytes).map_err(|e| format!("Write file failed: {e}"))?;
     let _ = fs::write(web_dir.join(&final_name), bytes);
+    register_checksum_entry(
+        &cfg.checksum_manifest_file,
+        &disk_path,
+        &sha256_bytes(bytes),
+        bytes.len() as u64,
+    );
 
-    // Run authenticity & duplicate check against entire archive + extract text if readable!
-    let roots = [
-        cfg.profile_dir.as_path(),
-        cfg.locations_dir.as_path(),
-        cfg.documents_dir.as_path(),
-    ];
+    // Run authenticity & duplicate check against entire archive + conservation analysis (if image) + extract text!
     let auth = analyze_authenticity(&disk_path, &roots).ok();
+    let conservation = if is_image_ext(&disk_path) {
+        analyze_image_quality_and_conservation(&disk_path).ok()
+    } else {
+        None
+    };
     let extracted = extract_text_from_file(&disk_path).ok().unwrap_or_default();
 
     let mut patch = Map::new();
     if let Some(a) = auth {
         patch.insert("authenticity_report".to_string(), a);
+    }
+    if let Some(c) = conservation {
+        patch.insert("conservation_report".to_string(), c);
     }
     if !extracted.trim().is_empty() {
         let existing_text = load_document(cfg, slug)

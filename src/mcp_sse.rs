@@ -266,6 +266,7 @@ async fn dispatch_tool(
                 .tool_summarize_document(&file_path, &text, &language)
                 .await)
         }
+        "rojakface_system_health" => Ok(service.tool_system_health().await),
         other => {
             let svc = service.clone();
             let tool = other.to_string();
@@ -287,6 +288,16 @@ async fn dispatch_tool(
                 }
                 "rojakface_detect_authenticity" => {
                     Ok(svc.tool_detect_authenticity(&arg_str(&args, "file_path")))
+                }
+                "rojakface_assess_conservation" => {
+                    Ok(svc.tool_assess_conservation(&arg_str(&args, "image_path")))
+                }
+                "rojakface_enhance_image" => {
+                    Ok(svc
+                        .tool_enhance_image(&arg_str(&args, "image_path"), &arg_str(&args, "mode")))
+                }
+                "rojakface_verify_integrity" => {
+                    Ok(svc.tool_verify_integrity(arg_bool(&args, "update_manifest", true)))
                 }
                 "rojakface_search_locations" => {
                     Ok(svc.tool_search_locations(&arg_str(&args, "query")))
@@ -588,6 +599,45 @@ pub fn tool_definitions() -> Vec<Value> {
                 }
             }
         }),
+        json!({
+            "name": "rojakface_assess_conservation",
+            "description": "Analyze image quality (resolution, lighting, readability), detect archival damage (tear, faded, mold, aging) classified as none/light/medium/heavy, check duplicate/authenticity status, and suggest physical conservation healing treatments (fungal removal, controlled drying, protective coating, Kozo mending, deacidification).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "image_path": { "type": "string", "default": "" }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_enhance_image",
+            "description": "Digitally enhance a poor, dark, yellowed, or faded archival image (de-yellowing white balance, adaptive lighting gamma, percentile autocontrast, and unsharp mask) and return the enhanced image URL with Before vs After quality metrics.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "image_path": { "type": "string", "default": "" },
+                    "mode": { "type": "string", "default": "auto", "description": "auto, manuscript_ocr, deyellow_restore, contrast_lighting, or denoise_sharpen" }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_verify_integrity",
+            "description": "Audit SHA-256 cryptographic file integrity across all archived profiles, locations, and documents against checksum_manifest.json to detect corruption, tampering, missing files, and exact archive duplicates.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "update_manifest": { "type": "boolean", "default": true }
+                }
+            }
+        }),
+        json!({
+            "name": "rojakface_system_health",
+            "description": "Administration System Performance & Abnormality Monitor: inspects live CPU, RAM, Disk, Ollama AI health/latency, request load/errors, detects system abnormalities or burden overload, and recommends administrative actions.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
     ]
 }
 
@@ -598,7 +648,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_catalog_and_host_guard() {
         let tools = tool_definitions();
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 24);
         for t in &tools {
             assert!(t["name"].as_str().unwrap_or("").starts_with("rojakface_"));
             assert_eq!(t["inputSchema"]["type"].as_str(), Some("object"));

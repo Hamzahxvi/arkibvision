@@ -9,9 +9,11 @@
 
 use crate::config::{PERCEPTUAL_HASH_DISTANCE, is_image_ext};
 use crate::vision_ops::{hash_distance, perceptual_hash};
+use chrono::Utc;
 use flate2::read::ZlibDecoder;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
@@ -501,6 +503,245 @@ pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Valu
     }))
 }
 
+fn normalized_manifest_key(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// Checks if raw uploaded bytes already exist in the archive (exact SHA-256 or perceptual aHash for images).
+pub fn find_duplicate_in_archives(
+    bytes: &[u8],
+    orig_filename: &str,
+    archive_roots: &[&Path],
+) -> Option<Value> {
+    let target_sha = sha256_bytes(bytes);
+    let is_img = is_image_ext(Path::new(orig_filename));
+    let target_ahash = if is_img {
+        image::load_from_memory(bytes).ok().map(|img| {
+            let small = img
+                .grayscale()
+                .resize_exact(8, 8, image::imageops::FilterType::Triangle);
+            let pixels = small.to_luma8();
+            let sum: u64 = pixels.pixels().map(|p| u64::from(p[0])).sum();
+            let mean = (sum as f64) / 64.0;
+            let mut bits = 0u64;
+            for (idx, p) in pixels.pixels().enumerate() {
+                if f64::from(p[0]) >= mean {
+                    bits |= 1u64 << idx;
+                }
+            }
+            format!("{bits:016x}")
+        })
+    } else {
+        None
+    };
+
+    for root in archive_roots {
+        if !root.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(root).into_iter().flatten() {
+            let p = entry.path();
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            if fname.ends_with(".json") || fname.ends_with(".jsonl") {
+                continue;
+            }
+            if let Ok(other_bytes) = fs::read(p) {
+                let other_sha = sha256_bytes(&other_bytes);
+                if other_sha == target_sha {
+                    return Some(json!({
+                        "duplicate_type": "exact_sha256",
+                        "sha256": target_sha,
+                        "existing_file": p.display().to_string(),
+                        "existing_filename": fname,
+                    }));
+                }
+            }
+            if is_img
+                && is_image_ext(p)
+                && let (Some(h1), Ok(h2)) = (&target_ahash, perceptual_hash(p))
+            {
+                let dist = hash_distance(h1, &h2);
+                if dist <= 6 {
+                    return Some(json!({
+                        "duplicate_type": "near_duplicate_perceptual",
+                        "sha256": target_sha,
+                        "hamming_distance": dist,
+                        "existing_file": p.display().to_string(),
+                        "existing_filename": fname,
+                    }));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Registers or updates a single file's SHA-256 checksum inside `checksum_manifest.json`.
+pub fn register_checksum_entry(
+    manifest_path: &Path,
+    file_path: &Path,
+    sha256: &str,
+    size_bytes: u64,
+) {
+    let mut entries: Map<String, Value> = fs::read_to_string(manifest_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("files").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
+    let key = normalized_manifest_key(file_path);
+    entries.insert(
+        key,
+        json!({
+            "sha256": sha256,
+            "size_bytes": size_bytes,
+            "recorded_at": Utc::now().to_rfc3339(),
+        }),
+    );
+    let doc = json!({
+        "updated_at": Utc::now().to_rfc3339(),
+        "total_tracked": entries.len(),
+        "files": Value::Object(entries),
+    });
+    if let Ok(pretty) = serde_json::to_string_pretty(&doc) {
+        let tmp = manifest_path.with_extension("json.tmp");
+        if fs::write(&tmp, &pretty).is_ok() {
+            let _ = fs::rename(&tmp, manifest_path);
+        }
+    }
+}
+
+/// Audits SHA-256 file integrity across all archival roots (`profiles/`, `locations/`, `documents/`)
+/// against `checksum_manifest.json`, detecting tampered/corrupted files, missing files, and exact duplicates.
+pub fn verify_archive_integrity(
+    manifest_path: &Path,
+    archive_roots: &[&Path],
+    update_manifest: bool,
+) -> Result<Value, String> {
+    let prev_entries: Map<String, Value> = fs::read_to_string(manifest_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("files").and_then(Value::as_object).cloned())
+        .unwrap_or_default();
+
+    let mut current_files: BTreeMap<String, (String, u64)> = BTreeMap::new();
+    let mut sha_groups: HashMap<String, Vec<String>> = HashMap::new();
+
+    for root in archive_roots {
+        if !root.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(root).into_iter().flatten() {
+            let p = entry.path();
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let fname = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            if fname.ends_with(".json") || fname.ends_with(".jsonl") {
+                continue;
+            }
+            let bytes = fs::read(p).map_err(|e| format!("Failed reading {}: {e}", p.display()))?;
+            let sha = sha256_bytes(&bytes);
+            let key = normalized_manifest_key(p);
+            current_files.insert(key.clone(), (sha.clone(), bytes.len() as u64));
+            sha_groups.entry(sha).or_default().push(key);
+        }
+    }
+
+    let mut verified_count = 0usize;
+    let mut new_indexed: Vec<String> = Vec::new();
+    let mut corrupted: Vec<Value> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    let mut next_entries = prev_entries.clone();
+
+    for (key, (cur_sha, size)) in &current_files {
+        if let Some(prev) = prev_entries.get(key) {
+            let expected_sha = prev["sha256"].as_str().unwrap_or("");
+            if expected_sha == cur_sha {
+                verified_count += 1;
+            } else {
+                corrupted.push(json!({
+                    "file": key,
+                    "expected_sha256": expected_sha,
+                    "actual_sha256": cur_sha,
+                    "size_bytes": size,
+                }));
+            }
+        } else {
+            new_indexed.push(key.clone());
+            next_entries.insert(
+                key.clone(),
+                json!({
+                    "sha256": cur_sha,
+                    "size_bytes": size,
+                    "recorded_at": Utc::now().to_rfc3339(),
+                }),
+            );
+        }
+    }
+
+    for key in prev_entries.keys() {
+        if !current_files.contains_key(key) {
+            missing.push(key.clone());
+            if update_manifest {
+                next_entries.remove(key);
+            }
+        }
+    }
+
+    let mut duplicate_groups: Vec<Value> = sha_groups
+        .into_iter()
+        .filter(|(_, paths)| paths.len() > 1)
+        .map(|(sha, mut paths)| {
+            paths.sort();
+            json!({
+                "sha256": sha,
+                "count": paths.len(),
+                "files": paths,
+            })
+        })
+        .collect();
+    duplicate_groups.sort_by(|a, b| b["count"].as_u64().cmp(&a["count"].as_u64()));
+
+    if update_manifest || !manifest_path.is_file() {
+        let doc = json!({
+            "updated_at": Utc::now().to_rfc3339(),
+            "total_tracked": next_entries.len(),
+            "files": Value::Object(next_entries),
+        });
+        let pretty = serde_json::to_string_pretty(&doc).map_err(|e| format!("JSON err: {e}"))?;
+        let tmp = manifest_path.with_extension("json.tmp");
+        fs::write(&tmp, &pretty).map_err(|e| format!("Write manifest failed: {e}"))?;
+        fs::rename(&tmp, manifest_path).map_err(|e| format!("Rename manifest failed: {e}"))?;
+    }
+
+    let integrity_status = if !corrupted.is_empty() {
+        "CORRUPTION_OR_TAMPERING_DETECTED"
+    } else if !missing.is_empty() {
+        "MISSING_ARCHIVED_FILES"
+    } else {
+        "VERIFIED_INTACT"
+    };
+
+    Ok(json!({
+        "integrity_status": integrity_status,
+        "manifest_path": manifest_path.display().to_string(),
+        "manifest_updated": update_manifest || !manifest_path.is_file(),
+        "total_files_scanned": current_files.len(),
+        "verified_intact_count": verified_count,
+        "newly_indexed_count": new_indexed.len(),
+        "corrupted_count": corrupted.len(),
+        "missing_count": missing.len(),
+        "duplicate_groups_count": duplicate_groups.len(),
+        "corrupted_files": corrupted,
+        "missing_files": missing,
+        "duplicate_groups": duplicate_groups,
+        "checked_at_utc": Utc::now().to_rfc3339(),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,5 +756,34 @@ mod tests {
         assert!(!ai.is_empty());
         assert!(ed.is_empty());
         assert!(c2pa);
+    }
+
+    #[test]
+    fn test_checksum_integrity_audit_and_tamper_detection() {
+        let base = std::env::temp_dir().join(format!(
+            "rojakface_integrity_test_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let root = base.join("docs");
+        fs::create_dir_all(&root).unwrap();
+        let f1 = root.join("charter.txt");
+        let f2 = root.join("charter_copy.txt");
+        fs::write(&f1, b"Original archival text").unwrap();
+        fs::write(&f2, b"Original archival text").unwrap();
+        let manifest = base.join("checksum_manifest.json");
+
+        // Initial baseline manifest creation
+        let r1 = verify_archive_integrity(&manifest, &[root.as_path()], true).unwrap();
+        assert_eq!(r1["integrity_status"], "VERIFIED_INTACT");
+        assert_eq!(r1["newly_indexed_count"], 2);
+        assert_eq!(r1["duplicate_groups_count"], 1);
+
+        // Tamper with f1
+        fs::write(&f1, b"Tampered archival text!").unwrap();
+        let r2 = verify_archive_integrity(&manifest, &[root.as_path()], false).unwrap();
+        assert_eq!(r2["integrity_status"], "CORRUPTION_OR_TAMPERING_DETECTED");
+        assert_eq!(r2["corrupted_count"], 1);
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

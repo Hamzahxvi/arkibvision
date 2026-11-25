@@ -12,7 +12,7 @@ An **air-gapped, 100% on-premise multimodal AI platform** written in **100% safe
 3. [System Requirements & Prerequisites](#3-system-requirements--prerequisites)
 4. [Build & Setup Guide](#4-build--setup-guide)
 5. [Running, Stopping & CLI Tools](#5-running-stopping--cli-tools)
-6. [Core Processing Pipelines & 14 MCP Tools](#6-core-processing-pipelines--14-mcp-tools)
+6. [Core Processing Pipelines & 24 MCP Tools](#6-core-processing-pipelines--24-mcp-tools)
 7. [Admin Portal & Public/Private Data Governance](#7-admin-portal--publicprivate-data-governance)
 8. [Chatbox Usage & Example Prompts](#8-chatbox-usage--example-prompts)
 9. [Project Structure](#9-project-structure)
@@ -37,7 +37,14 @@ An **air-gapped, 100% on-premise multimodal AI platform** written in **100% safe
   - **Fraud & Authenticity Detection**: Detects exact SHA-256 archive copies, perceptual near-duplicate re-encoded copies, editing software signatures, and AI-generation markers (`Stable Diffusion`, `ComfyUI`, `Midjourney`, `DALL-E`, `Adobe Firefly`, `C2PA`, canvas heuristics).
 - **Automatic Description, Archival Summarization & Managed Document Folders (`rojakface_summarize_document`, `rojakface_search_documents`)**:
   - Parses multi-format documents (**TXT, MD, CSV, JSON, HTML, XML, DOCX, PDF, and image scans**) in pure Rust, extracting concise archival summaries, key topics, names, dates, events, script type, and authenticity status.
-- **Managed Admin Portal Folders**: Manage **👥 Enrolled People**, **📍 Locations** (e.g. specific halls/wings in Arkib Negara Malaysia with CLIP-indexed reference photos), **📁 Documents** (multi-format archival files with one-click Auto-Summarize and Authenticity badges), and **📋 Approval Requests** in `http://127.0.0.1:8005/admin`.
+- **Duplicate Prevention & SHA-256 Checksum Integrity (`rojakface_verify_integrity`)**: Automatically checks uploaded location photos and document files for exact SHA-256 and perceptual `aHash` duplicates across all archive folders before saving (`409 Conflict` prompt in Admin Portal) and maintains `data/processed/checksum_manifest.json` to audit corruption, tampering, missing files, and archive duplicates.
+- **Image Quality, Archival Damage Detection, Healing Advice & Digital Enhancement (`rojakface_assess_conservation`, `rojakface_enhance_image`)**:
+  - Analyzes **resolution**, **lighting/exposure**, and **readability/sharpness** (`0–100` scores).
+  - Identifies **tear**, **faded**, **mold**, and **aging** classified into **`none` / `light` / `medium` / `heavy`**.
+  - Recommends physical conservation treatments (**fungal removal**, **controlled drying**, **Japanese Kozo tissue mending**, **deacidification**, **protective coating/sizing**, **UV-filtered storage**).
+  - Enhances dark, yellowed, or faded scans digitally via gray-world de-yellowing, adaptive gamma lighting, percentile autocontrast, and unsharp masking with Before vs. After metrics.
+- **Administration System Performance & Overload Monitoring (`rojakface_system_health`)**: Live telemetry (`sysinfo`) of CPU %, RAM GB/%, Disk GB/%, Server Process RSS MB, Ollama ping latency, request throughput, error rates, and in-flight concurrency — detects abnormalities and burden overload (`HEALTHY` / `WARNING` / `CRITICAL_OVERLOAD`) with concrete administrative recommendations plus one-click integrity audit and temp cache cleanup in the Admin Portal.
+- **Managed Admin Portal Folders**: Manage **👥 Enrolled People**, **📍 Locations**, **📁 Documents**, **📊 System Monitor & Conservation Lab**, and **📋 Approval Requests** in `http://127.0.0.1:8005/admin`.
 - **Role-Based Governance & Security Hardening**: Chatbox users operate as **Guests** (enrollments and ID card updates are staged as `REQ-*` requests). **Admins** review requests in the session-authenticated Admin Portal. MCP endpoints enforce DNS-rebinding `Host` header validation and automatic SSE session cleanup on disconnect.
 
 ---
@@ -157,7 +164,7 @@ curl http://127.0.0.1:8005/health
 
 ---
 
-## 6. Core Processing Pipelines & 20 MCP Tools
+## 6. Core Processing Pipelines & 24 MCP Tools
 
 Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/messages/`):
 
@@ -175,7 +182,11 @@ Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/mess
 | | `rojakface_analyze_image` | Extracts full file/EXIF/GPS/PNG metadata, runs authenticity/fraud analysis, and matches buildings/landmarks via CLIP 768-D against managed Locations. |
 | | `rojakface_detect_authenticity` | Forensic detector for **Original vs Exact Copy (SHA-256) vs Near-Duplicate Copy (`aHash`) vs Edited vs AI-Generated** files/images. |
 | | `rojakface_summarize_document` | Multi-format (TXT/MD/CSV/JSON/HTML/DOCX/PDF/Image) automatic archival description & structured summary (topics, names, dates, events, authenticity). |
-| **Pipeline D: Role-Based Governance** | `rojakface_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
+| **Pipeline D: Archival Conservation, Integrity & Ops** | `rojakface_assess_conservation` | Evaluates resolution, lighting, readability, detects tear/faded/mold/aging (`none`/`light`/`medium`/`heavy`), checks authenticity/duplicates, and suggests physical healing treatments. |
+| | `rojakface_enhance_image` | Digitally enhances dark, yellowed, or faded archival images (white balance de-yellowing, gamma lighting, autocontrast, unsharp mask) with Before vs. After quality scores. |
+| | `rojakface_verify_integrity` | Audits SHA-256 file integrity across `profiles/`, `locations/`, and `documents/` against `checksum_manifest.json` to flag corruption, tampering, missing files, and exact duplicates. |
+| | `rojakface_system_health` | Live administration telemetry (CPU, RAM, Disk, Ollama latency, workload/errors) with abnormality/overload detection (`HEALTHY`/`WARNING`/`CRITICAL_OVERLOAD`) and recommended actions. |
+| **Pipeline E: Role-Based Governance** | `rojakface_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
 | | `rojakface_request_update_metadata` | Stages a Guest metadata/MyKad/ID-card update request (`REQ-*`), auto-classifying English & Malay sensitive keys as `private`. |
 | | `rojakface_list_pending_requests` | Lists pending, approved, or rejected staging requests. |
 | | `rojakface_review_pending_request` | Admin-key guarded approval/rejection tool. |
@@ -227,12 +238,14 @@ Open **`http://127.0.0.1:8005/admin`**:
 │   ├── vision_ops.rs               # EXIF orientation, perceptual aHash, OCR line-valley chunker
 │   ├── jawi.rs                     # Jawi-to-Rumi orthographic & phonetic skeleton decoder
 │   ├── ancient_scripts.rs          # Jawi, Pallava, Kawi & Rencong script decoder & glossary
-│   ├── forensics.rs                # File/EXIF/GPS/PNG metadata & AI/Copy fraud authenticity engine
+│   ├── forensics.rs                # File/EXIF/GPS/PNG metadata, duplicate guard, SHA-256 integrity & AI/Copy fraud engine
+│   ├── conservation.rs             # Image quality, tear/faded/mold/aging classifier, healing advice & digital enhancement
+│   ├── monitor.rs                  # Live CPU/RAM/Disk/Ollama telemetry, abnormality & burden overload advisor
 │   ├── archives.rs                 # Managed Location & Document folders + PDF/DOCX/TXT summarizer
 │   ├── metadata.rs                 # Slugs, identity normalization, 12h time, bilingual privacy keys
-│   ├── service.rs                  # Core business logic backing all 20 MCP tools & Admin APIs
+│   ├── service.rs                  # Core business logic backing all 24 MCP tools & Admin APIs
 │   ├── mcp_sse.rs                  # MCP-over-SSE server (/sse & /messages/) + DNS guard
-│   └── admin.rs                    # Axum Admin Portal routes (People, Locations, Documents, Queue)
+│   └── admin.rs                    # Axum Admin Portal routes (People, Locations, Documents, Monitor, Lab, Queue)
 ├── templates/
 │   └── admin_portal/               # login.html, dashboard.html, test_recognition.html
 ├── config/

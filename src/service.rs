@@ -2,20 +2,26 @@
 
 use crate::ancient_scripts::decode_ancient_script;
 use crate::archives::{
-    ensure_default_locations, extract_document_structure, extract_text_from_file, load_location,
-    search_documents, search_locations, summarize_file_info, summarize_with_ollama,
+    ensure_default_locations, extract_document_structure, extract_text_from_file, list_documents,
+    list_locations, load_location, search_documents, search_locations, summarize_file_info,
+    summarize_with_ollama,
 };
 use crate::biometrics::FaceEngine;
 use crate::config::{
     AUTO_GALLERY_MAX_IMAGES, AUTO_GALLERY_MIN_SCORE, AppConfig, MAX_AUTO_IMAGE_AGE_SECS,
     MIN_CLIP_IDENTIFY_THRESHOLD, PERCEPTUAL_HASH_DISTANCE, is_image_ext,
 };
-use crate::forensics::{analyze_authenticity, extract_file_metadata};
+use crate::conservation::{analyze_image_quality_and_conservation, enhance_archival_image};
+use crate::forensics::{
+    analyze_authenticity, extract_file_metadata, register_checksum_entry, sha256_bytes,
+    verify_archive_integrity,
+};
 use crate::jawi::decode_jawi_text;
 use crate::metadata::{
     format_identity_name, format_time_12h, merge_profile_metadata, normalize_alnum_lower,
     normalize_other_details, parse_proposed_metadata, profile_slug, public_other_details,
 };
+use crate::monitor::{ArchiveCounts, SystemMonitor};
 use crate::vector_store::{FacePoint, VectorStore};
 use crate::vision_ops::{
     build_ocr_document_chunks, encode_image_b64, hash_distance, perceptual_hash,
@@ -47,6 +53,7 @@ pub struct RojakFaceService {
     pub engine: Arc<FaceEngine>,
     pub store: Arc<VectorStore>,
     pub location_store: Arc<VectorStore>,
+    pub monitor: Arc<SystemMonitor>,
     pub http: reqwest::Client,
     id_cache: Mutex<Vec<CacheEntry>>,
     pub pending_lock: Mutex<()>,
@@ -122,11 +129,13 @@ impl RojakFaceService {
             .timeout(std::time::Duration::from_secs(90))
             .build()
             .map_err(|e| format!("HTTP client build error: {e}"))?;
+        let monitor = Arc::new(SystemMonitor::new());
         Ok(Self {
             cfg,
             engine,
             store,
             location_store,
+            monitor,
             http,
             id_cache: Mutex::new(Vec::new()),
             pending_lock: Mutex::new(()),
@@ -245,6 +254,7 @@ impl RojakFaceService {
                                 | "identity-gallery"
                                 | "location-gallery"
                                 | "document-gallery"
+                                | "enhanced"
                         )
                     } else {
                         true
@@ -419,6 +429,14 @@ impl RojakFaceService {
             let web_target = web_dir.join(&target_name);
             if !profile_target.is_file() {
                 let _ = fs::copy(src, &profile_target);
+                if let Ok(bytes) = fs::read(&profile_target) {
+                    register_checksum_entry(
+                        &self.cfg.checksum_manifest_file,
+                        &profile_target,
+                        &sha256_bytes(&bytes),
+                        bytes.len() as u64,
+                    );
+                }
             }
             if !web_target.is_file() {
                 let _ = fs::copy(src, &web_target);
@@ -1124,13 +1142,127 @@ impl RojakFaceService {
         }
 
         let faces_summary = self.tool_detect_faces(&resolved.to_string_lossy());
+        let conservation = analyze_image_quality_and_conservation(&resolved)
+            .unwrap_or_else(|e| json!({ "error": e }));
         json!({
             "file": resolved.file_name().and_then(|s| s.to_str()).unwrap_or(""),
             "file_metadata": metadata,
             "authenticity_analysis": authenticity,
+            "conservation_assessment": conservation,
             "matched_archival_locations": matched_locations,
             "faces_detected": faces_summary["faces_detected"],
-            "analysis_instruction": "Combine the extracted technical/EXIF metadata, authenticity verdict (Original/Copy/AI-Generated/Edited), and any matched archival location details with your own visual inspection of the attached image: describe objects, buildings, architectural features, landmarks, geographical context, and any visible embedded text in structured tables.",
+            "analysis_instruction": "Combine the extracted technical/EXIF metadata, authenticity/duplicate verdict (Original/Copy/AI-Generated/Edited), image quality & archival damage assessment (tear/faded/mold/aging + healing suggestions), and any matched archival location details with your own visual inspection of the attached image.",
+        })
+    }
+
+    pub fn tool_assess_conservation(&self, image_path: &str) -> Value {
+        let resolved = match self.resolve_image_path(image_path) {
+            Ok(p) => p,
+            Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
+        };
+        let mut report = match analyze_image_quality_and_conservation(&resolved) {
+            Ok(r) => r,
+            Err(reason) => return json!({ "status": "error", "reason": reason }),
+        };
+        let archive_roots = [
+            self.cfg.profile_dir.as_path(),
+            self.cfg.locations_dir.as_path(),
+            self.cfg.documents_dir.as_path(),
+        ];
+        if let Ok(auth) = analyze_authenticity(&resolved, &archive_roots)
+            && let Some(obj) = report.as_object_mut()
+        {
+            obj.insert(
+                "authenticity_summary".to_string(),
+                json!({
+                    "verdict": auth["verdict"],
+                    "fraud_risk": auth["fraud_risk"],
+                    "is_exact_copy": auth["is_exact_copy"],
+                    "is_near_duplicate_copy": auth["is_near_duplicate_copy"],
+                    "sha256": auth["metadata"]["sha256"],
+                }),
+            );
+        }
+        report
+    }
+
+    pub fn tool_enhance_image(&self, image_path: &str, mode: &str) -> Value {
+        let resolved = match self.resolve_image_path(image_path) {
+            Ok(p) => p,
+            Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
+        };
+        match enhance_archival_image(&self.cfg, &resolved, mode) {
+            Ok(res) => res,
+            Err(reason) => json!({ "status": "error", "reason": reason }),
+        }
+    }
+
+    pub fn tool_verify_integrity(&self, update_manifest: bool) -> Value {
+        let archive_roots = [
+            self.cfg.profile_dir.as_path(),
+            self.cfg.locations_dir.as_path(),
+            self.cfg.documents_dir.as_path(),
+        ];
+        match verify_archive_integrity(
+            &self.cfg.checksum_manifest_file,
+            &archive_roots,
+            update_manifest,
+        ) {
+            Ok(report) => report,
+            Err(reason) => json!({ "status": "error", "reason": reason }),
+        }
+    }
+
+    pub async fn tool_system_health(&self) -> Value {
+        let identities = self.store.list_counts().len();
+        let vectors = self.store.total_vectors();
+        let locations = list_locations(&self.cfg).len();
+        let documents = list_documents(&self.cfg).len();
+        let pending = self
+            .load_pending_requests()
+            .values()
+            .filter(|r| r.get("status").and_then(Value::as_str) == Some("pending"))
+            .count();
+        self.monitor
+            .snapshot(
+                &self.cfg,
+                &self.http,
+                ArchiveCounts {
+                    identities,
+                    vectors,
+                    locations,
+                    documents,
+                    pending_requests: pending,
+                },
+            )
+            .await
+    }
+
+    pub fn clear_temp_image_caches(&self) -> Value {
+        let mut removed_files = 0usize;
+        let mut freed_bytes = 0u64;
+        for subdir in ["ocr-chunks", "enhanced"] {
+            let dir = self.cfg.librechat_dir.join("images").join(subdir);
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Ok(m) = fs::metadata(&p) {
+                            freed_bytes += m.len();
+                        }
+                        if fs::remove_file(&p).is_ok() {
+                            removed_files += 1;
+                        }
+                    }
+                }
+            }
+        }
+        self.clear_identification_cache();
+        json!({
+            "status": "cleared",
+            "removed_files": removed_files,
+            "freed_bytes": freed_bytes,
+            "freed_mb": ((freed_bytes as f64) / (1024.0 * 1024.0) * 100.0).round() / 100.0,
         })
     }
 

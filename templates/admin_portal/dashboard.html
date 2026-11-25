@@ -80,6 +80,28 @@
   body.dark .archive-sub{color:#93c5fd}
   body.dark .archive-meta{color:#94a3b8}
   body.dark .archive-badge{background:#78350f;color:#fde68a}
+  .sys-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px;margin:16px 0}
+  .sys-card{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px}
+  .sys-card strong{display:block;font-size:1.3rem;color:#0f172a;margin-bottom:3px}
+  .sys-card span{font-size:.75rem;color:#64748b}
+  .sys-pill{display:inline-block;padding:5px 12px;border-radius:99px;font-size:.74rem;font-weight:700;letter-spacing:.04em}
+  .sys-pill.ok{background:#d1fae5;color:#065f46}
+  .sys-pill.warn{background:#fef3c7;color:#92400e}
+  .sys-pill.crit{background:#fee2e2;color:#991b1b}
+  .sys-box{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-top:14px;font-size:.84rem;line-height:1.55}
+  .sys-box h3{font-size:.88rem;color:#1e3a8a;margin-bottom:8px}
+  .sys-box ul{margin-left:18px;color:#334155}
+  .sys-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  .lab-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  .lab-controls input[type="file"],.lab-controls select{background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:.84rem}
+  .dmg-pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:.72rem;font-weight:700;text-transform:uppercase}
+  .dmg-none{background:#d1fae5;color:#065f46}.dmg-light{background:#fef3c7;color:#92400e}.dmg-medium{background:#ffedd5;color:#c2410c}.dmg-heavy{background:#fee2e2;color:#991b1b}
+  .lab-preview{margin-top:12px;max-width:440px;border-radius:10px;border:1px solid #cbd5e1;display:block}
+  body.dark .sys-card,body.dark .sys-box{background:#0f172a;border-color:#334155;color:#f1f5f9}
+  body.dark .sys-card strong{color:#f8fafc}
+  body.dark .sys-card span,body.dark .sys-box ul{color:#94a3b8}
+  body.dark .sys-box h3{color:#93c5fd}
+  body.dark .lab-controls input[type="file"],body.dark .lab-controls select{background:#0f172a;color:#f1f5f9;border-color:#475569}
   .form-field select{background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;padding:9px;font:inherit}
   body.dark .form-field select{background:#0f172a;color:#f1f5f9;border-color:#475569}
   .modal{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:1000}.modal.hidden{display:none}.modal-box{width:min(880px,100%);background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:14px;padding:24px;box-shadow:0 20px 60px rgba(15,23,42,.25);max-height:92vh;overflow-y:auto;overflow-x:hidden}.modal-box h2{margin-bottom:16px;color:#1e3a8a}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.form-field{display:flex;flex-direction:column;gap:5px}.form-field.full{grid-column:1/-1}.form-field label{font-size:.75rem;color:#475569;font-weight:600}.form-field input,.form-field textarea{background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;padding:9px;font:inherit}.form-field textarea{min-height:76px;resize:vertical}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.cancel-btn{background:#e2e8f0;color:#0f172a;border:0;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer}.modal-actions .btn{flex:0 0 auto;padding:10px 16px}
@@ -157,6 +179,7 @@
     <a class="nav-link" href="#people-section" onclick="setActiveNav(this)">👥 Enrolled People</a>
     <a class="nav-link" href="#locations-section" onclick="setActiveNav(this)">📍 Locations</a>
     <a class="nav-link" href="#documents-section" onclick="setActiveNav(this)">📁 Documents</a>
+    <a class="nav-link" href="#system-section" onclick="setActiveNav(this)">📊 System Monitor &amp; Lab</a>
     <a class="nav-link" href="/admin/test-recognition">🔍 Test Recognition</a>
     <button type="button" class="nav-action add-btn" onclick="openProfileModal()">＋ Add Enrolled Person</button>
     <button type="button" class="nav-action add-btn" style="background:#0284c7" onclick="openLocationModal()">＋ Add Location</button>
@@ -202,6 +225,47 @@
     <div class="section-head"><div><h2>📁 Archival Documents &amp; Manuscripts</h2><p class="section-help">Manage digitized manuscripts (Jawi, Pallava, Kawi, Rencong, Rumi, English), PDF/DOCX/TXT records, auto-summaries, and fraud/authenticity checks.</p></div><span class="section-label">Document folders</span></div>
     <div class="people-toolbar"><input id="document-search" type="search" placeholder="Search documents by title, reference code, script, or content…" oninput="renderDocuments()"/></div>
     <div class="person-grid" id="document-grid"><p class="empty">Loading…</p></div>
+  </section>
+  <section class="people-section" id="system-section">
+    <div class="section-head">
+      <div><h2>📊 System Performance, Integrity &amp; Conservation Lab</h2><p class="section-help">Live CPU/RAM/Disk telemetry, overload &amp; abnormality detection, SHA-256 checksum integrity audit, and archival image quality / damage healing lab.</p></div>
+      <span class="sys-pill ok" id="sys-status-badge">CHECKING…</span>
+    </div>
+    <div class="sys-grid" id="sys-metrics-grid">
+      <div class="sys-card"><strong id="m-cpu">—</strong><span>CPU Utilization</span></div>
+      <div class="sys-card"><strong id="m-ram">—</strong><span>System RAM</span></div>
+      <div class="sys-card"><strong id="m-disk">—</strong><span>Archive Disk Usage</span></div>
+      <div class="sys-card"><strong id="m-proc">—</strong><span>Server RSS / Uptime</span></div>
+      <div class="sys-card"><strong id="m-ollama">—</strong><span>Ollama Vision Engine</span></div>
+      <div class="sys-card"><strong id="m-workload">—</strong><span>Requests · Avg Latency</span></div>
+    </div>
+    <div class="sys-box" id="sys-advisor-box">
+      <h3>🧭 Abnormalities &amp; Recommended Administrative Actions</h3>
+      <div id="sys-advisor-content">Loading live diagnostics…</div>
+    </div>
+    <div class="sys-actions">
+      <button type="button" class="refresh" style="margin-left:0" onclick="loadSystemHealth(true)">↻ Refresh Telemetry</button>
+      <button type="button" class="small-btn edit-btn" style="padding:10px 14px;font-size:.82rem" onclick="runIntegrityAudit()">🛡️ Run SHA-256 Integrity Audit</button>
+      <button type="button" class="small-btn" style="background:#0f766e;padding:10px 14px;font-size:.82rem" onclick="clearTempCache()">🧹 Clear Temp Image Cache</button>
+    </div>
+    <div class="sys-box hidden" id="integrity-result-box"></div>
+    <div class="sys-box" style="margin-top:18px">
+      <h3>🧪 Archival Image Quality, Damage Assessment &amp; Digital Enhancement Lab</h3>
+      <p style="font-size:.8rem;color:#64748b">Upload a scanned manuscript or photograph to evaluate resolution, lighting, readability, tear/faded/mold/aging severity (light/medium/heavy), fraud/duplicate authenticity, conservation healing advice, or digitally enhance the image.</p>
+      <div class="lab-controls">
+        <input id="lab-image" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp"/>
+        <select id="lab-mode">
+          <option value="auto">Mode: Auto Archival Restore</option>
+          <option value="manuscript_ocr">Mode: Manuscript OCR Boost</option>
+          <option value="deyellow_restore">Mode: De-Yellow &amp; Paper Restore</option>
+          <option value="contrast_lighting">Mode: Lighting &amp; Contrast Fix</option>
+          <option value="denoise_sharpen">Mode: Crisp Sharpen</option>
+        </select>
+        <button type="button" class="small-btn edit-btn" style="padding:9px 14px;font-size:.82rem" onclick="runConservationAnalyze()">🔬 Analyze Quality &amp; Damage</button>
+        <button type="button" class="small-btn" style="background:#059669;padding:9px 14px;font-size:.82rem" onclick="runConservationEnhance()">✨ Enhance Image Quality</button>
+      </div>
+      <div id="lab-result" style="margin-top:14px"></div>
+    </div>
   </section>
 </main>
 </div>
@@ -771,13 +835,19 @@ document.getElementById('location-form').addEventListener('submit',async e=>{
     closeLocationModal();showToast(editingLocSlug?'✅ Location updated':'✅ Location created');loadLocations();
   }catch(err){showToast('Error: '+err.message,false);}
 });
-async function uploadLocationImage(){
+async function uploadLocationImage(force=false){
   const input=document.getElementById('loc-add-image');
   if(!editingLocSlug||!input.files[0])return;
   const data=new FormData();data.append('image',input.files[0]);
   try{
-    const r=await fetch('/admin/api/locations/'+encodeURIComponent(editingLocSlug)+'/images',{method:'POST',body:data});
-    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Upload failed');
+    const qs=force?'?force=1':'';
+    const r=await fetch('/admin/api/locations/'+encodeURIComponent(editingLocSlug)+'/images'+qs,{method:'POST',body:data});
+    const j=await r.json();
+    if(r.status===409 && !force){
+      if(window.confirm('⚠️ '+j.reason+'\n\nUpload duplicate anyway?')) return uploadLocationImage(true);
+      input.value=''; showToast('Duplicate upload prevented',false); return;
+    }
+    if(!r.ok)throw new Error(j.reason||'Upload failed');
     input.value='';renderLocationImages(j.location);loadLocations();showToast('✅ Photo uploaded & CLIP-indexed');
   }catch(err){showToast('Error: '+err.message,false);}
 }
@@ -875,13 +945,19 @@ document.getElementById('document-form').addEventListener('submit',async e=>{
     closeDocumentModal();showToast(editingDocSlug?'✅ Document updated':'✅ Document folder created');loadDocuments();
   }catch(err){showToast('Error: '+err.message,false);}
 });
-async function uploadDocumentFile(){
+async function uploadDocumentFile(force=false){
   const input=document.getElementById('doc-add-file');
   if(!editingDocSlug||!input.files[0])return;
   const data=new FormData();data.append('file',input.files[0]);
   try{
-    const r=await fetch('/admin/api/documents/'+encodeURIComponent(editingDocSlug)+'/files',{method:'POST',body:data});
-    const j=await r.json();if(!r.ok)throw new Error(j.reason||'Upload failed');
+    const qs=force?'?force=1':'';
+    const r=await fetch('/admin/api/documents/'+encodeURIComponent(editingDocSlug)+'/files'+qs,{method:'POST',body:data});
+    const j=await r.json();
+    if(r.status===409 && !force){
+      if(window.confirm('⚠️ '+j.reason+'\n\nUpload duplicate anyway?')) return uploadDocumentFile(true);
+      input.value=''; showToast('Duplicate upload prevented',false); return;
+    }
+    if(!r.ok)throw new Error(j.reason||'Upload failed');
     input.value='';
     const d=j.document;
     document.getElementById('doc-text').value=d.extracted_text||'';
@@ -923,6 +999,104 @@ async function deleteDocument(slug,title){
     loadDocuments();showToast('🗑️ Deleted document '+title);
   }catch(err){showToast('Error: '+err.message,false);}
 }
+
+// ─── System Performance Monitor, Integrity Audit & Conservation Lab ───────────
+function fmtUptime(s){
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=s%60;
+  return h>0?`${h}h ${m}m`:m>0?`${m}m ${sec}s`:`${sec}s`;
+}
+async function loadSystemHealth(manual=false){
+  try{
+    const r=await fetch('/admin/api/system/health?ts='+Date.now(),{cache:'no-store'});
+    if(!r.ok)return;
+    const d=await r.json();
+    const badge=document.getElementById('sys-status-badge');
+    badge.textContent=d.status||'UNKNOWN';
+    badge.className='sys-pill '+(d.status==='CRITICAL_OVERLOAD'?'crit':d.status==='WARNING'?'warn':'ok');
+    const res=d.resources||{},svc=d.services||{},wl=d.workload||{};
+    document.getElementById('m-cpu').textContent=(res.cpu_usage_pct??0)+'%';
+    document.getElementById('m-ram').textContent=`${res.ram_used_gb??0} / ${res.ram_total_gb??0} GB (${res.ram_usage_pct??0}%)`;
+    document.getElementById('m-disk').textContent=`${res.disk_used_pct??0}% (${res.disk_available_gb??0} GB free)`;
+    document.getElementById('m-proc').textContent=`${res.server_process_ram_mb??0} MB · ${fmtUptime(d.uptime_seconds||0)}`;
+    document.getElementById('m-ollama').textContent=svc.ollama_reachable?`Online (${svc.ollama_ping_ms} ms)`:'OFFLINE';
+    document.getElementById('m-workload').textContent=`${wl.total_requests??0} req · ${wl.avg_latency_ms??0} ms (${wl.in_flight_requests??0} active)`;
+    const abn=(d.abnormalities||[]);
+    const acts=(d.recommended_actions||[]);
+    let html='';
+    if(abn.length){
+      html+='<div style="margin-bottom:8px"><b>⚠️ Detected Abnormalities:</b><ul>'+abn.map(a=>`<li><b>[${escapeHtml(a.severity)}] ${escapeHtml(a.component)}:</b> ${escapeHtml(a.detail)}</li>`).join('')+'</ul></div>';
+    }else{
+      html+='<div style="margin-bottom:8px;color:#059669"><b>✅ No system abnormalities or burden overload detected.</b></div>';
+    }
+    html+='<div><b>💡 Recommended Actions:</b><ul>'+acts.map(x=>`<li>${escapeHtml(x)}</li>`).join('')+'</ul></div>';
+    document.getElementById('sys-advisor-content').innerHTML=html;
+    if(manual) showToast('📊 Telemetry refreshed');
+  }catch(e){document.getElementById('sys-advisor-content').textContent='Failed to load system telemetry.';}
+}
+async function runIntegrityAudit(){
+  const box=document.getElementById('integrity-result-box');
+  box.classList.remove('hidden');
+  box.innerHTML='<h3>🛡️ Running SHA-256 Checksum Integrity Audit…</h3>';
+  try{
+    const r=await fetch('/admin/api/system/integrity',{method:'POST'});
+    const j=await r.json();
+    const ok=j.integrity_status==='VERIFIED_INTACT';
+    box.innerHTML=`<h3>🛡️ SHA-256 Checksum Audit — <span class="sys-pill ${ok?'ok':'crit'}">${escapeHtml(j.integrity_status||'ERROR')}</span></h3>
+      <p>Scanned: <b>${j.total_files_scanned??0}</b> file(s) · Verified intact: <b>${j.verified_intact_count??0}</b> · Newly indexed: <b>${j.newly_indexed_count??0}</b> · Corrupted/Tampered: <b>${j.corrupted_count??0}</b> · Missing: <b>${j.missing_count??0}</b> · Exact Duplicate Groups: <b>${j.duplicate_groups_count??0}</b></p>`;
+    showToast(ok?'✅ All archive checksums verified':'⚠️ Integrity issues detected',ok);
+  }catch(err){box.innerHTML='Error running integrity audit: '+escapeHtml(err.message);}
+}
+async function clearTempCache(){
+  try{
+    const r=await fetch('/admin/api/system/clear-cache',{method:'POST'});
+    const j=await r.json();
+    showToast(`🧹 Cleared ${j.removed_files||0} temp file(s) (${j.freed_mb||0} MB freed)`);
+    loadSystemHealth();
+  }catch(err){showToast('Error clearing cache',false);}
+}
+function dmgPill(lvl){
+  const c=['none','light','medium','heavy'].includes(lvl)?lvl:'none';
+  return `<span class="dmg-pill dmg-${c}">${escapeHtml(lvl||'none')}</span>`;
+}
+async function runConservationAnalyze(){
+  const input=document.getElementById('lab-image');
+  const out=document.getElementById('lab-result');
+  if(!input.files[0]){showToast('Choose an image first',false);return;}
+  out.innerHTML='⏳ Analyzing resolution, lighting, readability, archival damage &amp; authenticity…';
+  const fd=new FormData();fd.append('image',input.files[0]);
+  try{
+    const r=await fetch('/admin/api/conservation/analyze',{method:'POST',body:fd});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.reason||'Analysis failed');
+    const q=j.image_quality||{},d=j.damage_assessment||{},a=j.authenticity_summary||{};
+    const sugg=(j.conservation_healing_suggestions||[]).map(s=>`<li><b>${escapeHtml(s.treatment)}</b> (${escapeHtml(s.issue)} — ${dmgPill(s.severity)}): ${(s.actions||[]).map(escapeHtml).join(' ')}</li>`).join('');
+    out.innerHTML=`<div style="display:grid;gap:10px">
+      <div><b>📐 Image Quality:</b> Overall <b>${q.overall_score??0}/100 (${escapeHtml(q.overall_grade)})</b> · Resolution: ${q.resolution?.width}×${q.resolution?.height} (${q.resolution?.score}/100) · Lighting: ${q.lighting?.score}/100 (${escapeHtml(q.lighting?.condition)}) · Readability: ${q.readability?.score}/100 (${escapeHtml(q.readability?.grade)})</div>
+      <div><b>🩹 Archival Damage (Overall ${dmgPill(d.overall_severity)}):</b> Tear ${dmgPill(d.tear?.level)} · Faded ${dmgPill(d.faded?.level)} · Mold ${dmgPill(d.mold?.level)} · Aging ${dmgPill(d.aging?.level)}</div>
+      ${a.verdict?`<div><b>🛡️ Authenticity / Duplicate:</b> <b>${escapeHtml(a.verdict)}</b> (Fraud Risk: ${escapeHtml(a.fraud_risk)}) · SHA-256: <code>${escapeHtml((a.sha256||'').slice(0,16))}…</code></div>`:''}
+      <div><b>💊 Conservation &amp; Healing Recommendations:</b><ul>${sugg}</ul></div>
+    </div>`;
+  }catch(err){out.innerHTML='Error: '+escapeHtml(err.message);}
+}
+async function runConservationEnhance(){
+  const input=document.getElementById('lab-image');
+  const mode=document.getElementById('lab-mode').value;
+  const out=document.getElementById('lab-result');
+  if(!input.files[0]){showToast('Choose an image first',false);return;}
+  out.innerHTML='✨ Enhancing image quality (white balance, lighting, contrast, sharpening)…';
+  const fd=new FormData();fd.append('image',input.files[0]);fd.append('mode',mode);
+  try{
+    const r=await fetch('/admin/api/conservation/enhance',{method:'POST',body:fd});
+    const j=await r.json();
+    if(!r.ok)throw new Error(j.reason||'Enhancement failed');
+    const bq=j.before_quality||{},aq=j.after_quality||{};
+    out.innerHTML=`<div><b>✨ Enhancement Complete (${escapeHtml(j.mode)}):</b> Overall Quality <b>${bq.overall_score} → ${aq.overall_score}/100</b> · Lighting ${bq.lighting?.score} → ${aq.lighting?.score} · Readability ${bq.readability?.score} → ${aq.readability?.score}</div>
+      <div style="font-size:.78rem;color:#64748b;margin-top:4px">Steps: ${(j.steps_applied||[]).join(', ')}</div>
+      ${j.admin_preview_url?`<img class="lab-preview" src="${escapeHtml(j.admin_preview_url)}" alt="Enhanced archival preview" onclick="openImageViewer('${escapeHtml(j.admin_preview_url)}')"/>`:''}`;
+    showToast('✨ Image enhanced successfully');
+  }catch(err){out.innerHTML='Error: '+escapeHtml(err.message);}
+}
+loadSystemHealth();
 </script>
 </body>
 </html>

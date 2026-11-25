@@ -5,23 +5,47 @@ mod ancient_scripts;
 mod archives;
 mod biometrics;
 mod config;
+mod conservation;
 mod forensics;
 mod jawi;
 mod mcp_sse;
 mod metadata;
+mod monitor;
 mod service;
 mod vector_store;
 mod vision_ops;
 
 use crate::config::AppConfig;
 use crate::service::RojakFaceService;
-use axum::extract::State;
+use axum::extract::{Request, State};
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
+
+async fn monitor_middleware(
+    State(service): State<Arc<RojakFaceService>>,
+    req: Request,
+    next: Next,
+) -> Response {
+    // Skip long-lived SSE connections so they don't skew HTTP request latency/concurrency counters.
+    if req.uri().path() == "/sse" {
+        return next.run(req).await;
+    }
+    service.monitor.begin_request();
+    let started = Instant::now();
+    let resp = next.run(req).await;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    service
+        .monitor
+        .finish_request(elapsed_ms, resp.status().is_server_error());
+    resp
+}
 
 async fn health_handler(State(service): State<Arc<RojakFaceService>>) -> Json<Value> {
     let identities = service.store.list_counts().len();
@@ -97,7 +121,11 @@ async fn main() {
 
     let app: Router = mcp_sse::mcp_router(service.clone())
         .merge(admin_routes)
-        .merge(health_route);
+        .merge(health_route)
+        .layer(middleware::from_fn_with_state(
+            service.clone(),
+            monitor_middleware,
+        ));
 
     let addr_str = format!("{}:{}", cfg.host, cfg.port);
     let addr: SocketAddr = addr_str.parse().unwrap_or_else(|_| {
