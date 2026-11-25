@@ -376,18 +376,18 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_ocr_document",
-            "description": "Slice a document or handwriting image along natural horizontal line valleys into contrast-enhanced chunks for accurate multilingual OCR.",
+            "description": "Read or transcribe text, handwriting, letters, certificates, or old manuscripts (Jawi, Pallava, Kawi, Rencong, Malay, English, Tamil, Mandarin, Sanskrit) from an uploaded image. Use for everyday requests like 'read this', 'what does this say', 'baca tulisan ini'. Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "" },
+                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." },
                     "max_chunks": { "type": "integer", "default": 3 }
                 }
             }
         }),
         json!({
             "name": "rojakface_decode_jawi",
-            "description": "Decode Jawi script or rough VLM transliterations into corrected 3-dot Jawi and natural Standard Bahasa Melayu (Rumi).",
+            "description": "Convert Jawi writing (Malay-Arabic script) into natural Standard Bahasa Melayu (Rumi) and explain its meaning.",
             "inputSchema": {
                 "type": "object",
                 "required": ["text"],
@@ -398,11 +398,11 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_identify_faces",
-            "description": "Identify faces against enrolled identities with strict anti-false-positive threshold (All Roles).",
+            "description": "Recognize or check who is in an uploaded photo against saved people in the database ('who is this?', 'do we know him/her?', 'siapa dalam gambar ini?'). Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "" },
+                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." },
                     "threshold": { "type": "number", "default": 0.88 },
                     "save_new_image": { "type": "boolean", "default": true }
                 }
@@ -548,31 +548,31 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_analyze_image",
-            "description": "Computer Vision & Archival Image Analyzer: extracts file/EXIF/GPS metadata, checks authenticity (original vs copy vs AI-generated vs edited), and matches buildings/landmarks against managed archival Locations via CLIP 768-D.",
+            "description": "All-in-one smart photo & archival check: use for general requests like 'check this', 'what is this?', 'what building/place is this?', 'where was this taken?', 'tell me about this photo', 'semak gambar ini'. Checks file details, date/time/location, authenticity/duplicates, quality/damage, and matches saved buildings or archive halls. Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "" }
+                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." }
                 }
             }
         }),
         json!({
             "name": "rojakface_detect_authenticity",
-            "description": "Forensic fraud & authenticity detector: determines whether a file or image is likely original, an exact SHA-256 copy, a perceptual near-duplicate copy, edited, or AI-generated.",
+            "description": "Check if an uploaded photo or file is real/original, fake, AI-generated, edited, or already exists as a copy/duplicate in the system ('is this real or fake?', 'is this AI?', 'do we already have this?', 'gambar ini tulen atau palsu?', 'sudah ada dalam sistem?'). Always leave file_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "default": "" }
+                    "file_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded files/images. Never invent 'image.jpg'." }
                 }
             }
         }),
         json!({
             "name": "rojakface_summarize_document",
-            "description": "Automatic archival description & structured summarization for lengthy documents (TXT, MD, CSV, JSON, HTML, DOCX, PDF, or image scans), extracting concise summary, key topics, names, dates, events, script, and authenticity status.",
+            "description": "Summarize or explain a long document or pasted text in simple points ('summarize this', 'what is this document about?', 'give me the main points', 'ringkaskan dokumen ini'). Extracts key topics, names, dates, events, and authenticity status.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "default": "" },
+                    "file_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded files or when using raw text." },
                     "text": { "type": "string", "default": "" },
                     "language": { "type": "string", "default": "auto" }
                 }
@@ -580,7 +580,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_search_locations",
-            "description": "Search or list managed archival Location folders (e.g. specific halls, wings, galleries, or buildings in the National Archives of Malaysia) with historical significance, coordinates, and reference photos.",
+            "description": "Find or list saved places, buildings, landmarks, rooms, galleries, or wings (e.g. Arkib Negara Malaysia / National Archives of Malaysia). Use for 'show locations', 'list places', 'senarai lokasi', 'cari dewan'.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -590,7 +590,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_search_documents",
-            "description": "Search or list managed archival Document folders by title, reference code, script (Jawi/Pallava/Kawi/Rencong/Rumi/English), topic, or extracted digital text.",
+            "description": "Find or list saved archival documents, manuscripts, letters, or records ('show documents', 'find files about...', 'senarai dokumen', 'cari manuskrip').",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -601,28 +601,28 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_assess_conservation",
-            "description": "Analyze image quality (resolution, lighting, readability), detect archival damage (tear, faded, mold, aging) classified as none/light/medium/heavy, check duplicate/authenticity status, and suggest physical conservation healing treatments (fungal removal, controlled drying, protective coating, Kozo mending, deacidification).",
+            "description": "Check photo/scan quality (clarity, brightness, readability), spot damage (tears, fading, mould/fungus, yellowing/old paper) rated light/medium/heavy, check if real/AI/duplicate, and suggest how to repair, clean, dry, coat, or preserve the item ('is this damaged/spoilt?', 'how to fix/preserve this old document?', 'gambar ini rosak tak?', 'semak kualiti & kerosakan'). Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "" }
+                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." }
                 }
             }
         }),
         json!({
             "name": "rojakface_enhance_image",
-            "description": "Digitally enhance a poor, dark, yellowed, or faded archival image (de-yellowing white balance, adaptive lighting gamma, percentile autocontrast, and unsharp mask) and return the enhanced image URL with Before vs After quality metrics.",
+            "description": "Improve, clean up, brighten, sharpen, or restore a blurry, dark, faded, or yellowed photo/scan ('make this clearer', 'fix this dark/old photo', 'brighten/sharpen this', 'jelaskan/baiki gambar ini'). Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "" },
+                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." },
                     "mode": { "type": "string", "default": "auto", "description": "auto, manuscript_ocr, deyellow_restore, contrast_lighting, or denoise_sharpen" }
                 }
             }
         }),
         json!({
             "name": "rojakface_verify_integrity",
-            "description": "Audit SHA-256 cryptographic file integrity across all archived profiles, locations, and documents against checksum_manifest.json to detect corruption, tampering, missing files, and exact archive duplicates.",
+            "description": "Check if all saved archive files are safe, intact, not corrupted or changed, and find any duplicate files ('are our files safe?', 'check for broken/corrupted/duplicate files', 'semak fail rosak atau pendua', 'audit integriti fail').",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -632,7 +632,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_system_health",
-            "description": "Administration System Performance & Abnormality Monitor: inspects live CPU, RAM, Disk, Ollama AI health/latency, request load/errors, detects system abnormalities or burden overload, and recommends administrative actions.",
+            "description": "Check how the system/server is running: speed, memory, CPU, storage space, problems/overload, and what actions to take ('how is the system doing?', 'is the server okay or slow?', 'any system issues?', 'sistem ok ke?', 'kenapa lambat?').",
             "inputSchema": {
                 "type": "object",
                 "properties": {}

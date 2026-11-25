@@ -370,7 +370,7 @@ pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Valu
                 let other_sha = sha256_bytes(&other_bytes);
                 if other_sha == target_sha {
                     exact_copies.push(json!({
-                        "matched_file": p.display().to_string(),
+                        "matched_file": normalized_manifest_key(p),
                         "match_type": "exact_sha256_copy",
                         "sha256": other_sha,
                     }));
@@ -384,7 +384,7 @@ pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Valu
                 let dist = hash_distance(h1, &h2);
                 if dist <= PERCEPTUAL_HASH_DISTANCE {
                     near_copies.push(json!({
-                        "matched_file": p.display().to_string(),
+                        "matched_file": normalized_manifest_key(p),
                         "match_type": "near_duplicate_perceptual_copy",
                         "hamming_distance": dist,
                     }));
@@ -470,24 +470,60 @@ pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Valu
         );
     }
 
-    let (verdict, risk_level, confidence) = if !ai_hits.is_empty() {
-        ("LIKELY_AI_GENERATED", "HIGH", 0.94)
+    let (verdict, plain_verdict, risk_level, confidence) = if !ai_hits.is_empty() {
+        (
+            "LIKELY_AI_GENERATED",
+            "Likely AI-generated image (AI generator metadata detected)",
+            "HIGH",
+            0.94,
+        )
     } else if !exact_copies.is_empty() {
-        ("EXACT_COPY_OF_ARCHIVED_FILE", "MEDIUM", 1.0)
+        (
+            "EXACT_COPY_OF_ARCHIVED_FILE",
+            "Exact duplicate — this exact file already exists in the archive",
+            "MEDIUM",
+            1.0,
+        )
     } else if !near_copies.is_empty() {
-        ("NEAR_DUPLICATE_OR_REENCODED_COPY", "MEDIUM", 0.88)
+        (
+            "NEAR_DUPLICATE_OR_REENCODED_COPY",
+            "Possible copy — a visually similar image already exists in the archive",
+            "MEDIUM",
+            0.88,
+        )
     } else if !editor_hits.is_empty() {
-        ("EDITED_OR_PROCESSED", "MEDIUM", 0.82)
+        (
+            "EDITED_OR_PROCESSED",
+            "Edited or modified using photo-editing software",
+            "MEDIUM",
+            0.82,
+        )
     } else if has_ai_dims && !has_camera_exif {
-        ("SUSPECTED_AI_GENERATED_OR_SYNTHETIC", "MEDIUM", 0.68)
+        (
+            "SUSPECTED_AI_GENERATED_OR_SYNTHETIC",
+            "Possibly AI-generated or synthetic (standard AI canvas size with no camera details)",
+            "MEDIUM",
+            0.68,
+        )
     } else if has_camera_exif {
-        ("LIKELY_ORIGINAL_CAMERA_CAPTURE", "LOW", 0.85)
+        (
+            "LIKELY_ORIGINAL_CAMERA_CAPTURE",
+            "Likely an original camera photograph (original camera details intact)",
+            "LOW",
+            0.85,
+        )
     } else {
-        ("INCONCLUSIVE_UNVERIFIED_SOURCE", "LOW", 0.50)
+        (
+            "INCONCLUSIVE_UNVERIFIED_SOURCE",
+            "No camera details found (common for screenshots, messaging-app forwards, scans, or stripped AI images — visual inspection required)",
+            "LOW",
+            0.50,
+        )
     };
 
     Ok(json!({
         "verdict": verdict,
+        "plain_language_verdict": plain_verdict,
         "fraud_risk": risk_level,
         "confidence": confidence,
         "is_exact_copy": !exact_copies.is_empty(),
@@ -499,12 +535,17 @@ pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Valu
         "matched_exact_copies": exact_copies,
         "matched_near_duplicates": near_copies,
         "forensic_signals": signals,
+        "visual_inspection_instruction": "IMPORTANT: Screenshots and re-saved AI images often have metadata stripped. Combine these file checks with your own visual inspection of the image (look for unnatural composites, impossible anatomy/bodies, warped text, or synthetic textures) and explain the result in friendly, non-technical language.",
         "metadata": meta,
     }))
 }
 
 fn normalized_manifest_key(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    let s = path.to_string_lossy().replace('\\', "/");
+    if let Some(idx) = s.find("/data/processed/") {
+        return s[idx + "/data/processed/".len()..].to_string();
+    }
+    s
 }
 
 /// Checks if raw uploaded bytes already exist in the archive (exact SHA-256 or perceptual aHash for images).
@@ -554,7 +595,7 @@ pub fn find_duplicate_in_archives(
                     return Some(json!({
                         "duplicate_type": "exact_sha256",
                         "sha256": target_sha,
-                        "existing_file": p.display().to_string(),
+                        "existing_file": normalized_manifest_key(p),
                         "existing_filename": fname,
                     }));
                 }
@@ -569,7 +610,7 @@ pub fn find_duplicate_in_archives(
                         "duplicate_type": "near_duplicate_perceptual",
                         "sha256": target_sha,
                         "hamming_distance": dist,
-                        "existing_file": p.display().to_string(),
+                        "existing_file": normalized_manifest_key(p),
                         "existing_filename": fname,
                     }));
                 }
@@ -727,7 +768,7 @@ pub fn verify_archive_integrity(
 
     Ok(json!({
         "integrity_status": integrity_status,
-        "manifest_path": manifest_path.display().to_string(),
+        "manifest_name": "checksum_manifest.json",
         "manifest_updated": update_manifest || !manifest_path.is_file(),
         "total_files_scanned": current_files.len(),
         "verified_intact_count": verified_count,
@@ -739,6 +780,7 @@ pub fn verify_archive_integrity(
         "missing_files": missing,
         "duplicate_groups": duplicate_groups,
         "checked_at_utc": Utc::now().to_rfc3339(),
+        "presentation_note": "Summarize results in plain, non-technical language for the user (e.g. 'All files are safe and intact', plus any duplicate items found). Do not expose internal server directory paths.",
     }))
 }
 

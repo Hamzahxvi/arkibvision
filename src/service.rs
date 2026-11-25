@@ -277,12 +277,35 @@ impl RojakFaceService {
     pub fn resolve_image_path(&self, image_path: &str) -> Result<PathBuf, String> {
         let cleaned = image_path.trim().trim_matches('"').trim_matches('\'');
         let lower = cleaned.to_ascii_lowercase();
-        if !cleaned.is_empty()
-            && !matches!(
+        let is_placeholder = cleaned.is_empty()
+            || matches!(
                 lower.as_str(),
-                "latest" | "uploaded" | "image" | "chat_image"
-            )
-        {
+                "latest"
+                    | "uploaded"
+                    | "image"
+                    | "chat_image"
+                    | "attached"
+                    | "attachment"
+                    | "current"
+                    | "file"
+                    | "photo"
+                    | "picture"
+                    | "image.jpg"
+                    | "image.jpeg"
+                    | "image.png"
+                    | "photo.jpg"
+                    | "photo.png"
+                    | "upload.jpg"
+                    | "upload.png"
+                    | "uploaded_image.jpg"
+                    | "uploaded_image.png"
+                    | "attached_image.jpg"
+                    | "attached_image.png"
+                    | "input.jpg"
+                    | "input.png"
+            );
+
+        if !is_placeholder {
             let cand = PathBuf::from(cleaned);
             if cand.is_file() {
                 return Ok(cand);
@@ -304,22 +327,35 @@ impl RojakFaceService {
                     }
                 }
             }
-            return Err(format!("Specified image '{image_path}' not found on disk."));
+            // If the model invented a filename (e.g. "document.jpg" or "/tmp/photo.png")
+            // while the user actually uploaded an image in chat, gracefully fall back to the
+            // latest chat attachment instead of failing with a confusing "file not found" error!
         }
 
         let (latest, from_chat) = self.latest_uploaded_image();
         if let Some(path) = latest {
             let age = now_unix_secs().saturating_sub(file_latest_unix_secs(&path));
-            if !from_chat && age > MAX_AUTO_IMAGE_AGE_SECS {
-                return Err(
-                    "The current chat attachment could not be resolved safely. The newest stored image is older than 60 seconds and may belong to another message. Re-upload the image in the current message.".to_string(),
-                );
+            if from_chat || age <= MAX_AUTO_IMAGE_AGE_SECS {
+                return Ok(path);
             }
-            return Ok(path);
+            if !is_placeholder {
+                return Err(format!(
+                    "Could not find '{image_path}' and no newly uploaded image was detected. Please attach the image directly in your message."
+                ));
+            }
+            return Err(
+                "No newly uploaded image was detected in this message. Please attach or re-upload your image and try again.".to_string(),
+            );
+        }
+
+        if !is_placeholder {
+            return Err(format!(
+                "Could not find '{image_path}'. Please attach the image or file directly in the chat."
+            ));
         }
 
         Err(
-            "No image attachment found in LibreChat. Please attach an image in your message."
+            "No image attachment was found in this message. Please attach an image and try again."
                 .to_string(),
         )
     }
