@@ -151,8 +151,8 @@ async fn main() {
         vec_count
     );
     println!(
-        "Admin Portal: http://127.0.0.1:{}/admin | Health: http://127.0.0.1:{}/health",
-        cfg.port, cfg.port
+        "Admin Portal: Integrated inside LibreChat ({}/#rojakface-admin) | Health: http://127.0.0.1:{}/health",
+        cfg.librechat_url, cfg.port
     );
     println!("Roles Active: Guest (default, staging review) | Admin (valid admin_key required)");
 

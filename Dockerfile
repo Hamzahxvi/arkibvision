@@ -15,7 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=builder /app/target/release/rojakface-server /usr/local/bin/rojakface-server
 COPY config/ ./config/
-COPY templates/ ./templates/
 
 EXPOSE 8005
 

@@ -48,7 +48,6 @@ pub struct AppConfig {
     pub ort_dylib_path: PathBuf,
     pub yunet_model_path: PathBuf,
     pub clip_model_path: PathBuf,
-    pub templates_dir: PathBuf,
 }
 
 pub fn is_image_ext(path: &Path) -> bool {
@@ -191,17 +190,6 @@ fn find_clip_model(project_root: &Path) -> PathBuf {
     direct
 }
 
-fn find_templates_dir(project_root: &Path) -> PathBuf {
-    let candidates = [
-        project_root.join("templates").join("admin_portal"),
-        project_root.join("src").join("models").join("admin_portal"),
-    ];
-    candidates
-        .into_iter()
-        .find(|p| p.join("dashboard.html").is_file())
-        .unwrap_or_else(|| project_root.join("templates").join("admin_portal"))
-}
-
 fn load_or_create_admin_key(project_root: &Path) -> String {
     if let Ok(k) = env::var("ROJAKFACE_ADMIN_KEY") {
         let trimmed = k.trim();
@@ -278,7 +266,6 @@ impl AppConfig {
         let ort_dylib_path = find_ort_dylib(&project_root);
         let yunet_model_path = find_yunet_model(&project_root);
         let clip_model_path = find_clip_model(&project_root);
-        let templates_dir = find_templates_dir(&project_root);
 
         let _ = fs::create_dir_all(&pending_images_dir);
         let _ = fs::create_dir_all(&profile_dir);
@@ -317,7 +304,6 @@ impl AppConfig {
             ort_dylib_path,
             yunet_model_path,
             clip_model_path,
-            templates_dir,
         }
     }
 }

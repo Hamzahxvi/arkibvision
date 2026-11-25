@@ -8,10 +8,10 @@ use crate::config::{
 use crate::metadata::value_to_trimmed_string;
 use crate::service::RojakFaceService;
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Form, Multipart, Path as AxumPath, Query, Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, Request, State};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use base64::Engine as _;
@@ -29,9 +29,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct AdminState {
     pub service: Arc<RojakFaceService>,
     pub sessions: Arc<Mutex<HashMap<String, u64>>>,
-    pub login_html: Arc<String>,
-    pub dashboard_html: Arc<String>,
-    pub test_recognition_html: Arc<String>,
 }
 
 fn now_secs() -> u64 {
@@ -79,64 +76,97 @@ fn valid_session_token(
     None
 }
 
-fn render_login(login_html: &str, error: &str) -> Html<String> {
-    let err_html = if error.is_empty() {
-        String::new()
-    } else {
-        format!(r#"<div class="error">{error}</div>"#)
-    };
-    Html(login_html.replace("{{ERROR}}", &err_html))
+fn is_allowed_origin(origin: &str, librechat_url: &str) -> bool {
+    let o = origin.trim().trim_end_matches('/');
+    o.eq_ignore_ascii_case(librechat_url.trim_end_matches('/'))
+        || o.eq_ignore_ascii_case("http://localhost:3080")
+        || o.eq_ignore_ascii_case("http://127.0.0.1:3080")
+}
+
+async fn cors_middleware(State(state): State<AdminState>, req: Request, next: Next) -> Response {
+    let origin = req
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    let allowed = origin
+        .as_deref()
+        .filter(|o| is_allowed_origin(o, &state.service.cfg.librechat_url));
+
+    if req.method() == Method::OPTIONS {
+        let mut resp = StatusCode::NO_CONTENT.into_response();
+        if let Some(orig) = allowed
+            && let Ok(hv) = HeaderValue::from_str(orig)
+        {
+            let h = resp.headers_mut();
+            h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, hv);
+            h.insert(
+                header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+                HeaderValue::from_static("true"),
+            );
+            h.insert(
+                header::ACCESS_CONTROL_ALLOW_METHODS,
+                HeaderValue::from_static("GET, POST, PATCH, DELETE, OPTIONS"),
+            );
+            h.insert(
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                HeaderValue::from_static("Content-Type"),
+            );
+            h.insert(header::VARY, HeaderValue::from_static("Origin"));
+        }
+        return resp;
+    }
+
+    let mut resp = next.run(req).await;
+    if let Some(orig) = allowed
+        && let Ok(hv) = HeaderValue::from_str(orig)
+    {
+        let h = resp.headers_mut();
+        h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, hv);
+        h.insert(
+            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+            HeaderValue::from_static("true"),
+        );
+        h.insert(header::VARY, HeaderValue::from_static("Origin"));
+    }
+    resp
 }
 
 async fn auth_middleware(State(state): State<AdminState>, req: Request, next: Next) -> Response {
     let path = req.uri().path();
-    if path == "/admin/login" || path == "/admin/logout" {
+    if matches!(
+        path,
+        "/admin" | "/admin/" | "/admin/api/session" | "/admin/api/login" | "/admin/api/logout"
+    ) {
         return next.run(req).await;
     }
     if valid_session_token(req.headers(), &state.sessions).is_none() {
-        if path.starts_with("/admin/api/")
-            || path.starts_with("/admin/profile-images/")
-            || path.starts_with("/admin/location-images/")
-            || path.starts_with("/admin/document-files/")
-            || path.starts_with("/admin/enhanced-images/")
-        {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({
-                    "status": "unauthorized",
-                    "reason": "Please sign in to the Admin Portal.",
-                })),
-            )
-                .into_response();
-        }
-        return render_login(&state.login_html, "").into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "status": "unauthorized",
+                "reason": "Please sign in to the Admin Portal.",
+            })),
+        )
+            .into_response();
     }
     next.run(req).await
 }
 
 pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
-    let tdir = &service.cfg.templates_dir;
-    let login_html = fs::read_to_string(tdir.join("login.html"))
-        .map_err(|e| format!("Missing login.html in {}: {e}", tdir.display()))?;
-    let dashboard_html = fs::read_to_string(tdir.join("dashboard.html"))
-        .map_err(|e| format!("Missing dashboard.html in {}: {e}", tdir.display()))?;
-    let test_recognition_html = fs::read_to_string(tdir.join("test_recognition.html"))
-        .map_err(|e| format!("Missing test_recognition.html in {}: {e}", tdir.display()))?;
-
     let state = AdminState {
         service,
         sessions: Arc::new(Mutex::new(HashMap::new())),
-        login_html: Arc::new(login_html),
-        dashboard_html: Arc::new(dashboard_html),
-        test_recognition_html: Arc::new(test_recognition_html),
     };
 
     let router = Router::new()
-        .route("/admin/login", get(admin_login_get).post(admin_login_post))
-        .route("/admin/logout", get(admin_logout))
-        .route("/admin", get(admin_dashboard))
-        .route("/admin/", get(admin_dashboard))
-        .route("/admin/test-recognition", get(admin_test_recognition_page))
+        // Redirect legacy /admin URL straight into LibreChat's integrated Admin Portal
+        .route("/admin", get(admin_redirect_to_librechat))
+        .route("/admin/", get(admin_redirect_to_librechat))
+        // JSON Session Auth for LibreChat-native Admin Portal
+        .route("/admin/api/session", get(admin_api_session))
+        .route("/admin/api/login", post(admin_api_login))
+        .route("/admin/api/logout", post(admin_api_logout))
         .route(
             "/admin/images/{img_type}/{request_id}",
             get(admin_serve_image),
@@ -235,33 +265,53 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
             state.clone(),
             auth_middleware,
         ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            cors_middleware,
+        ))
         .with_state(state);
 
     Ok(router)
 }
 
+async fn admin_redirect_to_librechat(State(state): State<AdminState>) -> Redirect {
+    Redirect::temporary(&format!(
+        "{}/#rojakface-admin",
+        state.service.cfg.librechat_url
+    ))
+}
+
 #[derive(Deserialize)]
-struct LoginForm {
+struct LoginPayload {
     username: Option<String>,
     password: Option<String>,
-    embed: Option<String>,
-    theme: Option<String>,
 }
 
-async fn admin_login_get(State(state): State<AdminState>) -> Html<String> {
-    render_login(&state.login_html, "")
+async fn admin_api_session(State(state): State<AdminState>, headers: HeaderMap) -> Json<Value> {
+    let authed = valid_session_token(&headers, &state.sessions).is_some();
+    Json(json!({
+        "authenticated": authed,
+        "user": if authed { Value::String(state.service.cfg.admin_user.clone()) } else { Value::Null },
+    }))
 }
 
-async fn admin_login_post(
+async fn admin_api_login(
     State(state): State<AdminState>,
-    Form(form): Form<LoginForm>,
+    Json(payload): Json<LoginPayload>,
 ) -> Response {
-    let user = form.username.unwrap_or_default();
-    let pass = form.password.unwrap_or_default();
+    let user = payload.username.unwrap_or_default();
+    let pass = payload.password.unwrap_or_default();
     let ok = constant_time_eq(user.trim(), &state.service.cfg.admin_user)
         && constant_time_eq(&pass, &state.service.cfg.admin_pass);
     if !ok {
-        return render_login(&state.login_html, "Invalid username or password.").into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "status": "error",
+                "reason": "Invalid username or password.",
+            })),
+        )
+            .into_response();
     }
     let now = now_secs();
     let mut tok_bytes = [0u8; 32];
@@ -275,48 +325,36 @@ async fn admin_login_post(
     let cookie = format!(
         "{ADMIN_SESSION_COOKIE}={token}; Max-Age={ADMIN_SESSION_TTL_SECS}; HttpOnly; SameSite=Lax; Path=/admin"
     );
-    let mut target = "/admin".to_string();
-    let is_embed = form.embed.as_deref() == Some("1");
-    let theme = form
-        .theme
-        .as_deref()
-        .filter(|t| matches!(*t, "dark" | "light"));
-    if is_embed {
-        target.push_str("?embed=1");
-        if let Some(t) = theme {
-            target.push_str("&theme=");
-            target.push_str(t);
-        }
-    } else if let Some(t) = theme {
-        target.push_str("?theme=");
-        target.push_str(t);
-    }
-    let mut resp = Redirect::to(&target).into_response();
+    let mut resp = (
+        StatusCode::OK,
+        Json(json!({
+            "status": "ok",
+            "authenticated": true,
+            "user": state.service.cfg.admin_user,
+        })),
+    )
+        .into_response();
     if let Ok(val) = HeaderValue::from_str(&cookie) {
         resp.headers_mut().append(header::SET_COOKIE, val);
     }
     resp
 }
 
-async fn admin_logout(State(state): State<AdminState>, headers: HeaderMap) -> Response {
+async fn admin_api_logout(State(state): State<AdminState>, headers: HeaderMap) -> Response {
     if let Some(tok) = valid_session_token(&headers, &state.sessions) {
         state.sessions.lock().expect("sessions lock").remove(&tok);
     }
-    let mut resp = render_login(&state.login_html, "You have been signed out.").into_response();
+    let mut resp = (
+        StatusCode::OK,
+        Json(json!({ "status": "logged_out", "authenticated": false })),
+    )
+        .into_response();
     if let Ok(val) = HeaderValue::from_str(&format!(
         "{ADMIN_SESSION_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/admin"
     )) {
         resp.headers_mut().append(header::SET_COOKIE, val);
     }
     resp
-}
-
-async fn admin_dashboard(State(state): State<AdminState>) -> Html<String> {
-    Html((*state.dashboard_html).clone())
-}
-
-async fn admin_test_recognition_page(State(state): State<AdminState>) -> Html<String> {
-    Html((*state.test_recognition_html).clone())
 }
 
 async fn admin_api_requests(State(state): State<AdminState>) -> Json<Value> {

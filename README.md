@@ -1,6 +1,6 @@
 # RojakFace Enterprise Vision, Biometric Identity & Multilingual OCR Platform (Pure Rust)
 
-An **air-gapped, 100% on-premise multimodal AI platform** written in **100% safe Rust (`#![forbid(unsafe_code)]`, 0% Python)** that integrates **Biometric Face Recognition**, **Privacy-Aware Identity & Visual Photo Retrieval**, **ID Card / Document Data Ingestion**, and **Multilingual Document & Handwriting OCR (Jawi, Sanskrit, Tamil, Mandarin, Malay, English)** inside **LibreChat** (`http://localhost:3080`), powered by a single compiled **Rust Axum + Tokio MCP SSE Server** (`http://0.0.0.0:8005/sse`) and **Admin Portal** (`http://127.0.0.1:8005/admin`).
+An **air-gapped, 100% on-premise multimodal AI platform** written in **100% safe Rust (`#![forbid(unsafe_code)]`, 0% Python)** that integrates **Biometric Face Recognition**, **Privacy-Aware Identity & Visual Photo Retrieval**, **ID Card / Document Data Ingestion**, **Historical Script OCR (Jawi, Pallava, Kawi, Rencong)**, **Conservation/Damage Healing & Enhancement**, and **System Monitoring** natively inside **LibreChat** (`http://localhost:3080`) — including the integrated **Admin Portal** right under the MCP Settings icon — powered by a single headless compiled **Rust Axum + Tokio MCP SSE & JSON API Server** (`http://0.0.0.0:8005/sse`).
 
 ![RojakFace Pipeline Architecture Diagram](reports/pipeline_diagram.svg)
 
@@ -44,7 +44,7 @@ An **air-gapped, 100% on-premise multimodal AI platform** written in **100% safe
   - Recommends physical conservation treatments (**fungal removal**, **controlled drying**, **Japanese Kozo tissue mending**, **deacidification**, **protective coating/sizing**, **UV-filtered storage**).
   - Enhances dark, yellowed, or faded scans digitally via gray-world de-yellowing, adaptive gamma lighting, percentile autocontrast, and unsharp masking with Before vs. After metrics.
 - **Administration System Performance & Overload Monitoring (`rojakface_system_health`)**: Live telemetry (`sysinfo`) of CPU %, RAM GB/%, Disk GB/%, Server Process RSS MB, Ollama ping latency, request throughput, error rates, and in-flight concurrency — detects abnormalities and burden overload (`HEALTHY` / `WARNING` / `CRITICAL_OVERLOAD`) with concrete administrative recommendations plus one-click integrity audit and temp cache cleanup in the Admin Portal.
-- **Managed Admin Portal Folders**: Manage **👥 Enrolled People**, **📍 Locations**, **📁 Documents**, **📊 System Monitor & Conservation Lab**, and **📋 Approval Requests** in `http://127.0.0.1:8005/admin`.
+- **Integrated LibreChat Admin Portal**: Open directly inside LibreChat (`http://localhost:3080`) via the Shield-Check icon under **MCP Settings** (same theme & layout as LibreChat) to manage **📋 Approvals**, **👥 People**, **📍 Locations**, **📁 Documents**, **📊 System & Lab**, and **🔍 Test Face**. (Standalone `http://127.0.0.1:8005/admin` is removed and redirects into LibreChat.)
 - **Role-Based Governance & Security Hardening**: Chatbox users operate as **Guests** (enrollments and ID card updates are staged as `REQ-*` requests). **Admins** review requests in the session-authenticated Admin Portal. MCP endpoints enforce DNS-rebinding `Host` header validation and automatic SSE session cleanup on disconnect.
 
 ---
@@ -126,6 +126,7 @@ Copy-Item config\librechat\librechat.yaml ..\LibreChat\librechat.yaml -Force
 Copy-Item config\librechat\docker-compose.override.yml ..\LibreChat\docker-compose.override.yml -Force
 Copy-Item config\librechat\custom-index.html ..\LibreChat\custom-index.html -Force
 Copy-Item config\librechat\royal-theme.css ..\LibreChat\images\royal-theme.css -Force
+Copy-Item config\librechat\admin-embed.js ..\LibreChat\images\admin-embed.js -Force
 ```
 
 ### Step 4 — Optional First-Time Batch Face Enrollment (Pure Rust)
@@ -199,11 +200,10 @@ Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/mess
 
 ## 7. Admin Portal & Public/Private Data Governance
 
-Open **`http://127.0.0.1:8005/admin`**:
-- **Form Login & Session Auth**: Constant-time credential verification with 8-hour `HttpOnly` session cookies (`ROJAKFACE_ADMIN_USER` / `ROJAKFACE_ADMIN_PASS`).
-- **Pending Approval Queue**: Inspect staged source photos, face crops, and extracted ID card fields, then **Approve** or **Reject** (logged to `data/interim/pending_requests/history.jsonl`).
-- **Trusted Profile Editor**: Edit Name, Address, Notes, per-photo metadata (`Description`, `Photograph by`, `Location`, `Date`, `Time`), upload/delete photos, and toggle custom attributes between **Public Data** and **Private Data**.
-- **Recognition Test Bench** (`http://127.0.0.1:8005/admin/test-recognition`): Upload test portraits and tune the cosine threshold (`0.88–0.98`) without modifying stored galleries.
+Open **LibreChat (`http://localhost:3080`)** and click the **Admin Portal** shield-check icon directly underneath **MCP Settings** in the left navigation rail:
+- **Native LibreChat Theme & Layout**: Rendered directly inside LibreChat using LibreChat's exact Light/Dark CSS variables (no separate standalone port-8005 page or iframe).
+- **Session Auth**: Constant-time credential verification (`POST /admin/api/login`) with 8-hour `HttpOnly` session cookies (`ROJAKFACE_ADMIN_USER` / `ROJAKFACE_ADMIN_PASS`).
+- **6 Integrated Tabs**: **📋 Approvals** (guest staging queue), **👥 People** (Public vs. Private custom fields & per-photo metadata), **📍 Locations** (CLIP-indexed halls/wings with duplicate guard), **📁 Documents** (multi-format upload, duplicate guard & Auto-Summarize), **📊 System & Lab** (live CPU/RAM/Disk/Ollama telemetry, SHA-256 integrity check, cache cleanup, & archival quality/damage/enhancement lab), and **🔍 Test Face**.
 
 ---
 
@@ -245,11 +245,9 @@ Open **`http://127.0.0.1:8005/admin`**:
 │   ├── metadata.rs                 # Slugs, identity normalization, 12h time, bilingual privacy keys
 │   ├── service.rs                  # Core business logic backing all 24 MCP tools & Admin APIs
 │   ├── mcp_sse.rs                  # MCP-over-SSE server (/sse & /messages/) + DNS guard
-│   └── admin.rs                    # Axum Admin Portal routes (People, Locations, Documents, Monitor, Lab, Queue)
-├── templates/
-│   └── admin_portal/               # login.html, dashboard.html, test_recognition.html
+│   └── admin.rs                    # Headless CORS-enabled JSON Admin API consumed natively by LibreChat
 ├── config/
-│   ├── librechat/                  # librechat.yaml, docker-compose.override.yml, custom-index.html, royal-theme.css
+│   ├── librechat/                  # librechat.yaml, docker-compose.override.yml, custom-index.html, royal-theme.css, admin-embed.js
 │   └── settings.json               # Thresholds, ports & vector store settings
 ├── data/
 │   └── raw/staff_enroll/           # Sample enrollment source portraits
