@@ -7,7 +7,9 @@ use serde_json::{Value, json};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
-use sysinfo::{Disks, Pid, ProcessesToUpdate, System};
+use sysinfo::{
+    CpuRefreshKind, Disks, MemoryRefreshKind, Pid, ProcessesToUpdate, RefreshKind, System,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ArchiveCounts {
@@ -30,7 +32,13 @@ pub struct SystemMonitor {
 
 impl SystemMonitor {
     pub fn new() -> Self {
-        let mut sys = System::new_all().expect("sysinfo System::new_all");
+        // Refresh only CPU + memory at startup instead of enumerating all OS processes.
+        let mut sys = System::new_with_specifics(
+            RefreshKind::nothing()
+                .with_cpu(CpuRefreshKind::everything())
+                .with_memory(MemoryRefreshKind::everything()),
+        )
+        .expect("sysinfo System::new_with_specifics");
         sys.refresh_cpu_usage();
         sys.refresh_memory();
         Self {

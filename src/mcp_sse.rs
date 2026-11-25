@@ -160,10 +160,10 @@ async fn handle_jsonrpc(service: &Arc<RojakFaceService>, req: Value) -> Option<V
     let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
 
     // Notifications (no id) require no response.
-    if id.is_none() || method.starts_with("notifications/") {
+    let id = id?;
+    if method.starts_with("notifications/") {
         return None;
     }
-    let id = id.unwrap();
 
     let result = match method {
         "initialize" => {

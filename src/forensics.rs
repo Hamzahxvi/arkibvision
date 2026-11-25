@@ -8,9 +8,13 @@
 //! - Multi-signal AI-generated / Original / Copy / Edited fraud assessment
 
 use crate::config::{PERCEPTUAL_HASH_DISTANCE, is_image_ext};
-use crate::vision_ops::{encode_jpeg, hash_distance, load_rgb_image, perceptual_hash};
+use crate::vision_ops::{
+    encode_jpeg, hash_distance, load_rgb_image_from_bytes, perceptual_hash_from_bytes,
+    perceptual_hash_from_image,
+};
 use chrono::Utc;
 use flate2::read::ZlibDecoder;
+use image::DynamicImage;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
@@ -501,12 +505,11 @@ fn extract_xml_attr_or_tag(xml: &str, name: &str) -> Option<String> {
 /// - Local high-pass sensor noise uniformity / consistency analysis
 /// - 8x8 JPEG block-grid boundary ratio (re-encoding / external copy detection)
 /// - LSB bit-plane statistical probe for steganographic / invisible watermarks
-fn analyze_pixel_forensics(path: &Path) -> Option<Value> {
-    let img = load_rgb_image(path).ok()?;
+fn analyze_pixel_forensics(path: &Path, img: &DynamicImage) -> Option<Value> {
     let work = if img.width().max(img.height()) > 640 {
         img.thumbnail(640, 640)
     } else {
-        img
+        img.clone()
     };
     let rgb = work.to_rgb8();
     let (w, h) = rgb.dimensions();
@@ -698,12 +701,14 @@ fn analyze_pixel_forensics(path: &Path) -> Option<Value> {
     }))
 }
 
-/// Extract comprehensive technical + EXIF + PNG metadata for any file or image.
-pub fn extract_file_metadata(path: &Path) -> Result<Value, String> {
-    let bytes = fs::read(path).map_err(|e| format!("Failed reading {}: {e}", path.display()))?;
+fn extract_file_metadata_from_loaded(
+    path: &Path,
+    bytes: &[u8],
+    decoded: Option<&DynamicImage>,
+) -> Result<Value, String> {
     let meta = fs::metadata(path).map_err(|e| format!("Failed stat {}: {e}", path.display()))?;
     let file_size = meta.len();
-    let sha256 = sha256_bytes(&bytes);
+    let sha256 = sha256_bytes(bytes);
     let file_name = path
         .file_name()
         .and_then(|s| s.to_str())
@@ -726,12 +731,17 @@ pub fn extract_file_metadata(path: &Path) -> Result<Value, String> {
     let mut png_chunks = Map::new();
 
     if is_image_ext(path) {
-        if let Ok(dims) = image::image_dimensions(path) {
-            dimensions = Some(dims);
+        if let Some(img) = decoded {
+            dimensions = Some((img.width(), img.height()));
+            ahash = Some(perceptual_hash_from_image(img));
+        } else {
+            if let Ok(dims) = image::image_dimensions(path) {
+                dimensions = Some(dims);
+            }
+            ahash = perceptual_hash_from_bytes(bytes).ok();
         }
-        ahash = perceptual_hash(path).ok();
-        exif_map = extract_exif_map(&bytes);
-        png_chunks = extract_png_text_chunks(&bytes);
+        exif_map = extract_exif_map(bytes);
+        png_chunks = extract_png_text_chunks(bytes);
     }
 
     let date_time = exif_map
@@ -768,13 +778,29 @@ pub fn extract_file_metadata(path: &Path) -> Result<Value, String> {
     }))
 }
 
+/// Extract comprehensive technical + EXIF + PNG metadata for any file or image.
+pub fn extract_file_metadata(path: &Path) -> Result<Value, String> {
+    let bytes = fs::read(path).map_err(|e| format!("Failed reading {}: {e}", path.display()))?;
+    let decoded = if is_image_ext(path) {
+        load_rgb_image_from_bytes(&bytes).ok()
+    } else {
+        None
+    };
+    extract_file_metadata_from_loaded(path, &bytes, decoded.as_ref())
+}
+
 /// Perform multi-signal authenticity & fraud detection (Original vs Exact Copy vs Near-Duplicate vs AI-Generated vs Edited).
 pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Value, String> {
     let bytes = fs::read(path).map_err(|e| format!("Failed reading {}: {e}", path.display()))?;
-    let meta = extract_file_metadata(path)?;
+    let is_img = is_image_ext(path);
+    let decoded_img = if is_img {
+        load_rgb_image_from_bytes(&bytes).ok()
+    } else {
+        None
+    };
+    let meta = extract_file_metadata_from_loaded(path, &bytes, decoded_img.as_ref())?;
     let target_sha = meta["sha256"].as_str().unwrap_or("").to_string();
     let target_ahash = meta["perceptual_hash"].as_str().map(String::from);
-    let is_img = is_image_ext(path);
     let canonical_target = fs::canonicalize(path).ok();
 
     let mut exact_copies: Vec<Value> = Vec::new();
@@ -808,18 +834,19 @@ pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Valu
                     }));
                     continue;
                 }
-            }
-            if is_img
-                && is_image_ext(p)
-                && let (Some(h1), Ok(h2)) = (&target_ahash, perceptual_hash(p))
-            {
-                let dist = hash_distance(h1, &h2);
-                if dist <= PERCEPTUAL_HASH_DISTANCE {
-                    near_copies.push(json!({
-                        "matched_file": normalized_manifest_key(p),
-                        "match_type": "near_duplicate_perceptual_copy",
-                        "hamming_distance": dist,
-                    }));
+                if is_img
+                    && is_image_ext(p)
+                    && let (Some(h1), Ok(h2)) =
+                        (&target_ahash, perceptual_hash_from_bytes(&other_bytes))
+                {
+                    let dist = hash_distance(h1, &h2);
+                    if dist <= PERCEPTUAL_HASH_DISTANCE {
+                        near_copies.push(json!({
+                            "matched_file": normalized_manifest_key(p),
+                            "match_type": "near_duplicate_perceptual_copy",
+                            "hamming_distance": dist,
+                        }));
+                    }
                 }
             }
         }
@@ -842,11 +869,9 @@ pub fn analyze_authenticity(path: &Path, archive_roots: &[&Path]) -> Result<Valu
     }
 
     let jpeg_structure = inspect_jpeg_structure(&bytes);
-    let pixel_forensics = if is_img {
-        analyze_pixel_forensics(path)
-    } else {
-        None
-    };
+    let pixel_forensics = decoded_img
+        .as_ref()
+        .and_then(|img| analyze_pixel_forensics(path, img));
 
     let is_bare_stripped_jpeg = jpeg_structure
         .as_ref()
@@ -1334,7 +1359,7 @@ fn normalized_manifest_key(path: &Path) -> String {
     s
 }
 
-/// Checks if raw uploaded bytes already exist in the archive (exact SHA-256 or perceptual aHash for images).
+/// Checks if raw uploaded bytes already exist in the archive (exact SHA-256 or perceptual 16x16 aHash for images).
 pub fn find_duplicate_in_archives(
     bytes: &[u8],
     orig_filename: &str,
@@ -1343,21 +1368,7 @@ pub fn find_duplicate_in_archives(
     let target_sha = sha256_bytes(bytes);
     let is_img = is_image_ext(Path::new(orig_filename));
     let target_ahash = if is_img {
-        image::load_from_memory(bytes).ok().map(|img| {
-            let small = img
-                .grayscale()
-                .resize_exact(8, 8, image::imageops::FilterType::Triangle);
-            let pixels = small.to_luma8();
-            let sum: u64 = pixels.pixels().map(|p| u64::from(p[0])).sum();
-            let mean = (sum as f64) / 64.0;
-            let mut bits = 0u64;
-            for (idx, p) in pixels.pixels().enumerate() {
-                if f64::from(p[0]) >= mean {
-                    bits |= 1u64 << idx;
-                }
-            }
-            format!("{bits:016x}")
-        })
+        perceptual_hash_from_bytes(bytes).ok()
     } else {
         None
     };
@@ -1385,20 +1396,21 @@ pub fn find_duplicate_in_archives(
                         "existing_filename": fname,
                     }));
                 }
-            }
-            if is_img
-                && is_image_ext(p)
-                && let (Some(h1), Ok(h2)) = (&target_ahash, perceptual_hash(p))
-            {
-                let dist = hash_distance(h1, &h2);
-                if dist <= 6 {
-                    return Some(json!({
-                        "duplicate_type": "near_duplicate_perceptual",
-                        "sha256": target_sha,
-                        "hamming_distance": dist,
-                        "existing_file": normalized_manifest_key(p),
-                        "existing_filename": fname,
-                    }));
+                if is_img
+                    && is_image_ext(p)
+                    && let (Some(h1), Ok(h2)) =
+                        (&target_ahash, perceptual_hash_from_bytes(&other_bytes))
+                {
+                    let dist = hash_distance(h1, &h2);
+                    if dist <= PERCEPTUAL_HASH_DISTANCE {
+                        return Some(json!({
+                            "duplicate_type": "near_duplicate_perceptual",
+                            "sha256": target_sha,
+                            "hamming_distance": dist,
+                            "existing_file": normalized_manifest_key(p),
+                            "existing_filename": fname,
+                        }));
+                    }
                 }
             }
         }
@@ -1676,6 +1688,44 @@ mod tests {
         let r2 = verify_archive_integrity(&manifest, &[root.as_path()], false).unwrap();
         assert_eq!(r2["integrity_status"], "CORRUPTION_OR_TAMPERING_DETECTED");
         assert_eq!(r2["corrupted_count"], 1);
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_find_duplicate_in_archives_exact_and_near_duplicate() {
+        let base = std::env::temp_dir().join(format!(
+            "rojakface_dup_test_{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let root = base.join("imgs");
+        fs::create_dir_all(&root).unwrap();
+
+        // Build a patterned 64x64 synthetic image and save at Q=92
+        let mut buf = image::RgbImage::new(64, 64);
+        for y in 0..64u32 {
+            for x in 0..64u32 {
+                let v = if (x / 8 + y / 8) % 2 == 0 {
+                    220u8
+                } else {
+                    40u8
+                };
+                buf.put_pixel(x, y, image::Rgb([v, v.saturating_sub(20), 128]));
+            }
+        }
+        let img = DynamicImage::ImageRgb8(buf);
+        let q92 = encode_jpeg(&img, 92).unwrap();
+        let q70 = encode_jpeg(&img, 70).unwrap();
+        assert_ne!(sha256_bytes(&q92), sha256_bytes(&q70));
+        fs::write(root.join("archival_ref.jpg"), &q92).unwrap();
+
+        // Exact SHA-256 duplicate
+        let exact = find_duplicate_in_archives(&q92, "upload.jpg", &[root.as_path()]).unwrap();
+        assert_eq!(exact["duplicate_type"], "exact_sha256");
+
+        // Re-encoded perceptual near-duplicate (different SHA-256, same visual content)
+        let near = find_duplicate_in_archives(&q70, "reencoded.jpg", &[root.as_path()]).unwrap();
+        assert_eq!(near["duplicate_type"], "near_duplicate_perceptual");
 
         let _ = fs::remove_dir_all(&base);
     }

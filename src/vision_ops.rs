@@ -95,14 +95,23 @@ pub fn hash_distance(left: &str, right: &str) -> i64 {
     }
 }
 
-pub fn perceptual_hash(path: &Path) -> Result<String, String> {
-    let img = load_rgb_image(path)?;
+pub fn perceptual_hash_from_image(img: &DynamicImage) -> String {
     let gray: GrayImage = img
         .grayscale()
         .resize_exact(16, 16, FilterType::Triangle)
         .to_luma8();
     let pixels: Vec<i64> = gray.as_raw().iter().map(|&b| i64::from(b)).collect();
-    Ok(compute_ahash_bits(&pixels))
+    compute_ahash_bits(&pixels)
+}
+
+pub fn perceptual_hash_from_bytes(bytes: &[u8]) -> Result<String, String> {
+    let img = load_rgb_image_from_bytes(bytes)?;
+    Ok(perceptual_hash_from_image(&img))
+}
+
+pub fn perceptual_hash(path: &Path) -> Result<String, String> {
+    let img = load_rgb_image(path)?;
+    Ok(perceptual_hash_from_image(&img))
 }
 
 pub fn compute_text_line_chunks(row_energies: &[f64], height: i64, max_chunks: i64) -> Value {

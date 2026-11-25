@@ -1106,7 +1106,7 @@ impl RojakFaceService {
         self.match_images_via_ollama(&candidates, clean_query).await
     }
 
-    // ─── ALL 14 MCP TOOLS ───────────────────────────────────────────────────
+    // ─── ALL 24 MCP TOOLS ───────────────────────────────────────────────────
 
     pub fn tool_detect_faces(&self, image_path: &str) -> Value {
         let resolved = match self.resolve_image_path(image_path) {
@@ -1228,27 +1228,32 @@ impl RojakFaceService {
     /// Multi-layer deep authenticity check:
     /// Layer 1: Archive SHA-256 & perceptual hash duplicate check
     /// Layer 2: Deep metadata, C2PA/JUMBF, IPTC DigitalSourceType, XMP, PNG chunks, JPEG structure
-    /// Layer 3: Pixel-level ELA splice check, local noise CV, 8x8 blockiness, LSB watermark probe
+    /// Layer 3: Pixel-level ELA splice check, local noise CV, 8x8 blockiness, lossless LSB probe
     /// Layer 4: Dedicated zero-temperature local Vision-AI forensic audit fused into the verdict
+    /// Layers 1–3 (CPU/disk) run concurrently with Layer 4 (Ollama HTTP) via `tokio::join!`.
     pub async fn analyze_authenticity_deep(&self, path: &Path) -> Result<Value, String> {
         let p = path.to_path_buf();
         let profile_dir = self.cfg.profile_dir.clone();
         let locations_dir = self.cfg.locations_dir.clone();
         let documents_dir = self.cfg.documents_dir.clone();
-        let mut report = tokio::task::spawn_blocking(move || {
+        let file_forensics_fut = tokio::task::spawn_blocking(move || {
             let roots = [
                 profile_dir.as_path(),
                 locations_dir.as_path(),
                 documents_dir.as_path(),
             ];
             analyze_authenticity(&p, &roots)
-        })
-        .await
-        .map_err(|e| format!("Forensics task failed: {e}"))??;
-
-        if is_image_ext(path)
-            && let Some(visual) = self.visual_forensic_audit(path).await
-        {
+        });
+        let visual_fut = async {
+            if is_image_ext(path) {
+                self.visual_forensic_audit(path).await
+            } else {
+                None
+            }
+        };
+        let (file_res, visual_opt) = tokio::join!(file_forensics_fut, visual_fut);
+        let mut report = file_res.map_err(|e| format!("Forensics task failed: {e}"))??;
+        if let Some(visual) = visual_opt {
             fuse_visual_audit(&mut report, visual);
         }
         Ok(report)
@@ -1259,40 +1264,58 @@ impl RojakFaceService {
             Ok(p) => p,
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
-        let metadata = extract_file_metadata(&resolved).unwrap_or_else(|e| json!({ "error": e }));
-        let authenticity = self
-            .analyze_authenticity_deep(&resolved)
-            .await
-            .unwrap_or_else(|e| json!({ "error": e }));
 
-        // Match full image against enrolled Archival Locations / Buildings / Landmarks via CLIP 768-D!
-        let mut matched_locations = Vec::new();
-        if let Ok(emb) = self.engine.embed_full_image_from_path(&resolved) {
-            let hits = self.location_store.search(&emb, 3);
-            for hit in hits {
-                if hit.score >= 0.78 {
-                    let loc_detail = load_location(&self.cfg, &hit.point.crop_path);
-                    matched_locations.push(json!({
-                        "location_name": hit.point.identity,
-                        "location_slug": hit.point.crop_path,
-                        "similarity": (f64::from(hit.score) * 10000.0).round() / 10000.0,
-                        "matched_reference_image": hit.point.filename,
-                        "location_details": loc_detail,
-                    }));
+        // Overlap heavy CPU/ONNX work (CLIP location match, YuNet faces, conservation) with deep authenticity + Ollama.
+        let rp = resolved.clone();
+        let engine = self.engine.clone();
+        let loc_store = self.location_store.clone();
+        let cfg = self.cfg.clone();
+        let vision_task = tokio::task::spawn_blocking(move || {
+            let mut matched_locations = Vec::new();
+            if let Ok(emb) = engine.embed_full_image_from_path(&rp) {
+                let hits = loc_store.search(&emb, 3);
+                for hit in hits {
+                    if hit.score >= 0.78 {
+                        let loc_detail = load_location(&cfg, &hit.point.crop_path);
+                        matched_locations.push(json!({
+                            "location_name": hit.point.identity,
+                            "location_slug": hit.point.crop_path,
+                            "similarity": (f64::from(hit.score) * 10000.0).round() / 10000.0,
+                            "matched_reference_image": hit.point.filename,
+                            "location_details": loc_detail,
+                        }));
+                    }
                 }
             }
-        }
+            let faces_detected = engine
+                .extract_features_from_path(&rp)
+                .map(|d| d.len())
+                .unwrap_or(0);
+            let conservation = analyze_image_quality_and_conservation(&rp)
+                .unwrap_or_else(|e| json!({ "error": e }));
+            (matched_locations, faces_detected, conservation)
+        });
 
-        let faces_summary = self.tool_detect_faces(&resolved.to_string_lossy());
-        let conservation = analyze_image_quality_and_conservation(&resolved)
-            .unwrap_or_else(|e| json!({ "error": e }));
+        let (auth_res, vision_res) =
+            tokio::join!(self.analyze_authenticity_deep(&resolved), vision_task);
+        let authenticity = auth_res.unwrap_or_else(|e| json!({ "error": e }));
+        let metadata = authenticity
+            .get("metadata")
+            .filter(|v| v.is_object())
+            .cloned()
+            .unwrap_or_else(|| {
+                extract_file_metadata(&resolved).unwrap_or_else(|e| json!({ "error": e }))
+            });
+        let (matched_locations, faces_detected, conservation) =
+            vision_res.unwrap_or_else(|e| (Vec::new(), 0, json!({ "error": e.to_string() })));
+
         json!({
             "file": resolved.file_name().and_then(|s| s.to_str()).unwrap_or(""),
             "file_metadata": metadata,
             "authenticity_analysis": authenticity,
             "conservation_assessment": conservation,
             "matched_archival_locations": matched_locations,
-            "faces_detected": faces_summary["faces_detected"],
+            "faces_detected": faces_detected,
             "analysis_instruction": "Present the extracted metadata, the fused authenticity verdict (Original/Copy/AI-Generated/Manipulated — NEVER override a HIGH or MEDIUM risk verdict), image quality & archival damage assessment (tear/faded/mold/aging + healing suggestions), and any matched archival location details in clear, friendly language.",
         })
     }
@@ -1303,15 +1326,16 @@ impl RojakFaceService {
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
         let rp = resolved.clone();
-        let mut report =
-            match tokio::task::spawn_blocking(move || analyze_image_quality_and_conservation(&rp))
-                .await
-            {
-                Ok(Ok(r)) => r,
-                Ok(Err(reason)) => return json!({ "status": "error", "reason": reason }),
-                Err(e) => return json!({ "status": "error", "reason": e.to_string() }),
-            };
-        if let Ok(auth) = self.analyze_authenticity_deep(&resolved).await
+        let cons_fut =
+            tokio::task::spawn_blocking(move || analyze_image_quality_and_conservation(&rp));
+        let (cons_res, auth_res) =
+            tokio::join!(cons_fut, self.analyze_authenticity_deep(&resolved));
+        let mut report = match cons_res {
+            Ok(Ok(r)) => r,
+            Ok(Err(reason)) => return json!({ "status": "error", "reason": reason }),
+            Err(e) => return json!({ "status": "error", "reason": e.to_string() }),
+        };
+        if let Ok(auth) = auth_res
             && let Some(obj) = report.as_object_mut()
         {
             obj.insert(

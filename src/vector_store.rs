@@ -132,16 +132,24 @@ impl VectorStore {
         }
         let q_unit = normalize_l2(query);
         let guard = self.points.read().expect("vector store lock");
-        let mut hits: Vec<SearchHit> = guard
+        // Score by index without cloning heavy 768-D vectors, then clone only the top `limit` winners.
+        let mut scored: Vec<(usize, f32)> = guard
             .iter()
-            .map(|pt| SearchHit {
-                point: pt.clone(),
-                score: dot_product(&q_unit, &pt.unit_vector),
-            })
+            .enumerate()
+            .map(|(i, pt)| (i, dot_product(&q_unit, &pt.unit_vector)))
             .collect();
-        hits.sort_by(|a, b| b.score.total_cmp(&a.score));
-        hits.truncate(limit);
-        hits
+        if scored.len() > limit {
+            scored.select_nth_unstable_by(limit, |a, b| b.1.total_cmp(&a.1));
+            scored.truncate(limit);
+        }
+        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+        scored
+            .into_iter()
+            .map(|(i, score)| SearchHit {
+                point: guard[i].clone(),
+                score,
+            })
+            .collect()
     }
 
     pub fn upsert(&self, mut point: FacePoint) -> Result<(), String> {

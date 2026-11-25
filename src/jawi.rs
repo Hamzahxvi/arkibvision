@@ -447,8 +447,11 @@ fn jawi_phonetic_skeleton(word: &str) -> String {
         })
         .collect();
 
-    if mapped.len() > 2 && mapped.last() == Some(&'e') {
-        *mapped.last_mut().unwrap() = 'a';
+    if mapped.len() > 2
+        && let Some(last) = mapped.last_mut()
+        && *last == 'e'
+    {
+        *last = 'a';
     }
 
     let mut collapsed = String::with_capacity(mapped.len());

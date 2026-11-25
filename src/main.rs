@@ -28,6 +28,39 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+/// RAII guard so cancelled/dropped HTTP requests never leak `in_flight` counts.
+struct InFlightGuard {
+    service: Arc<RojakFaceService>,
+    started: Instant,
+    completed: bool,
+}
+
+impl InFlightGuard {
+    fn new(service: Arc<RojakFaceService>) -> Self {
+        service.monitor.begin_request();
+        Self {
+            service,
+            started: Instant::now(),
+            completed: false,
+        }
+    }
+
+    fn finish(mut self, is_error: bool) {
+        self.completed = true;
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        self.service.monitor.finish_request(elapsed_ms, is_error);
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            let elapsed_ms = self.started.elapsed().as_millis() as u64;
+            self.service.monitor.finish_request(elapsed_ms, false);
+        }
+    }
+}
+
 async fn monitor_middleware(
     State(service): State<Arc<RojakFaceService>>,
     req: Request,
@@ -37,13 +70,9 @@ async fn monitor_middleware(
     if req.uri().path() == "/sse" {
         return next.run(req).await;
     }
-    service.monitor.begin_request();
-    let started = Instant::now();
+    let guard = InFlightGuard::new(service);
     let resp = next.run(req).await;
-    let elapsed_ms = started.elapsed().as_millis() as u64;
-    service
-        .monitor
-        .finish_request(elapsed_ms, resp.status().is_server_error());
+    guard.finish(resp.status().is_server_error());
     resp
 }
 
