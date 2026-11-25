@@ -5,6 +5,11 @@
   var STAGE_ID = 'rf-admin-stage';
   var API_BASE = 'http://' + (window.location.hostname || 'localhost') + ':8005';
 
+  var TRASH_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>';
+  var TRASH_LG_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>';
+  var DOTS_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/></svg>';
+  var EDIT_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+
   var state = {
     open: false,
     authed: false,
@@ -18,6 +23,8 @@
     selectedGroup: 'all',
     locations: [],
     documents: [],
+    documentGroups: [],
+    selectedDocGroup: 'all',
     health: null,
     integrity: null,
     labHtml: '',
@@ -77,6 +84,66 @@
     document.body.appendChild(v);
   }
 
+  function closeMenus() {
+    document.querySelectorAll('.rf-menu-pop').forEach(function (m) { m.remove(); });
+  }
+
+  function openFolderMenu(anchorBtn, opts) {
+    closeMenus();
+    var rect = anchorBtn.getBoundingClientRect();
+    var pop = document.createElement('div');
+    pop.className = 'rf-menu-pop';
+    pop.setAttribute('role', 'menu');
+    pop.style.top = Math.min(window.innerHeight - 110, Math.round(rect.bottom + 6)) + 'px';
+    pop.style.left = Math.min(window.innerWidth - 190, Math.max(8, Math.round(rect.left - 120))) + 'px';
+    pop.innerHTML =
+      '<button type="button" class="rf-menu-item" data-act="rename">' + EDIT_SVG + '<span>Rename folder</span></button>' +
+      '<button type="button" class="rf-menu-item danger" data-act="delete">' + TRASH_SVG + '<span>Delete folder</span></button>';
+    pop.querySelector('[data-act="rename"]').onclick = function (e) {
+      e.stopPropagation();
+      closeMenus();
+      if (opts.onRename) opts.onRename();
+    };
+    pop.querySelector('[data-act="delete"]').onclick = function (e) {
+      e.stopPropagation();
+      closeMenus();
+      if (opts.onDelete) opts.onDelete();
+    };
+    document.body.appendChild(pop);
+  }
+
+  function openConfirmModal(opts) {
+    closeMenus();
+    var wrap = document.createElement('div');
+    wrap.className = 'rf-modal-backdrop';
+    wrap.style.zIndex = '90';
+    wrap.innerHTML =
+      '<div class="rf-modal" style="width:min(460px,100%)">' +
+      '<div class="rf-confirm-icon">' + TRASH_LG_SVG + '</div>' +
+      '<h2 style="margin-bottom:8px">' + esc(opts.title || 'Confirm Delete') + '</h2>' +
+      '<p style="font-size:.86rem;color:rgb(var(--text-secondary));line-height:1.55;margin:0 0 18px">' + esc(opts.message || 'Are you sure you want to continue?') + '</p>' +
+      '<div class="rf-actions" style="justify-content:flex-end;margin-top:0">' +
+      '<button type="button" class="rf-btn" id="rf-cfm-cancel">Cancel</button>' +
+      '<button type="button" class="rf-btn ' + (opts.primary ? 'rf-btn-primary' : 'rf-btn-danger-solid') + '" id="rf-cfm-ok">' + (opts.primary ? '' : TRASH_SVG) + '<span>' + esc(opts.confirmLabel || 'Delete') + '</span></button>' +
+      '</div></div>';
+    document.body.appendChild(wrap);
+    var cancel = function () {
+      wrap.remove();
+      if (opts.onCancel) opts.onCancel();
+    };
+    wrap.onclick = function (e) { if (e.target === wrap) cancel(); };
+    wrap.querySelector('#rf-cfm-cancel').onclick = cancel;
+    wrap.querySelector('#rf-cfm-ok').onclick = async function () {
+      var okBtn = wrap.querySelector('#rf-cfm-ok');
+      okBtn.disabled = true;
+      try {
+        if (opts.onConfirm) await opts.onConfirm();
+      } finally {
+        wrap.remove();
+      }
+    };
+  }
+
   function computeRailRight() {
     if (state.railEl && document.body.contains(state.railEl)) {
       var rect = state.railEl.getBoundingClientRect();
@@ -119,6 +186,7 @@
         api('/admin/api/people-groups?ts=' + Date.now()),
         api('/admin/api/locations?ts=' + Date.now()),
         api('/admin/api/documents?ts=' + Date.now()),
+        api('/admin/api/document-groups?ts=' + Date.now()),
         api('/admin/api/system/health?ts=' + Date.now())
       ]);
       if (res[0].ok && Array.isArray(res[0].data)) state.requests = res[0].data;
@@ -126,7 +194,8 @@
       if (res[2].ok && Array.isArray(res[2].data)) state.peopleGroups = res[2].data;
       if (res[3].ok && Array.isArray(res[3].data)) state.locations = res[3].data;
       if (res[4].ok && Array.isArray(res[4].data)) state.documents = res[4].data;
-      if (res[5].ok) state.health = res[5].data;
+      if (res[5].ok && Array.isArray(res[5].data)) state.documentGroups = res[5].data;
+      if (res[6].ok) state.health = res[6].data;
       render();
       if (manual) toast('Admin data refreshed');
     } catch (e) {}
@@ -341,7 +410,7 @@
           '<div style="font-size:.8rem;color:rgb(var(--text-secondary));line-height:1.55">' + rows + '</div>' +
           '<div class="rf-actions">' +
           '<button type="button" class="rf-btn rf-btn-ok" style="flex:1" data-rf-act="approve" data-rf-id="' + esc(req.id) + '">✅ Approve</button>' +
-          '<button type="button" class="rf-btn rf-btn-danger" style="flex:1" data-rf-act="reject" data-rf-id="' + esc(req.id) + '">❌ Reject</button>' +
+          '<button type="button" class="rf-btn rf-btn-danger" style="flex:1" data-rf-act="reject" data-rf-id="' + esc(req.id) + '">' + TRASH_SVG + '<span>Reject</span></button>' +
           '</div></article>';
       }).join('') : '<div class="rf-empty"><b>All clear!</b><div style="margin-top:4px;font-size:.82rem">No pending requests need your attention.</div></div>') +
       '</div>';
@@ -357,21 +426,33 @@
       });
     });
     body.querySelectorAll('[data-rf-act]').forEach(function (b) {
-      b.addEventListener('click', async function () {
+      b.addEventListener('click', function () {
         var act = b.getAttribute('data-rf-act');
         var id = b.getAttribute('data-rf-id');
-        if (act === 'reject' && !window.confirm('Reject request ' + id + '?')) return;
-        b.disabled = true;
-        try {
-          var r = await api('/admin/api/' + act + '/' + encodeURIComponent(id), { method: 'POST' });
-          if (r.ok) {
-            toast(act === 'approve' ? '✅ Approved: ' + (r.data.identity || id) : '❌ Rejected: ' + id, act === 'approve');
-            await refreshAll(false);
-          } else {
-            toast('Error: ' + (r.data.reason || 'failed'), false);
-            b.disabled = false;
-          }
-        } catch (err) { toast('Error: ' + err.message, false); b.disabled = false; }
+        var req = state.requests.find(function (x) { return x.id === id; });
+        var runAct = async function () {
+          b.disabled = true;
+          try {
+            var r = await api('/admin/api/' + act + '/' + encodeURIComponent(id), { method: 'POST' });
+            if (r.ok) {
+              toast(act === 'approve' ? '✅ Approved: ' + (r.data.identity || id) : 'Rejected request: ' + id, act === 'approve');
+              await refreshAll(false);
+            } else {
+              toast('Error: ' + (r.data.reason || 'failed'), false);
+              b.disabled = false;
+            }
+          } catch (err) { toast('Error: ' + err.message, false); b.disabled = false; }
+        };
+        if (act === 'reject') {
+          openConfirmModal({
+            title: 'Reject Request',
+            message: 'Reject pending request ' + id + (req && req.name ? ' for ' + req.name : '') + '? The staged request will be marked rejected.',
+            confirmLabel: 'Reject Request',
+            onConfirm: runAct
+          });
+        } else {
+          runAct();
+        }
       });
     });
   }
@@ -382,6 +463,7 @@
   }
 
   function renderPeople(body) {
+    closeMenus();
     var q = state.search.toLowerCase();
     var validSlugs = {};
     state.peopleGroups.forEach(function (g) { validSlugs[String(g.slug || '').toLowerCase()] = true; });
@@ -407,8 +489,7 @@
         return '<div class="rf-folder-chip' + (state.selectedGroup === gs ? ' active' : '') + '" data-rf-grp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
           '<span>📁 ' + esc(g.name) + '</span>' +
           '<span class="rf-fcnt">' + cnt + '</span>' +
-          '<button type="button" class="rf-folder-act" data-rf-ren-grp="' + esc(gs) + '" title="Rename group folder">✎</button>' +
-          '<button type="button" class="rf-folder-act" data-rf-del-grp="' + esc(gs) + '" title="Delete group folder">×</button>' +
+          '<button type="button" class="rf-folder-act" data-rf-grp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
           '</div>';
       }).join('') +
       '<div class="rf-folder-chip' + (state.selectedGroup === 'unassigned' ? ' active' : '') + '" data-rf-grp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
@@ -423,7 +504,7 @@
 
     body.innerHTML =
       '<div class="rf-section-head"><div><h2>👥 Enrolled People' + (activeGroupObj ? ' — 📁 ' + esc(activeGroupObj.name) : state.selectedGroup === 'unassigned' ? ' — Unassigned' : '') + '</h2>' +
-      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize enrolled people into maintainable group folders (e.g. Staff, External Entity). Create, rename, or move people between folders anytime.') + '</p></div>' +
+      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize enrolled people into maintainable group folders (e.g. Staff, External Entity). Use the ⋮ menu on any folder to rename or delete it.') + '</p></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="rf-btn" id="rf-add-group-btn">📁＋ New Group Folder</button>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-person-btn">＋ Add Person</button>' +
@@ -434,20 +515,19 @@
       (list.length ? list.map(function (p) {
         var img = p.images && p.images[0] ? '<img class="rf-thumb" src="' + esc(apiUrl(p.images[0].url)) + '" alt="' + esc(p.identity) + '"/>' : '<div class="rf-thumb">👤</div>';
         var curGs = personGroupSlug(p);
-        var grpBadge = p.group ? '<span class="rf-pill" style="margin-left:6px">📁 ' + esc(p.group) + '</span>' : '';
         return '<article class="rf-card">' + img + '<div class="rf-card-body">' +
-          '<h3 title="' + esc(p.identity) + '">' + esc(p.identity) + grpBadge + '</h3>' +
+          '<h3 title="' + esc(p.identity) + '">' + esc(p.identity) + '</h3>' +
           '<p class="rf-desc">' + esc(p.notes || p.address || p.description || 'No notes') + '</p>' +
           '<div class="rf-meta">' + Number(p.vector_count || 0) + ' vector(s) · ' + (p.images ? p.images.length : 0) + ' photo(s)</div>' +
           '<div class="rf-actions">' +
-          '<select class="rf-move-sel" data-rf-move-p="' + esc(p.slug) + '" title="Assign or move to group folder">' + groupOpts(curGs) + '</select>' +
-          '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-p="' + esc(p.slug) + '">✎ Edit</button>' +
-          '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-p="' + esc(p.slug) + '">Delete</button>' +
+          '<select class="rf-move-sel" data-rf-move-p="' + esc(p.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
+          '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-p="' + esc(p.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
+          '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-p="' + esc(p.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
       }).join('') : '<div class="rf-empty">No enrolled people in this folder yet. Move someone here using the folder dropdown or click "＋ Add Person".</div>') +
       '</div>';
 
-    document.getElementById('rf-add-group-btn').onclick = function () { openGroupModal(null); };
+    document.getElementById('rf-add-group-btn').onclick = function () { openGroupModal('people', null); };
     document.getElementById('rf-add-person-btn').onclick = function () { openPersonModal(null); };
     document.getElementById('rf-ppl-search').oninput = function (e) { state.search = e.target.value; renderPeople(body); };
 
@@ -458,26 +538,31 @@
         renderPeople(body);
       };
     });
-    body.querySelectorAll('[data-rf-ren-grp]').forEach(function (btn) {
+    body.querySelectorAll('[data-rf-grp-menu]').forEach(function (btn) {
       btn.onclick = function (ev) {
         ev.stopPropagation();
-        var gs = btn.getAttribute('data-rf-ren-grp');
+        var gs = btn.getAttribute('data-rf-grp-menu');
         var g = state.peopleGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
-        if (g) openGroupModal(g);
-      };
-    });
-    body.querySelectorAll('[data-rf-del-grp]').forEach(function (btn) {
-      btn.onclick = async function (ev) {
-        ev.stopPropagation();
-        var gs = btn.getAttribute('data-rf-del-grp');
-        var g = state.peopleGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
-        if (!g || !window.confirm('Delete group folder "' + g.name + '"?\n\nEnrolled people inside will NOT be deleted — they will move to Unassigned.')) return;
-        var r = await api('/admin/api/people-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
-        if (r.ok) {
-          if (state.selectedGroup === gs) state.selectedGroup = 'all';
-          toast('Deleted folder "' + g.name + '"');
-          await refreshAll(false);
-        } else toast((r.data && r.data.reason) || 'Delete failed', false);
+        if (!g) return;
+        var memberCnt = state.profiles.filter(function (p) { return personGroupSlug(p) === gs; }).length;
+        openFolderMenu(btn, {
+          onRename: function () { openGroupModal('people', g); },
+          onDelete: function () {
+            openConfirmModal({
+              title: 'Delete Group Folder "' + g.name + '"?',
+              message: 'This removes the "' + g.name + '" folder. The ' + memberCnt + ' enrolled ' + (memberCnt === 1 ? 'person' : 'people') + ' inside will NOT be deleted — they will move safely to Unassigned.',
+              confirmLabel: 'Delete Folder',
+              onConfirm: async function () {
+                var r = await api('/admin/api/people-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
+                if (r.ok) {
+                  if (state.selectedGroup === gs) state.selectedGroup = 'all';
+                  toast('Deleted folder "' + g.name + '"');
+                  await refreshAll(false);
+                } else toast((r.data && r.data.reason) || 'Delete failed', false);
+              }
+            });
+          }
+        });
       };
     });
     body.querySelectorAll('[data-rf-move-p]').forEach(function (sel) {
@@ -505,24 +590,38 @@
       };
     });
     body.querySelectorAll('[data-rf-del-p]').forEach(function (b) {
-      b.onclick = async function () {
+      b.onclick = function () {
         var p = state.profiles.find(function (x) { return x.slug === b.getAttribute('data-rf-del-p'); });
-        if (!p || !window.confirm('Delete "' + p.identity + '" and all photos/vectors?')) return;
-        var r = await api('/admin/api/profiles/' + encodeURIComponent(p.slug), { method: 'DELETE' });
-        if (r.ok) { toast('Deleted ' + p.identity); await refreshAll(false); }
-        else toast(r.data.reason || 'Delete failed', false);
+        if (!p) return;
+        var vc = Number(p.vector_count || 0);
+        var ic = p.images ? p.images.length : 0;
+        openConfirmModal({
+          title: 'Delete "' + p.identity + '"?',
+          message: 'Delete ' + p.identity + ' and their ' + vc + ' vector(s) and ' + ic + ' photo(s)? This cannot be undone.',
+          confirmLabel: 'Delete Person',
+          onConfirm: async function () {
+            var r = await api('/admin/api/profiles/' + encodeURIComponent(p.slug), { method: 'DELETE' });
+            if (r.ok) { toast('Deleted ' + p.identity); await refreshAll(false); }
+            else toast((r.data && r.data.reason) || 'Delete failed', false);
+          }
+        });
       };
     });
   }
 
-  function openGroupModal(group) {
+  function openGroupModal(kind, group) {
+    var isDoc = kind === 'document';
+    var endpoint = isDoc ? '/admin/api/document-groups' : '/admin/api/people-groups';
+    var placeholder = isDoc
+      ? 'e.g. Historical Manuscripts, Official Records, Treaties, Letters'
+      : 'e.g. Staff, External Entity, VIP Guests, Researchers';
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
     wrap.innerHTML =
-      '<div class="rf-modal" style="width:min(520px,100%)"><h2>' + (group ? 'Rename Group Folder' : 'New People Group Folder') + '</h2>' +
+      '<div class="rf-modal" style="width:min(520px,100%)"><h2>' + (group ? 'Rename Group Folder' : (isDoc ? 'New Document Group Folder' : 'New People Group Folder')) + '</h2>' +
       '<form id="rf-g-form"><div class="rf-form-grid">' +
-      '<div class="rf-field full"><label>Group Folder Name</label><input class="rf-input" id="rf-g-name" required placeholder="e.g. Staff, External Entity, VIP Guests, Researchers" value="' + esc(group ? group.name || '' : '') + '"/></div>' +
-      '<div class="rf-field full"><label>Description</label><textarea class="rf-textarea" id="rf-g-desc" placeholder="Optional description of who belongs in this folder…">' + esc(group ? group.description || '' : '') + '</textarea></div>' +
+      '<div class="rf-field full"><label>Group Folder Name</label><input class="rf-input" id="rf-g-name" required placeholder="' + placeholder + '" value="' + esc(group ? group.name || '' : '') + '"/></div>' +
+      '<div class="rf-field full"><label>Description</label><textarea class="rf-textarea" id="rf-g-desc" placeholder="Optional description of what belongs in this folder…">' + esc(group ? group.description || '' : '') + '</textarea></div>' +
       '</div><div class="rf-actions" style="justify-content:flex-end;margin-top:16px">' +
       '<button type="button" class="rf-btn" id="rf-g-cancel">Cancel</button>' +
       '<button type="submit" class="rf-btn rf-btn-primary">' + (group ? 'Save Rename' : 'Create Folder') + '</button>' +
@@ -534,14 +633,16 @@
       ev.preventDefault();
       var name = document.getElementById('rf-g-name').value.trim();
       var description = document.getElementById('rf-g-desc').value.trim();
-      var r = await api(group ? '/admin/api/people-groups/' + encodeURIComponent(group.slug) : '/admin/api/people-groups', {
+      var r = await api(group ? endpoint + '/' + encodeURIComponent(group.slug) : endpoint, {
         method: group ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name, description: description })
       });
       if (r.ok) {
-        if (group && state.selectedGroup === String(group.slug || '').toLowerCase() && r.data && r.data.group) {
-          state.selectedGroup = String(r.data.group.slug || '').toLowerCase();
+        if (group && r.data && r.data.group) {
+          var nextSlug = String(r.data.group.slug || '').toLowerCase();
+          if (isDoc && state.selectedDocGroup === String(group.slug || '').toLowerCase()) state.selectedDocGroup = nextSlug;
+          if (!isDoc && state.selectedGroup === String(group.slug || '').toLowerCase()) state.selectedGroup = nextSlug;
         }
         wrap.remove();
         toast(group ? 'Renamed group folder to "' + name + '"' : 'Created group folder "' + name + '"');
@@ -569,7 +670,7 @@
         '<input class="rf-input rf-kv-k" style="padding:6px 8px;font-size:.8rem" placeholder="Field" value="' + esc(k) + '"/>' +
         '<input class="rf-input rf-kv-v" style="padding:6px 8px;font-size:.8rem" placeholder="Value" value="' + esc(v) + '"/>' +
         '<button type="button" class="rf-btn rf-btn-sm rf-kv-swap" title="Toggle public/private">⇄</button>' +
-        '<button type="button" class="rf-btn rf-btn-sm rf-kv-rm" title="Remove">×</button></div>';
+        '<button type="button" class="rf-icon-del rf-kv-rm" title="Delete detail">' + TRASH_SVG + '</button></div>';
     };
 
     var defaultGrp = profile ? personGroupSlug(profile) : (state.selectedGroup !== 'all' && state.selectedGroup !== 'unassigned' ? state.selectedGroup : '');
@@ -637,7 +738,7 @@
       gal.innerHTML = imgs.length ? imgs.map(function (im) {
         return '<div class="rf-tile' + (state.selectedPhoto === im.filename ? ' selected' : '') + '" data-fn="' + esc(im.filename) + '">' +
           '<img src="' + esc(apiUrl(im.url)) + '" alt="' + esc(im.filename) + '"/>' +
-          '<button type="button" class="rf-tile-del" data-del="' + esc(im.filename) + '">×</button></div>';
+          '<button type="button" class="rf-tile-del" data-del="' + esc(im.filename) + '" title="Delete photo">' + TRASH_SVG + '</button></div>';
       }).join('') : '<div style="font-size:.78rem;color:rgb(var(--text-secondary));padding:10px">No stored photos yet.</div>';
 
       gal.querySelectorAll('.rf-tile').forEach(function (t) {
@@ -684,17 +785,23 @@
         };
       });
       gal.querySelectorAll('.rf-tile-del').forEach(function (d) {
-        d.onclick = async function (e) {
+        d.onclick = function (e) {
           e.stopPropagation();
           var fn = d.getAttribute('data-del');
-          if (!window.confirm('Delete photo ' + fn + '?')) return;
-          var r = await api('/admin/api/profiles/' + encodeURIComponent(cur.slug) + '/images/' + encodeURIComponent(fn), { method: 'DELETE' });
-          if (r.ok && r.data.profile) {
-            cur = r.data.profile;
-            renderGal(cur);
-            toast('Photo deleted');
-            refreshAll(false);
-          } else toast(r.data.reason || 'Delete failed', false);
+          openConfirmModal({
+            title: 'Delete Photo?',
+            message: 'Delete photo "' + fn + '" from ' + cur.identity + '? This cannot be undone.',
+            confirmLabel: 'Delete Photo',
+            onConfirm: async function () {
+              var r = await api('/admin/api/profiles/' + encodeURIComponent(cur.slug) + '/images/' + encodeURIComponent(fn), { method: 'DELETE' });
+              if (r.ok && r.data.profile) {
+                cur = r.data.profile;
+                renderGal(cur);
+                toast('Photo deleted');
+                refreshAll(false);
+              } else toast((r.data && r.data.reason) || 'Delete failed', false);
+            }
+          });
         };
       });
     }
@@ -779,8 +886,8 @@
           '<p class="rf-desc">' + esc(l.description || l.historical_significance || 'No description yet.') + '</p>' +
           '<div class="rf-meta">' + (l.image_count || 0) + ' photo(s)' + (l.coordinates ? ' · ' + esc(l.coordinates) : '') + '</div>' +
           '<div class="rf-actions">' +
-          '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-l="' + esc(l.slug) + '">✎ Edit</button>' +
-          '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-l="' + esc(l.slug) + '">Delete</button>' +
+          '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-l="' + esc(l.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
+          '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-l="' + esc(l.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
       }).join('') : '<div class="rf-empty">No archival locations yet.</div>') +
       '</div>';
@@ -794,12 +901,19 @@
       };
     });
     body.querySelectorAll('[data-rf-del-l]').forEach(function (b) {
-      b.onclick = async function () {
+      b.onclick = function () {
         var l = state.locations.find(function (x) { return x.slug === b.getAttribute('data-rf-del-l'); });
-        if (!l || !window.confirm('Delete location "' + l.name + '"?')) return;
-        var r = await api('/admin/api/locations/' + encodeURIComponent(l.slug), { method: 'DELETE' });
-        if (r.ok) { toast('Deleted location'); await refreshAll(false); }
-        else toast(r.data.reason || 'Delete failed', false);
+        if (!l) return;
+        openConfirmModal({
+          title: 'Delete Location "' + l.name + '"?',
+          message: 'Delete location "' + l.name + '" and its ' + (l.image_count || 0) + ' reference photo(s)? This cannot be undone.',
+          confirmLabel: 'Delete Location',
+          onConfirm: async function () {
+            var r = await api('/admin/api/locations/' + encodeURIComponent(l.slug), { method: 'DELETE' });
+            if (r.ok) { toast('Deleted location'); await refreshAll(false); }
+            else toast((r.data && r.data.reason) || 'Delete failed', false);
+          }
+        });
       };
     });
   }
@@ -834,14 +948,22 @@
       if (!gal) return;
       var imgs = cur.images || [];
       gal.innerHTML = imgs.length ? imgs.map(function (im) {
-        return '<div class="rf-tile"><img src="' + esc(apiUrl(im.admin_url)) + '" data-zoom="' + esc(apiUrl(im.admin_url)) + '"/><button type="button" class="rf-tile-del" data-del="' + esc(im.filename) + '">×</button></div>';
+        return '<div class="rf-tile"><img src="' + esc(apiUrl(im.admin_url)) + '" data-zoom="' + esc(apiUrl(im.admin_url)) + '"/><button type="button" class="rf-tile-del" data-del="' + esc(im.filename) + '" title="Delete photo">' + TRASH_SVG + '</button></div>';
       }).join('') : '<div style="font-size:.78rem;color:rgb(var(--text-secondary));padding:10px">No reference photos yet.</div>';
       gal.querySelectorAll('[data-zoom]').forEach(function (img) { img.onclick = function () { openViewer(img.getAttribute('data-zoom')); }; });
       gal.querySelectorAll('[data-del]').forEach(function (btn) {
-        btn.onclick = async function (e) {
+        btn.onclick = function (e) {
           e.stopPropagation();
-          var r = await api('/admin/api/locations/' + encodeURIComponent(cur.slug) + '/images/' + encodeURIComponent(btn.getAttribute('data-del')), { method: 'DELETE' });
-          if (r.ok && r.data.location) { cur = r.data.location; renderLocGal(cur); toast('Photo deleted'); refreshAll(false); }
+          var fn = btn.getAttribute('data-del');
+          openConfirmModal({
+            title: 'Delete Reference Photo?',
+            message: 'Delete reference photo "' + fn + '" from ' + cur.name + '?',
+            confirmLabel: 'Delete Photo',
+            onConfirm: async function () {
+              var r = await api('/admin/api/locations/' + encodeURIComponent(cur.slug) + '/images/' + encodeURIComponent(fn), { method: 'DELETE' });
+              if (r.ok && r.data.location) { cur = r.data.location; renderLocGal(cur); toast('Photo deleted'); refreshAll(false); }
+            }
+          });
         };
       });
     }
@@ -854,8 +976,14 @@
         fd.append('image', file);
         var r = await api('/admin/api/locations/' + encodeURIComponent(loc.slug) + '/images' + (force ? '?force=1' : ''), { method: 'POST', body: fd });
         if (r.status === 409 && !force) {
-          if (window.confirm('⚠️ ' + (r.data.reason || 'Duplicate file detected') + '\n\nUpload duplicate anyway?')) return doLocUpload(file, true);
-          toast('Duplicate upload prevented', false);
+          openConfirmModal({
+            title: 'Duplicate Image Detected',
+            message: (r.data.reason || 'This image already exists in the archive.') + ' Do you still want to upload a duplicate copy?',
+            confirmLabel: 'Upload Anyway',
+            primary: true,
+            onConfirm: function () { return doLocUpload(file, true); },
+            onCancel: function () { toast('Duplicate upload prevented', false); }
+          });
           return;
         }
         if (r.ok && r.data.location) { loc = r.data.location; renderLocGal(loc); toast('Photo uploaded & indexed'); refreshAll(false); }
@@ -888,32 +1016,134 @@
     };
   }
 
-  // ─── Tab 4: Archival Documents ────────────────────────────────────────────
+  // ─── Tab 4: Archival Documents (with Maintainable Group Folders) ──────────
+  function docGroupSlug(d) {
+    return String(d.group_slug || '').trim().toLowerCase();
+  }
+
   function renderDocuments(body) {
+    closeMenus();
     var q = state.search.toLowerCase();
-    var list = state.documents.filter(function (d) { return !q || JSON.stringify(d).toLowerCase().indexOf(q) !== -1; });
+    var validSlugs = {};
+    state.documentGroups.forEach(function (g) { validSlugs[String(g.slug || '').toLowerCase()] = true; });
+    if (state.selectedDocGroup !== 'all' && state.selectedDocGroup !== 'unassigned' && !validSlugs[state.selectedDocGroup]) {
+      state.selectedDocGroup = 'all';
+    }
+
+    var unassignedCnt = state.documents.filter(function (d) { return !docGroupSlug(d); }).length;
+    var activeGroupObj = state.documentGroups.find(function (g) { return String(g.slug || '').toLowerCase() === state.selectedDocGroup; });
+
+    var list = state.documents.filter(function (d) {
+      var gs = docGroupSlug(d);
+      if (state.selectedDocGroup === 'unassigned' && gs) return false;
+      if (state.selectedDocGroup !== 'all' && state.selectedDocGroup !== 'unassigned' && gs !== state.selectedDocGroup) return false;
+      return !q || JSON.stringify(d).toLowerCase().indexOf(q) !== -1;
+    });
+
+    var folderChips =
+      '<div class="rf-folder-chip' + (state.selectedDocGroup === 'all' ? ' active' : '') + '" data-rf-dgrp="all">📂 All <span class="rf-fcnt">' + state.documents.length + '</span></div>' +
+      state.documentGroups.map(function (g) {
+        var gs = String(g.slug || '').toLowerCase();
+        var cnt = state.documents.filter(function (d) { return docGroupSlug(d) === gs; }).length;
+        return '<div class="rf-folder-chip' + (state.selectedDocGroup === gs ? ' active' : '') + '" data-rf-dgrp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
+          '<span>📁 ' + esc(g.name) + '</span>' +
+          '<span class="rf-fcnt">' + cnt + '</span>' +
+          '<button type="button" class="rf-folder-act" data-rf-dgrp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
+          '</div>';
+      }).join('') +
+      '<div class="rf-folder-chip' + (state.selectedDocGroup === 'unassigned' ? ' active' : '') + '" data-rf-dgrp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
+
+    var groupOpts = function (curSlug) {
+      return '<option value=""' + (!curSlug ? ' selected' : '') + '>📂 Unassigned</option>' +
+        state.documentGroups.map(function (g) {
+          var gs = String(g.slug || '').toLowerCase();
+          return '<option value="' + esc(gs) + '"' + (curSlug === gs ? ' selected' : '') + '>📁 ' + esc(g.name) + '</option>';
+        }).join('');
+    };
+
     body.innerHTML =
-      '<div class="rf-section-head"><div><h2>📁 Archival Documents &amp; Manuscripts</h2><p>Manage digitized Jawi, Pallava, Kawi, Rencong, Rumi, and English documents with auto-summarization and authenticity checks.</p></div>' +
-      '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-doc-btn">＋ Add Document</button></div>' +
-      '<div class="rf-toolbar"><input class="rf-input" id="rf-doc-search" style="flex:1;min-width:220px" type="search" placeholder="Search documents by title, code, script, or text…" value="' + esc(state.search) + '"/></div>' +
+      '<div class="rf-section-head"><div><h2>📁 Archival Documents &amp; Manuscripts' + (activeGroupObj ? ' — 📁 ' + esc(activeGroupObj.name) : state.selectedDocGroup === 'unassigned' ? ' — Unassigned' : '') + '</h2>' +
+      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize digitized Jawi, Pallava, Kawi, Rencong, Rumi, and English documents into maintainable group folders. Use the ⋮ menu on any folder to rename or delete it.') + '</p></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button type="button" class="rf-btn" id="rf-add-dgrp-btn">📁＋ New Group Folder</button>' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-doc-btn">＋ Add Document</button>' +
+      '</div></div>' +
+      '<div class="rf-folder-bar">' + folderChips + '</div>' +
+      '<div class="rf-toolbar"><input class="rf-input" id="rf-doc-search" style="flex:1;min-width:220px" type="search" placeholder="Search documents in this folder by title, code, script, or text…" value="' + esc(state.search) + '"/></div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (d) {
         var sub = [d.reference_code, d.script_type, d.category].filter(Boolean).join(' · ') || 'Archival Document';
         var verdict = d.authenticity_report && d.authenticity_report.verdict ? '<span class="rf-badge rf-badge-warn" style="margin-left:6px">' + esc(d.authenticity_report.verdict) + '</span>' : '';
+        var curGs = docGroupSlug(d);
         return '<article class="rf-card"><div class="rf-thumb">📁</div><div class="rf-card-body">' +
           '<h3 title="' + esc(d.title) + '">' + esc(d.title) + '</h3>' +
           '<div class="rf-sub">' + esc(sub) + '</div>' +
           '<p class="rf-desc">' + esc(d.summary || d.extracted_text || 'No summary yet.') + '</p>' +
           '<div class="rf-meta">' + (d.file_count || 0) + ' file(s)' + verdict + '</div>' +
           '<div class="rf-actions">' +
-          '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-d="' + esc(d.slug) + '">✎ Edit</button>' +
-          '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-d="' + esc(d.slug) + '">Delete</button>' +
+          '<select class="rf-move-sel" data-rf-move-d="' + esc(d.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
+          '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-d="' + esc(d.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
+          '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-d="' + esc(d.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
-      }).join('') : '<div class="rf-empty">No archival document folders yet. Click "＋ Add Document" to create one.</div>') +
+      }).join('') : '<div class="rf-empty">No archival documents in this folder yet. Click "＋ Add Document" to create one.</div>') +
       '</div>';
 
+    document.getElementById('rf-add-dgrp-btn').onclick = function () { openGroupModal('document', null); };
     document.getElementById('rf-add-doc-btn').onclick = function () { openDocumentModal(null); };
     document.getElementById('rf-doc-search').oninput = function (e) { state.search = e.target.value; renderDocuments(body); };
+
+    body.querySelectorAll('[data-rf-dgrp]').forEach(function (chip) {
+      chip.onclick = function (ev) {
+        if (ev.target.closest('.rf-folder-act')) return;
+        state.selectedDocGroup = chip.getAttribute('data-rf-dgrp');
+        renderDocuments(body);
+      };
+    });
+    body.querySelectorAll('[data-rf-dgrp-menu]').forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var gs = btn.getAttribute('data-rf-dgrp-menu');
+        var g = state.documentGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
+        if (!g) return;
+        var memberCnt = state.documents.filter(function (d) { return docGroupSlug(d) === gs; }).length;
+        openFolderMenu(btn, {
+          onRename: function () { openGroupModal('document', g); },
+          onDelete: function () {
+            openConfirmModal({
+              title: 'Delete Group Folder "' + g.name + '"?',
+              message: 'This removes the "' + g.name + '" folder. The ' + memberCnt + ' document' + (memberCnt === 1 ? '' : 's') + ' inside will NOT be deleted — they will move safely to Unassigned.',
+              confirmLabel: 'Delete Folder',
+              onConfirm: async function () {
+                var r = await api('/admin/api/document-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
+                if (r.ok) {
+                  if (state.selectedDocGroup === gs) state.selectedDocGroup = 'all';
+                  toast('Deleted folder "' + g.name + '"');
+                  await refreshAll(false);
+                } else toast((r.data && r.data.reason) || 'Delete failed', false);
+              }
+            });
+          }
+        });
+      };
+    });
+    body.querySelectorAll('[data-rf-move-d]').forEach(function (sel) {
+      sel.onchange = async function () {
+        var slug = sel.getAttribute('data-rf-move-d');
+        var nextGrp = sel.value;
+        var r = await api('/admin/api/documents/' + encodeURIComponent(slug), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ group_slug: nextGrp })
+        });
+        if (r.ok) {
+          toast(nextGrp ? 'Moved to folder' : 'Moved to Unassigned');
+          await refreshAll(false);
+        } else {
+          toast((r.data && r.data.reason) || 'Move failed', false);
+          renderDocuments(body);
+        }
+      };
+    });
     body.querySelectorAll('[data-rf-edit-d]').forEach(function (b) {
       b.onclick = function () {
         var d = state.documents.find(function (x) { return x.slug === b.getAttribute('data-rf-edit-d'); });
@@ -921,12 +1151,19 @@
       };
     });
     body.querySelectorAll('[data-rf-del-d]').forEach(function (b) {
-      b.onclick = async function () {
+      b.onclick = function () {
         var d = state.documents.find(function (x) { return x.slug === b.getAttribute('data-rf-del-d'); });
-        if (!d || !window.confirm('Delete document folder "' + d.title + '"?')) return;
-        var r = await api('/admin/api/documents/' + encodeURIComponent(d.slug), { method: 'DELETE' });
-        if (r.ok) { toast('Deleted document'); await refreshAll(false); }
-        else toast(r.data.reason || 'Delete failed', false);
+        if (!d) return;
+        openConfirmModal({
+          title: 'Delete Document "' + d.title + '"?',
+          message: 'Delete document "' + d.title + '" and its ' + (d.file_count || 0) + ' uploaded file(s)? This cannot be undone.',
+          confirmLabel: 'Delete Document',
+          onConfirm: async function () {
+            var r = await api('/admin/api/documents/' + encodeURIComponent(d.slug), { method: 'DELETE' });
+            if (r.ok) { toast('Deleted document'); await refreshAll(false); }
+            else toast((r.data && r.data.reason) || 'Delete failed', false);
+          }
+        });
       };
     });
   }
@@ -935,10 +1172,18 @@
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
     var scripts = ['Jawi', 'Pallava', 'Kawi', 'Rencong', 'Rumi / Bahasa Melayu', 'English', 'Multilingual'];
+    var defaultGrp = doc ? docGroupSlug(doc) : (state.selectedDocGroup !== 'all' && state.selectedDocGroup !== 'unassigned' ? state.selectedDocGroup : '');
+    var grpSelectHtml =
+      '<option value=""' + (!defaultGrp ? ' selected' : '') + '>Unassigned</option>' +
+      state.documentGroups.map(function (g) {
+        var gs = String(g.slug || '').toLowerCase();
+        return '<option value="' + esc(gs) + '"' + (defaultGrp === gs ? ' selected' : '') + '>' + esc(g.name) + '</option>';
+      }).join('');
     wrap.innerHTML =
-      '<div class="rf-modal"><h2>' + (doc ? 'Edit Document Folder' : 'Add Archival Document Folder') + '</h2>' +
+      '<div class="rf-modal"><h2>' + (doc ? 'Edit Document' : 'Add Archival Document') + '</h2>' +
       '<form id="rf-d-form"><div class="rf-form-grid">' +
-      '<div class="rf-field full"><label>Document Title</label><input class="rf-input" id="rf-d-title" required value="' + esc(doc ? doc.title || '' : '') + '"/></div>' +
+      '<div class="rf-field"><label>Document Title</label><input class="rf-input" id="rf-d-title" required value="' + esc(doc ? doc.title || '' : '') + '"/></div>' +
+      '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-d-group">' + grpSelectHtml + '</select></div>' +
       '<div class="rf-field"><label>Reference Code</label><input class="rf-input" id="rf-d-ref" value="' + esc(doc ? doc.reference_code || '' : '') + '"/></div>' +
       '<div class="rf-field"><label>Category</label><input class="rf-input" id="rf-d-cat" value="' + esc(doc ? doc.category || '' : '') + '"/></div>' +
       '<div class="rf-field"><label>Script / Writing System</label><select class="rf-select" id="rf-d-script">' +
@@ -967,12 +1212,20 @@
       if (!box) return;
       var files = cur.files || [];
       box.innerHTML = files.length ? files.map(function (f) {
-        return '<div class="rf-btn rf-btn-sm"><a href="' + esc(apiUrl(f.admin_url)) + '" target="_blank" style="color:inherit;text-decoration:none">📄 ' + esc(f.filename) + '</a><span data-del-f="' + esc(f.filename) + '" style="color:#dc2626;margin-left:6px;cursor:pointer;font-weight:700">×</span></div>';
+        return '<div class="rf-btn rf-btn-sm" style="gap:8px"><a href="' + esc(apiUrl(f.admin_url)) + '" target="_blank" style="color:inherit;text-decoration:none">📄 ' + esc(f.filename) + '</a><button type="button" class="rf-icon-del" data-del-f="' + esc(f.filename) + '" title="Delete file" style="width:22px;height:22px">' + TRASH_SVG + '</button></div>';
       }).join('') : '<span style="font-size:.78rem;color:rgb(var(--text-secondary))">No files uploaded yet.</span>';
       box.querySelectorAll('[data-del-f]').forEach(function (x) {
-        x.onclick = async function () {
-          var r = await api('/admin/api/documents/' + encodeURIComponent(cur.slug) + '/files/' + encodeURIComponent(x.getAttribute('data-del-f')), { method: 'DELETE' });
-          if (r.ok && r.data.document) { cur = r.data.document; renderDocFiles(cur); toast('File deleted'); refreshAll(false); }
+        x.onclick = function () {
+          var fn = x.getAttribute('data-del-f');
+          openConfirmModal({
+            title: 'Delete File?',
+            message: 'Delete file "' + fn + '" from document "' + cur.title + '"? This cannot be undone.',
+            confirmLabel: 'Delete File',
+            onConfirm: async function () {
+              var r = await api('/admin/api/documents/' + encodeURIComponent(cur.slug) + '/files/' + encodeURIComponent(fn), { method: 'DELETE' });
+              if (r.ok && r.data.document) { cur = r.data.document; renderDocFiles(cur); toast('File deleted'); refreshAll(false); }
+            }
+          });
         };
       });
       var ai = document.getElementById('rf-d-authinfo');
@@ -991,8 +1244,14 @@
         fd.append('file', file);
         var r = await api('/admin/api/documents/' + encodeURIComponent(doc.slug) + '/files' + (force ? '?force=1' : ''), { method: 'POST', body: fd });
         if (r.status === 409 && !force) {
-          if (window.confirm('⚠️ ' + (r.data.reason || 'Duplicate file detected') + '\n\nUpload duplicate anyway?')) return doDocUpload(file, true);
-          toast('Duplicate upload prevented', false);
+          openConfirmModal({
+            title: 'Duplicate File Detected',
+            message: (r.data.reason || 'This file already exists in the archive.') + ' Do you still want to upload a duplicate copy?',
+            confirmLabel: 'Upload Anyway',
+            primary: true,
+            onConfirm: function () { return doDocUpload(file, true); },
+            onCancel: function () { toast('Duplicate upload prevented', false); }
+          });
           return;
         }
         if (r.ok && r.data.document) {
@@ -1027,6 +1286,7 @@
       ev.preventDefault();
       var payload = {
         title: document.getElementById('rf-d-title').value,
+        group_slug: document.getElementById('rf-d-group').value,
         reference_code: document.getElementById('rf-d-ref').value,
         category: document.getElementById('rf-d-cat').value,
         script_type: document.getElementById('rf-d-script').value,
@@ -1248,6 +1508,9 @@
   }
 
   document.addEventListener('click', function (ev) {
+    if (!ev.target.closest || (!ev.target.closest('.rf-menu-pop') && !ev.target.closest('.rf-folder-act'))) {
+      closeMenus();
+    }
     if (!state.open) return;
     var target = ev.target && ev.target.closest ? ev.target.closest('button, a') : null;
     if (!target || target.id === BTN_ID) return;
@@ -1258,7 +1521,12 @@
   }, true);
 
   document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape' && state.open && !document.querySelector('.rf-modal-backdrop')) closeAdmin();
+    if (ev.key === 'Escape') {
+      if (document.querySelector('.rf-menu-pop')) { closeMenus(); return; }
+      var modals = document.querySelectorAll('.rf-modal-backdrop');
+      if (modals.length) { modals[modals.length - 1].remove(); return; }
+      if (state.open) closeAdmin();
+    }
   });
 
   window.addEventListener('resize', function () { if (state.open) positionStage(); });

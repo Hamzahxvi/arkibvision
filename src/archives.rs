@@ -517,6 +517,28 @@ pub fn save_document(
                 .or_insert_with(|| Value::String(String::new()));
         }
     }
+    if payload.contains_key("group_slug") || payload.contains_key("group") {
+        let raw = payload
+            .get("group_slug")
+            .or_else(|| payload.get("group"))
+            .map(value_to_trimmed_string)
+            .unwrap_or_default();
+        if raw.is_empty() {
+            meta.insert("group_slug".to_string(), Value::String(String::new()));
+            meta.insert("group".to_string(), Value::String(String::new()));
+        } else if let Some((gs, gn)) = resolve_document_group(cfg, &raw) {
+            meta.insert("group_slug".to_string(), Value::String(gs));
+            meta.insert("group".to_string(), Value::String(gn));
+        } else {
+            meta.insert("group_slug".to_string(), Value::String(group_slug(&raw)));
+            meta.insert("group".to_string(), Value::String(raw));
+        }
+    } else {
+        meta.entry("group_slug".to_string())
+            .or_insert_with(|| Value::String(String::new()));
+        meta.entry("group".to_string())
+            .or_insert_with(|| Value::String(String::new()));
+    }
     for arr_key in ["key_topics", "key_names", "key_dates"] {
         if let Some(val) = payload.get(arr_key) {
             if val.is_array() {
@@ -1339,6 +1361,219 @@ pub fn delete_people_group(cfg: &AppConfig, slug: &str) -> Result<Value, String>
     }))
 }
 
+// ─── Maintainable Document Group Folders (e.g. Historical Manuscripts, Official Records) ─
+
+pub fn ensure_default_document_groups(cfg: &AppConfig) {
+    if cfg.document_groups_file.is_file() {
+        return;
+    }
+    let now = Utc::now().to_rfc3339();
+    let defaults = [
+        (
+            "Historical Manuscripts",
+            "Classical Malay, Jawi, Pallava, Kawi, and Rencong heritage manuscripts.",
+        ),
+        (
+            "Official Records",
+            "Treaties, government letters, legal instruments, and archival files.",
+        ),
+    ];
+    let mut list = Vec::new();
+    for (name, desc) in defaults {
+        let mut m = Map::new();
+        m.insert("slug".to_string(), Value::String(group_slug(name)));
+        m.insert("name".to_string(), Value::String(name.to_string()));
+        m.insert("description".to_string(), Value::String(desc.to_string()));
+        m.insert("created_at".to_string(), Value::String(now.clone()));
+        m.insert("updated_at".to_string(), Value::String(now.clone()));
+        list.push(m);
+    }
+    let _ = save_raw_people_groups(&cfg.document_groups_file, &list);
+}
+
+pub fn list_document_groups(cfg: &AppConfig) -> Vec<Value> {
+    ensure_default_document_groups(cfg);
+    let counts = count_members_by_group(&cfg.documents_dir);
+    let mut groups = load_raw_people_groups(&cfg.document_groups_file);
+    for g in &mut groups {
+        let slug = g
+            .get("slug")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let cnt = counts.get(&slug).copied().unwrap_or(0);
+        g.insert("member_count".to_string(), json!(cnt));
+    }
+    groups.into_iter().map(Value::Object).collect()
+}
+
+pub fn resolve_document_group(cfg: &AppConfig, group_or_slug: &str) -> Option<(String, String)> {
+    let clean = group_or_slug.trim();
+    if clean.is_empty() {
+        return None;
+    }
+    let target_slug = group_slug(clean);
+    let groups = load_raw_people_groups(&cfg.document_groups_file);
+    for g in groups {
+        let s = g.get("slug").and_then(Value::as_str).unwrap_or("");
+        let n = g.get("name").and_then(Value::as_str).unwrap_or("");
+        if s.eq_ignore_ascii_case(clean)
+            || s.eq_ignore_ascii_case(&target_slug)
+            || n.eq_ignore_ascii_case(clean)
+        {
+            return Some((s.to_string(), n.to_string()));
+        }
+    }
+    None
+}
+
+pub fn create_document_group(
+    cfg: &AppConfig,
+    name: &str,
+    description: &str,
+) -> Result<Value, String> {
+    ensure_default_document_groups(cfg);
+    let clean_name = name.trim();
+    if clean_name.is_empty() {
+        return Err("Document group folder name is required.".to_string());
+    }
+    let slug = group_slug(clean_name);
+    if slug.is_empty() || slug == "all" || slug == "unassigned" {
+        return Err(format!(
+            "'{clean_name}' is a reserved or invalid folder name."
+        ));
+    }
+    let mut groups = load_raw_people_groups(&cfg.document_groups_file);
+    if groups.iter().any(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(&slug))
+    }) {
+        return Err(format!(
+            "Document group folder '{clean_name}' already exists."
+        ));
+    }
+    let now = Utc::now().to_rfc3339();
+    let mut m = Map::new();
+    m.insert("slug".to_string(), Value::String(slug));
+    m.insert("name".to_string(), Value::String(clean_name.to_string()));
+    m.insert(
+        "description".to_string(),
+        Value::String(description.trim().to_string()),
+    );
+    m.insert("created_at".to_string(), Value::String(now.clone()));
+    m.insert("updated_at".to_string(), Value::String(now));
+    groups.push(m.clone());
+    save_raw_people_groups(&cfg.document_groups_file, &groups)?;
+    m.insert("member_count".to_string(), json!(0));
+    Ok(Value::Object(m))
+}
+
+pub fn rename_document_group(
+    cfg: &AppConfig,
+    old_slug: &str,
+    new_name: &str,
+    description: Option<&str>,
+) -> Result<Value, String> {
+    ensure_default_document_groups(cfg);
+    let clean_name = new_name.trim();
+    if clean_name.is_empty() {
+        return Err("New document group folder name is required.".to_string());
+    }
+    let new_slug = group_slug(clean_name);
+    if new_slug.is_empty() || new_slug == "all" || new_slug == "unassigned" {
+        return Err(format!(
+            "'{clean_name}' is a reserved or invalid folder name."
+        ));
+    }
+
+    let mut groups = load_raw_people_groups(&cfg.document_groups_file);
+    let Some(pos) = groups.iter().position(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(old_slug))
+    }) else {
+        return Err("Document group folder not found.".to_string());
+    };
+    if groups.iter().enumerate().any(|(i, g)| {
+        i != pos
+            && g.get("slug")
+                .and_then(Value::as_str)
+                .is_some_and(|s| s.eq_ignore_ascii_case(&new_slug))
+    }) {
+        return Err(format!(
+            "Another document group folder named '{clean_name}' already exists."
+        ));
+    }
+
+    let old_name = groups[pos]
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let old_slug_actual = groups[pos]
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or(old_slug)
+        .to_string();
+
+    groups[pos].insert("slug".to_string(), Value::String(new_slug.clone()));
+    groups[pos].insert("name".to_string(), Value::String(clean_name.to_string()));
+    if let Some(desc) = description {
+        groups[pos].insert(
+            "description".to_string(),
+            Value::String(desc.trim().to_string()),
+        );
+    }
+    groups[pos].insert(
+        "updated_at".to_string(),
+        Value::String(Utc::now().to_rfc3339()),
+    );
+    save_raw_people_groups(&cfg.document_groups_file, &groups)?;
+
+    let migrated = cascade_profile_group_update(
+        &cfg.documents_dir,
+        &old_slug_actual,
+        &old_name,
+        &new_slug,
+        clean_name,
+    );
+    let mut out = groups[pos].clone();
+    out.insert("migrated_documents".to_string(), json!(migrated));
+    Ok(Value::Object(out))
+}
+
+pub fn delete_document_group(cfg: &AppConfig, slug: &str) -> Result<Value, String> {
+    ensure_default_document_groups(cfg);
+    let mut groups = load_raw_people_groups(&cfg.document_groups_file);
+    let Some(pos) = groups.iter().position(|g| {
+        g.get("slug")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case(slug))
+    }) else {
+        return Err("Document group folder not found.".to_string());
+    };
+    let removed = groups.remove(pos);
+    let old_name = removed
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let old_slug = removed
+        .get("slug")
+        .and_then(Value::as_str)
+        .unwrap_or(slug)
+        .to_string();
+    save_raw_people_groups(&cfg.document_groups_file, &groups)?;
+    let unassigned = cascade_profile_group_update(&cfg.documents_dir, &old_slug, &old_name, "", "");
+    Ok(json!({
+        "status": "deleted",
+        "slug": old_slug,
+        "name": old_name,
+        "unassigned_documents": unassigned,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1408,6 +1643,28 @@ mod tests {
         let after_del: Value =
             serde_json::from_str(&fs::read_to_string(p1.join("metadata.json")).unwrap()).unwrap();
         assert_eq!(after_del["group"], "");
+
+        // Also test Document Group Folders CRUD & cascade
+        let ddir = base.join("documents");
+        let d1 = ddir.join("hikayat_hang_tuah");
+        fs::create_dir_all(&d1).unwrap();
+        cfg.documents_dir = ddir;
+        cfg.document_groups_file = base.join("document_groups.json");
+
+        ensure_default_document_groups(&cfg);
+        assert_eq!(list_document_groups(&cfg).len(), 2);
+        let dg = create_document_group(&cfg, "Royal Treaties", "Treaty records").unwrap();
+        assert_eq!(dg["slug"], "royal_treaties");
+        fs::write(
+            d1.join("metadata.json"),
+            r#"{"title":"Hikayat","group":"Royal Treaties","group_slug":"royal_treaties"}"#,
+        )
+        .unwrap();
+        let d_ren =
+            rename_document_group(&cfg, "royal_treaties", "National Treaties", None).unwrap();
+        assert_eq!(d_ren["migrated_documents"], 1);
+        let d_del = delete_document_group(&cfg, "national_treaties").unwrap();
+        assert_eq!(d_del["unassigned_documents"], 1);
 
         let _ = fs::remove_dir_all(&base);
     }

@@ -225,7 +225,15 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
             "/admin/location-images/{slug}/{*filename}",
             get(admin_location_image),
         )
-        // Managed Archival Document Folders
+        // Managed Archival Document Folders & Document Group Folders
+        .route(
+            "/admin/api/document-groups",
+            get(admin_api_document_groups).post(admin_create_document_group),
+        )
+        .route(
+            "/admin/api/document-groups/{slug}",
+            patch(admin_rename_document_group).delete(admin_delete_document_group),
+        )
         .route(
             "/admin/api/documents",
             get(admin_api_documents).post(admin_create_document),
@@ -1869,6 +1877,125 @@ async fn admin_delete_people_group(
     };
     let cfg = state.service.cfg.clone();
     match tokio::task::spawn_blocking(move || archives::delete_people_group(&cfg, &clean_slug))
+        .await
+    {
+        Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+// ─── Maintainable Document Group Folder Endpoints ────────────────────────────
+
+async fn admin_api_document_groups(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let list = tokio::task::spawn_blocking(move || archives::list_document_groups(&cfg))
+        .await
+        .unwrap_or_default();
+    Json(Value::Array(list))
+}
+
+async fn admin_create_document_group(
+    State(state): State<AdminState>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let name = payload
+        .get("name")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let description = payload
+        .get("description")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::create_document_group(&cfg, &name, &description)
+    })
+    .await
+    {
+        Ok(Ok(group)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "created", "group": group })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_rename_document_group(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    Json(payload): Json<Map<String, Value>>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid group slug." })),
+        )
+            .into_response();
+    };
+    let name = payload
+        .get("name")
+        .map(value_to_trimmed_string)
+        .unwrap_or_default();
+    let desc = payload
+        .get("description")
+        .filter(|v| !v.is_null())
+        .map(value_to_trimmed_string);
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        archives::rename_document_group(&cfg, &clean_slug, &name, desc.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(group)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "updated", "group": group })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_document_group(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid group slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || archives::delete_document_group(&cfg, &clean_slug))
         .await
     {
         Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
