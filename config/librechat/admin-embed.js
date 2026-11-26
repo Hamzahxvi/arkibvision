@@ -390,31 +390,55 @@
   // ─── Tab 1: Approvals ─────────────────────────────────────────────────────
   function renderApprovals(body) {
     var pending = state.requests.filter(function (x) { return x.status === 'pending'; });
-    var enrollCnt = pending.filter(function (x) { return x.request_type === 'enrollment'; }).length;
+    var isEnrollType = function (t) { return t === 'enrollment' || t === 'face_enrollment'; };
+    var enrollCnt = pending.filter(function (x) { return isEnrollType(x.request_type); }).length;
     var updateCnt = pending.filter(function (x) { return x.request_type === 'metadata_update'; }).length;
+    var ocrCnt = pending.filter(function (x) { return x.request_type === 'ocr_correction'; }).length;
     var q = state.search.toLowerCase();
     var visible = pending.filter(function (x) {
-      var mf = state.filter === 'all' || x.request_type === state.filter;
-      var ms = !q || (String(x.name || '') + ' ' + String(x.id || '')).toLowerCase().indexOf(q) !== -1;
+      var mf = state.filter === 'all' ||
+        (state.filter === 'enrollment' ? isEnrollType(x.request_type) : x.request_type === state.filter);
+      var ms = !q || (String(x.name || '') + ' ' + String(x.id || '') + ' ' + String(x.document_slug || '')).toLowerCase().indexOf(q) !== -1;
       return mf && ms;
     });
 
     body.innerHTML =
-      '<div class="rf-section-head"><div><h2>Requests Awaiting Approval</h2><p>Review guest enrollment and profile update requests before adding them to the trusted archive.</p></div></div>' +
+      '<div class="rf-section-head"><div><h2>Requests Awaiting Approval</h2><p>Review guest enrollment, profile update, and Jawi OCR correction requests before committing them to the trusted archive.</p></div></div>' +
       '<div class="rf-stats">' +
       '<div class="rf-stat"><strong>' + pending.length + '</strong><span>Waiting for review</span></div>' +
       '<div class="rf-stat"><strong>' + enrollCnt + '</strong><span>New enrollments</span></div>' +
       '<div class="rf-stat"><strong>' + updateCnt + '</strong><span>Profile updates</span></div>' +
+      '<div class="rf-stat"><strong>' + ocrCnt + '</strong><span>OCR corrections</span></div>' +
       '</div>' +
       '<div class="rf-toolbar">' +
-      '<input class="rf-input" id="rf-req-search" style="flex:1;min-width:220px" type="search" placeholder="Search by name or request ID…" value="' + esc(state.search) + '"/>' +
-      ['all', 'enrollment', 'metadata_update'].map(function (f) {
-        var lbl = f === 'all' ? 'All' : f === 'enrollment' ? 'Enrollments' : 'Updates';
+      '<input class="rf-input" id="rf-req-search" style="flex:1;min-width:220px" type="search" placeholder="Search by name, document, or request ID…" value="' + esc(state.search) + '"/>' +
+      ['all', 'enrollment', 'metadata_update', 'ocr_correction'].map(function (f) {
+        var lbl = f === 'all' ? 'All' : f === 'enrollment' ? 'Enrollments' : f === 'metadata_update' ? 'Updates' : 'OCR Edits';
         return '<button type="button" class="rf-btn' + (state.filter === f ? ' rf-btn-primary' : '') + '" data-rf-flt="' + f + '">' + lbl + '</button>';
       }).join('') +
       '</div>' +
       '<div class="rf-grid">' +
       (visible.length ? visible.map(function (req) {
+        if (req.request_type === 'ocr_correction') {
+          var pairs = Array.isArray(req.lexicon_suggestions) ? req.lexicon_suggestions : [];
+          var lexHtml = pairs.length
+            ? '<div style="margin-top:6px;padding:6px 8px;border-radius:6px;background:rgba(37,99,235,.08);font-size:.74rem">' +
+              '<b>DBP Lexicon Pairs (' + pairs.length + '):</b> ' +
+              pairs.map(function (p) { return esc(p.jawi || '') + ' → ' + esc(p.rumi || ''); }).join(', ') +
+              '<label style="display:flex;align-items:center;gap:6px;margin-top:5px;cursor:pointer">' +
+              '<input type="checkbox" checked data-rf-lex-chk="' + esc(req.id) + '"/> Add pairs to DBP lexicon (dbp_jawi_rumi.tsv)</label></div>'
+            : '';
+          return '<article class="rf-card rf-card-col">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center"><b>📜 ' + esc(req.document_title || req.name || 'Jawi OCR Correction') + '</b><span class="rf-meta">' + esc(req.id) + '</span></div>' +
+            (req.edited_jawi_text ? '<div dir="rtl" style="padding:7px 9px;border-radius:6px;border:1px solid rgb(var(--border-light));font-family:Amiri,Traditional Arabic,serif;font-size:1.05rem;max-height:90px;overflow:auto">' + esc(req.edited_jawi_text) + '</div>' : '') +
+            (req.edited_rumi_text ? '<div style="padding:7px 9px;border-radius:6px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.28);font-size:.8rem;max-height:90px;overflow:auto"><b>Rumi:</b> ' + esc(req.edited_rumi_text) + '</div>' : '') +
+            (req.note ? '<div style="font-size:.76rem;color:rgb(var(--text-secondary))"><b>Note:</b> ' + esc(req.note) + '</div>' : '') +
+            lexHtml +
+            '<div class="rf-actions">' +
+            '<button type="button" class="rf-btn rf-btn-ok" style="flex:1" data-rf-act="approve" data-rf-id="' + esc(req.id) + '">✅ Approve</button>' +
+            '<button type="button" class="rf-btn rf-btn-danger" style="flex:1" data-rf-act="reject" data-rf-id="' + esc(req.id) + '">' + TRASH_SVG + '<span>Reject</span></button>' +
+            '</div></article>';
+        }
         var meta = req.metadata || {};
         var kind = req.request_type === 'metadata_update' ? 'Profile update' : 'New enrollment';
         var srcImg = apiUrl('/admin/images/source/' + encodeURIComponent(req.id));
@@ -422,6 +446,7 @@
         var rows = [
           ['Action', kind],
           ['Submitted', new Date(req.submitted_at || Date.now()).toLocaleString()],
+          ['Group', meta.group],
           ['Description', meta.description],
           ['Location', meta.location],
           ['Note', req.note]
@@ -457,10 +482,17 @@
         var act = b.getAttribute('data-rf-act');
         var id = b.getAttribute('data-rf-id');
         var req = state.requests.find(function (x) { return x.id === id; });
+        var lexChk = body.querySelector('[data-rf-lex-chk="' + id + '"]');
+        var addLex = lexChk ? !!lexChk.checked : true;
         var runAct = async function () {
           b.disabled = true;
           try {
-            var r = await api('/admin/api/' + act + '/' + encodeURIComponent(id), { method: 'POST' });
+            var opts = { method: 'POST' };
+            if (act === 'approve') {
+              opts.headers = { 'Content-Type': 'application/json' };
+              opts.body = JSON.stringify({ add_to_lexicon: addLex });
+            }
+            var r = await api('/admin/api/' + act + '/' + encodeURIComponent(id), opts);
             if (r.ok) {
               toast(act === 'approve' ? '✅ Approved: ' + (r.data.identity || id) : 'Rejected request: ' + id, act === 'approve');
               await refreshAll(false);
@@ -2073,4 +2105,932 @@
   if (window.location.hash === '#arkib-admin' || window.location.hash === '#rojakface-admin') {
     setTimeout(openAdmin, 450);
   }
+})();
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Arkib Canvas — Split-Screen Right-Side Drawer (Zero-LLM-Token Native UI)
+// Mode 1: Jawi & Manuscript OCR Workbench (`ocr`)
+// Mode 2: Identity & Photo Enrollment Canvas (`enroll`)
+// ═════════════════════════════════════════════════════════════════════════════
+(function () {
+  var API_ORIGIN = (window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost')
+    ? ('http://' + window.location.hostname + ':8005')
+    : 'http://127.0.0.1:8005';
+  var DRAWER_ID = 'ac-drawer';
+  var RAIL_BTN_ID = 'ac-canvas-rail-btn';
+
+  var ac = {
+    open: false,
+    mode: 'ocr',
+    sessionId: 'latest',
+    widthVw: 46,
+    isAdmin: false,
+    data: null,
+    // Mode 1 (OCR) state
+    ocrZoom: 1,
+    ocrPanX: 0,
+    ocrPanY: 0,
+    activeStripIdx: -1,
+    jawiText: '',
+    rumiText: '',
+    rumiManualOverride: false,
+    lexiconPairs: [],
+    previewTimer: null,
+    // Mode 2 (Enroll) state
+    enrollImg: null,
+    enrollImgSrc: '',
+    rotateDeg: 0,
+    brightness: 100,
+    contrast: 100,
+    cropRect: null, // { x, y, w, h } in canvas CSS coordinates
+    croppedDataUrl: '',
+    enrollMode: 'new', // 'new' | 'existing'
+    dragMode: null,
+    dragStart: null,
+    cropStart: null
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function apiUrl(path) {
+    if (!path) return '';
+    if (path.indexOf('http://') === 0 || path.indexOf('https://') === 0 || path.indexOf('data:') === 0) return path;
+    return API_ORIGIN + path;
+  }
+
+  async function acApi(path, opts) {
+    var o = Object.assign({ credentials: 'include' }, opts || {});
+    var resp = await fetch(API_ORIGIN + path, o);
+    var data = {};
+    try { data = await resp.json(); } catch (_) { data = {}; }
+    return { ok: resp.ok, status: resp.status, data: data };
+  }
+
+  function acToast(msg, ok) {
+    var el = document.createElement('div');
+    el.className = 'rf-toast' + (ok === false ? ' rf-toast-err' : '');
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function () { el.remove(); }, 3800);
+  }
+
+  function parseCanvasHash(raw) {
+    if (!raw) return null;
+    var idx = raw.indexOf('#arkib-canvas:');
+    if (idx === -1) return null;
+    var frag = raw.slice(idx + '#arkib-canvas:'.length);
+    var parts = frag.split(':');
+    var mode = (parts[0] === 'enroll') ? 'enroll' : 'ocr';
+    var id = (parts[1] || 'latest').replace(/[^a-zA-Z0-9_-]/g, '') || 'latest';
+    return { mode: mode, id: id };
+  }
+
+  function applyDrawerWidth(pxOrVw) {
+    var val = typeof pxOrVw === 'number' ? (pxOrVw + 'vw') : String(pxOrVw);
+    document.documentElement.style.setProperty('--ac-width', val);
+  }
+
+  function ensureDrawer() {
+    var el = document.getElementById(DRAWER_ID);
+    if (el) return el;
+    el = document.createElement('aside');
+    el.id = DRAWER_ID;
+    el.setAttribute('aria-label', 'Arkib Canvas');
+    el.innerHTML =
+      '<div class="ac-resize-handle" id="ac-resize-handle" title="Drag to resize Canvas"></div>' +
+      '<div class="ac-header">' +
+      '  <div class="ac-title-wrap">' +
+      '    <span>🗂️ Arkib Canvas</span>' +
+      '    <span class="ac-role-pill" id="ac-role-pill">Guest · Staged Approval</span>' +
+      '  </div>' +
+      '  <div style="display:flex;align-items:center;gap:6px">' +
+      '    <button type="button" class="rf-btn" id="ac-reload-btn" style="padding:4px 9px;font-size:.74rem" title="Reload session">↻</button>' +
+      '    <button type="button" class="rf-btn" id="ac-close-btn" style="padding:4px 9px;font-size:.78rem" aria-label="Close Arkib Canvas">✕</button>' +
+      '  </div>' +
+      '</div>' +
+      '<div class="ac-mode-tabs">' +
+      '  <button type="button" class="ac-mode-tab" data-ac-mode="ocr">📜 Jawi &amp; OCR Workbench</button>' +
+      '  <button type="button" class="ac-mode-tab" data-ac-mode="enroll">🪪 Identity Enrollment</button>' +
+      '</div>' +
+      '<div class="ac-body" id="ac-body"><div class="rf-empty">Loading Arkib Canvas…</div></div>' +
+      '<div class="ac-footer" id="ac-footer"></div>';
+    document.body.appendChild(el);
+
+    document.getElementById('ac-close-btn').onclick = closeCanvas;
+    document.getElementById('ac-reload-btn').onclick = function () {
+      loadSession(ac.mode, ac.sessionId);
+    };
+    el.querySelectorAll('[data-ac-mode]').forEach(function (btn) {
+      btn.onclick = function () {
+        var nextMode = btn.getAttribute('data-ac-mode');
+        if (nextMode !== ac.mode) {
+          openCanvas(nextMode, 'latest');
+        }
+      };
+    });
+
+    // Draggable left-edge resize handle (360px .. 75vw)
+    var handle = document.getElementById('ac-resize-handle');
+    handle.addEventListener('mousedown', function (ev) {
+      ev.preventDefault();
+      document.body.classList.add('ac-canvas-resizing');
+      var onMove = function (e) {
+        var vw = ((window.innerWidth - e.clientX) / window.innerWidth) * 100;
+        var minVw = (360 / window.innerWidth) * 100;
+        ac.widthVw = Math.max(minVw, Math.min(75, vw));
+        applyDrawerWidth(ac.widthVw.toFixed(2) + 'vw');
+      };
+      var onUp = function () {
+        document.body.classList.remove('ac-canvas-resizing');
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+
+    return el;
+  }
+
+  function updateRailButtonState() {
+    var b = document.getElementById(RAIL_BTN_ID);
+    if (!b) return;
+    b.classList.toggle('ac-active', ac.open);
+    b.setAttribute('aria-pressed', ac.open ? 'true' : 'false');
+  }
+
+  function closeCanvas() {
+    ac.open = false;
+    document.body.classList.remove('ac-canvas-open');
+    var el = document.getElementById(DRAWER_ID);
+    if (el) el.remove();
+    updateRailButtonState();
+    if (window.location.hash && window.location.hash.indexOf('#arkib-canvas:') === 0) {
+      try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) {}
+    }
+  }
+
+  async function openCanvas(mode, id) {
+    ac.mode = (mode === 'enroll') ? 'enroll' : 'ocr';
+    ac.sessionId = id || 'latest';
+    ac.open = true;
+    applyDrawerWidth(ac.widthVw + 'vw');
+    document.body.classList.add('ac-canvas-open');
+    ensureDrawer();
+    updateRailButtonState();
+    await loadSession(ac.mode, ac.sessionId);
+  }
+
+  async function loadSession(mode, id) {
+    var el = ensureDrawer();
+    el.querySelectorAll('[data-ac-mode]').forEach(function (b) {
+      b.classList.toggle('ac-active', b.getAttribute('data-ac-mode') === mode);
+    });
+    var body = document.getElementById('ac-body');
+    var footer = document.getElementById('ac-footer');
+    body.innerHTML = '<div class="rf-empty">Loading ' + (mode === 'ocr' ? 'Jawi OCR Workbench' : 'Enrollment Canvas') + '…</div>';
+    footer.innerHTML = '';
+
+    try {
+      var r = await acApi('/canvas/api/session/' + encodeURIComponent(mode) + '/' + encodeURIComponent(id || 'latest'));
+      if (!r.ok || !r.data) {
+        body.innerHTML = '<div class="rf-err-banner">Could not load Arkib Canvas session (' + esc(r.data && r.data.reason || r.status) + ').</div>';
+        return;
+      }
+      ac.data = r.data;
+      ac.isAdmin = !!r.data.is_admin;
+      ac.sessionId = r.data.session_id || id || 'new';
+      var pill = document.getElementById('ac-role-pill');
+      if (pill) {
+        pill.className = 'ac-role-pill' + (ac.isAdmin ? ' ac-admin' : '');
+        pill.textContent = ac.isAdmin ? 'Admin · Direct Save' : 'Guest · Staged Approval';
+      }
+      if (mode === 'ocr') {
+        ac.ocrZoom = 1;
+        ac.ocrPanX = 0;
+        ac.ocrPanY = 0;
+        ac.activeStripIdx = -1;
+        ac.jawiText = String(r.data.raw_jawi_text || '');
+        ac.rumiText = String(r.data.standard_malay_rumi_text || '');
+        ac.rumiManualOverride = false;
+        ac.lexiconPairs = [];
+        renderOcrWorkbench(body, footer);
+      } else {
+        ac.rotateDeg = 0;
+        ac.brightness = 100;
+        ac.contrast = 100;
+        ac.cropRect = null;
+        ac.croppedDataUrl = '';
+        ac.enrollImg = null;
+        ac.enrollImgSrc = r.data.image_url ? apiUrl(r.data.image_url) : '';
+        ac.enrollMode = 'new';
+        renderEnrollCanvas(body, footer);
+      }
+    } catch (err) {
+      body.innerHTML = '<div class="rf-err-banner">Could not reach local ArkibVision server (port 8005): ' + esc(err.message) + '</div>';
+    }
+  }
+
+  // ─── Mode 1: Jawi & Manuscript OCR Workbench ──────────────────────────────
+  function renderOcrWorkbench(body, footer) {
+    var d = ac.data || {};
+    var chunks = Array.isArray(d.chunks) ? d.chunks : [];
+    var docs = Array.isArray(d.documents) ? d.documents : [];
+    var activeImgUrl = ac.activeStripIdx >= 0 && chunks[ac.activeStripIdx]
+      ? chunks[ac.activeStripIdx].enhanced_chunk_url
+      : (d.image_url ? apiUrl(d.image_url) : '');
+
+    var stripHtml = chunks.length
+      ? '<div class="ac-strip-list">' +
+        '<button type="button" class="ac-strip-btn' + (ac.activeStripIdx === -1 ? ' ac-active' : '') + '" data-ac-strip="-1">Full Scan</button>' +
+        chunks.map(function (c, i) {
+          var badge = c.has_rubrication ? '<span class="ac-badge-red">Red Ink</span>' : '';
+          return '<button type="button" class="ac-strip-btn' + (ac.activeStripIdx === i ? ' ac-active' : '') + '" data-ac-strip="' + i + '">' +
+            esc(c.region_label || ('Strip ' + (i + 1))) + ' (' + esc(c.detected_text_lines || 1) + 'L) ' + badge + '</button>';
+        }).join('') +
+        '</div>'
+      : '';
+
+    var cov = typeof d.coverage_pct === 'number' ? d.coverage_pct.toFixed(1) + '%' : '—';
+    var styleLbl = d.script_style === 'old_classical_jawi_or_mixed' ? 'Old Classical Jawi' : 'Modern Jawi';
+    var hijri = Array.isArray(d.hijri_colophon_dates) ? d.hijri_colophon_dates : [];
+    var hijriHtml = hijri.length
+      ? '<div id="ac-hijri-bar" style="font-size:.74rem;color:#fbbf24;padding:4px 8px;border-radius:6px;background:rgba(245,158,11,.1)">📅 Colophon Date: ' +
+        hijri.map(function (h) { return esc(h.hijri_date) + ' → ' + esc(h.gregorian_date_masihi); }).join(' · ') + '</div>'
+      : '<div id="ac-hijri-bar" style="display:none"></div>';
+
+    body.innerHTML =
+      (activeImgUrl
+        ? '<div class="ac-card">' +
+          '  <div class="ac-card-head">' +
+          '    <span>🖼️ Scan Viewer ' + (d.file ? '· ' + esc(d.file) : '') + (d.has_rubrication ? ' <span class="ac-badge-red">Dakwat Merah</span>' : '') + '</span>' +
+          '    <div style="display:flex;gap:4px">' +
+          '      <button type="button" class="rf-btn" id="ac-zoom-out" style="padding:2px 8px;font-size:.74rem">−</button>' +
+          '      <button type="button" class="rf-btn" id="ac-zoom-reset" style="padding:2px 8px;font-size:.72rem">100%</button>' +
+          '      <button type="button" class="rf-btn" id="ac-zoom-in" style="padding:2px 8px;font-size:.74rem">+</button>' +
+          '    </div>' +
+          '  </div>' +
+          '  <div class="ac-scan-viewport" id="ac-scan-vp"><img id="ac-scan-img" src="' + esc(activeImgUrl) + '" alt="Manuscript scan"/></div>' +
+          stripHtml +
+          '</div>'
+        : '') +
+      '<div class="ac-card">' +
+      '  <div class="ac-card-head">' +
+      '    <span>✍️ Jawi Editor (RTL)</span>' +
+      '    <div class="ac-jawi-keys">' +
+      ['چ', 'ڠ', 'ڤ', 'ݢ', 'ڽ', 'ۏ'].map(function (ch) {
+        return '<button type="button" class="ac-jawi-key" data-ac-jawi="' + ch + '" title="Insert ' + ch + '">' + ch + '</button>';
+      }).join('') +
+      '    </div>' +
+      '  </div>' +
+      '  <textarea id="ac-jawi-ta" class="ac-jawi-textarea" dir="rtl" placeholder="توليس اتاو سونتيڠ تيکس جاوي دسيني...">' + esc(ac.jawiText) + '</textarea>' +
+      '</div>' +
+      '<div class="ac-card">' +
+      '  <div class="ac-card-head">' +
+      '    <span>🇲🇾 Live Standard Bahasa Malaysia (Rumi)</span>' +
+      '    <div style="display:flex;align-items:center;gap:6px">' +
+      '      <span class="rf-meta" id="ac-style-lbl">' + esc(styleLbl) + '</span>' +
+      '      <span class="ac-badge-cov" id="ac-cov-badge">FST Coverage: ' + esc(cov) + '</span>' +
+      '    </div>' +
+      '  </div>' +
+      hijriHtml +
+      '  <textarea id="ac-rumi-ta" class="ac-rumi-textarea" placeholder="Deterministic Rumi transliteration appears here automatically (<5ms)…">' + esc(ac.rumiText) + '</textarea>' +
+      '</div>' +
+      '<div class="ac-card">' +
+      '  <div class="ac-card-head"><span>📚 Document Link &amp; DBP Lexicon Suggestions</span></div>' +
+      '  <div class="ac-form-grid">' +
+      '    <div class="ac-field"><label>Link to Existing Document (optional)</label>' +
+      '      <select id="ac-doc-slug" class="rf-input" style="width:100%">' +
+      '        <option value="">— Create / Unlinked Transcription —</option>' +
+      docs.map(function (doc) {
+        var sel = (d.document_slug && d.document_slug === doc.slug) ? ' selected' : '';
+        return '<option value="' + esc(doc.slug) + '"' + sel + '>' + esc(doc.title || doc.slug) + '</option>';
+      }).join('') +
+      '      </select>' +
+      '    </div>' +
+      '    <div class="ac-field"><label>Title / Notes</label><input id="ac-ocr-title" class="rf-input" style="width:100%" placeholder="e.g. Surat Sultan 1324H" value="' + esc(d.file || '') + '"/></div>' +
+      '  </div>' +
+      '  <div style="display:flex;gap:6px;align-items:center;margin-top:4px">' +
+      '    <input id="ac-lex-jawi" class="rf-input" dir="rtl" style="flex:1" placeholder="Jawi word (e.g. ڤرلمباݢأن)"/>' +
+      '    <input id="ac-lex-rumi" class="rf-input" style="flex:1" placeholder="DBP Rumi (e.g. Perlembagaan)"/>' +
+      '    <button type="button" class="rf-btn" id="ac-lex-add">+ Pair</button>' +
+      '  </div>' +
+      '  <div id="ac-lex-list" style="display:flex;flex-wrap:wrap;gap:6px;font-size:.74rem"></div>' +
+      '  <input id="ac-ocr-notes" class="rf-input" style="width:100%" placeholder="Archivist notes (optional)…"/>' +
+      '</div>';
+
+    footer.innerHTML =
+      '<span style="font-size:.74rem;color:rgb(var(--text-secondary))">' +
+      (ac.isAdmin ? 'Admin session active — saves directly to archive &amp; DBP TSV.' : 'Guest mode — creates staged REQ-* for Admin approval.') +
+      '</span>' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="ac-ocr-submit">' +
+      (ac.isAdmin ? '✅ Save Verified Transcription' : '📤 Submit Correction for Approval') +
+      '</button>';
+
+    // Scan zoom/pan bindings
+    var img = document.getElementById('ac-scan-img');
+    var vp = document.getElementById('ac-scan-vp');
+    var updateImgTransform = function () {
+      if (img) img.style.transform = 'translate(' + ac.ocrPanX + 'px,' + ac.ocrPanY + 'px) scale(' + ac.ocrZoom + ')';
+      var zr = document.getElementById('ac-zoom-reset');
+      if (zr) zr.textContent = Math.round(ac.ocrZoom * 100) + '%';
+    };
+    if (vp && img) {
+      document.getElementById('ac-zoom-in').onclick = function () { ac.ocrZoom = Math.min(4, ac.ocrZoom + 0.35); updateImgTransform(); };
+      document.getElementById('ac-zoom-out').onclick = function () { ac.ocrZoom = Math.max(0.6, ac.ocrZoom - 0.35); updateImgTransform(); };
+      document.getElementById('ac-zoom-reset').onclick = function () { ac.ocrZoom = 1; ac.ocrPanX = 0; ac.ocrPanY = 0; updateImgTransform(); };
+      vp.addEventListener('mousedown', function (ev) {
+        var sx = ev.clientX - ac.ocrPanX;
+        var sy = ev.clientY - ac.ocrPanY;
+        var onM = function (e) { ac.ocrPanX = e.clientX - sx; ac.ocrPanY = e.clientY - sy; updateImgTransform(); };
+        var onU = function () { window.removeEventListener('mousemove', onM); window.removeEventListener('mouseup', onU); };
+        window.addEventListener('mousemove', onM);
+        window.addEventListener('mouseup', onU);
+      });
+    }
+    body.querySelectorAll('[data-ac-strip]').forEach(function (btn) {
+      btn.onclick = function () {
+        ac.activeStripIdx = parseInt(btn.getAttribute('data-ac-strip'), 10);
+        ac.ocrZoom = 1; ac.ocrPanX = 0; ac.ocrPanY = 0;
+        renderOcrWorkbench(body, footer);
+      };
+    });
+
+    // Jawi editor + 6-key helper bar + debounced 250ms deterministic preview
+    var jawiTa = document.getElementById('ac-jawi-ta');
+    var rumiTa = document.getElementById('ac-rumi-ta');
+    var runPreview = async function () {
+      var text = jawiTa.value;
+      ac.jawiText = text;
+      if (!text.trim()) {
+        if (!ac.rumiManualOverride) { rumiTa.value = ''; ac.rumiText = ''; }
+        return;
+      }
+      try {
+        var r = await acApi('/canvas/api/jawi-preview', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jawi_text: text })
+        });
+        if (r.ok && r.data) {
+          if (!ac.rumiManualOverride) {
+            ac.rumiText = r.data.standard_malay_rumi_text || '';
+            rumiTa.value = ac.rumiText;
+          }
+          var covEl = document.getElementById('ac-cov-badge');
+          if (covEl && typeof r.data.coverage_pct === 'number') covEl.textContent = 'FST Coverage: ' + r.data.coverage_pct.toFixed(1) + '%';
+          var stEl = document.getElementById('ac-style-lbl');
+          if (stEl) stEl.textContent = r.data.script_style === 'old_classical_jawi_or_mixed' ? 'Old Classical Jawi' : 'Modern Jawi';
+          var hb = document.getElementById('ac-hijri-bar');
+          var hd = Array.isArray(r.data.hijri_colophon_dates) ? r.data.hijri_colophon_dates : [];
+          if (hb) {
+            if (hd.length) {
+              hb.style.display = 'block';
+              hb.style.cssText = 'font-size:.74rem;color:#fbbf24;padding:4px 8px;border-radius:6px;background:rgba(245,158,11,.1)';
+              hb.innerHTML = '📅 Colophon Date: ' + hd.map(function (h) { return esc(h.hijri_date) + ' → ' + esc(h.gregorian_date_masihi); }).join(' · ');
+            } else {
+              hb.style.display = 'none';
+            }
+          }
+        }
+      } catch (_) {}
+    };
+    var schedulePreview = function () {
+      ac.rumiManualOverride = false;
+      clearTimeout(ac.previewTimer);
+      ac.previewTimer = setTimeout(runPreview, 250);
+    };
+    jawiTa.addEventListener('input', schedulePreview);
+    rumiTa.addEventListener('input', function () {
+      ac.rumiText = rumiTa.value;
+      ac.rumiManualOverride = true;
+    });
+
+    body.querySelectorAll('[data-ac-jawi]').forEach(function (kbtn) {
+      kbtn.onclick = function () {
+        var ch = kbtn.getAttribute('data-ac-jawi');
+        var start = jawiTa.selectionStart || 0;
+        var end = jawiTa.selectionEnd || 0;
+        var v = jawiTa.value;
+        jawiTa.value = v.slice(0, start) + ch + v.slice(end);
+        jawiTa.focus();
+        jawiTa.selectionStart = jawiTa.selectionEnd = start + ch.length;
+        schedulePreview();
+      };
+    });
+
+    // Lexicon suggestion pairs
+    var renderLexList = function () {
+      var listEl = document.getElementById('ac-lex-list');
+      if (!listEl) return;
+      listEl.innerHTML = ac.lexiconPairs.map(function (p, i) {
+        return '<span class="ac-strip-btn">' + esc(p.jawi) + ' → ' + esc(p.rumi) +
+          ' <b style="cursor:pointer;color:#f87171;margin-left:3px" data-ac-lex-rm="' + i + '">×</b></span>';
+      }).join('');
+      listEl.querySelectorAll('[data-ac-lex-rm]').forEach(function (rm) {
+        rm.onclick = function () {
+          ac.lexiconPairs.splice(parseInt(rm.getAttribute('data-ac-lex-rm'), 10), 1);
+          renderLexList();
+        };
+      });
+    };
+    document.getElementById('ac-lex-add').onclick = function () {
+      var j = document.getElementById('ac-lex-jawi').value.trim();
+      var r = document.getElementById('ac-lex-rumi').value.trim();
+      if (!j || !r) { acToast('Enter both Jawi and DBP Rumi words.', false); return; }
+      ac.lexiconPairs.push({ jawi: j, rumi: r });
+      document.getElementById('ac-lex-jawi').value = '';
+      document.getElementById('ac-lex-rumi').value = '';
+      renderLexList();
+    };
+    renderLexList();
+
+    // Submit OCR Edit
+    document.getElementById('ac-ocr-submit').onclick = async function () {
+      var btn = this;
+      var jawiVal = jawiTa.value.trim();
+      var rumiVal = rumiTa.value.trim();
+      if (!jawiVal && !rumiVal) { acToast('Enter Jawi or Rumi text first.', false); return; }
+      btn.disabled = true;
+      try {
+        var r = await acApi('/canvas/api/submit-ocr-edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: ac.sessionId,
+            document_slug: document.getElementById('ac-doc-slug').value || null,
+            document_title: document.getElementById('ac-ocr-title').value.trim() || null,
+            edited_jawi_text: jawiVal,
+            edited_rumi_text: rumiVal,
+            lexicon_suggestions: ac.lexiconPairs,
+            notes: document.getElementById('ac-ocr-notes').value.trim() || null
+          })
+        });
+        if (r.ok && r.data) {
+          if (r.data.status === 'saved_by_admin') {
+            acToast('✅ Verified transcription saved (' + (r.data.document_slug || 'archive') + ', +' + (r.data.lexicon_added || 0) + ' lexicon pair(s)).', true);
+          } else {
+            acToast('📤 Submitted for Admin approval: ' + (r.data.request_id || 'REQ'), true);
+          }
+        } else {
+          acToast('Error: ' + (r.data && r.data.reason || 'Submit failed'), false);
+        }
+      } catch (err) {
+        acToast('Error: ' + err.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
+  // ─── Mode 2: Identity & Photo Enrollment Canvas (HTML5 <canvas> Editor) ───
+  function renderEnrollCanvas(body, footer) {
+    var d = ac.data || {};
+    var people = Array.isArray(d.existing_identities) ? d.existing_identities : [];
+    var groups = Array.isArray(d.people_groups) ? d.people_groups : [];
+
+    body.innerHTML =
+      '<div class="ac-card">' +
+      '  <div class="ac-card-head">' +
+      '    <span>✂️ Photo Editor &amp; Face Crop</span>' +
+      '    <div style="display:flex;gap:5px;flex-wrap:wrap">' +
+      '      <label class="rf-btn" style="padding:3px 8px;font-size:.72rem;cursor:pointer">📁 Upload<input type="file" id="ac-enr-file" accept="image/*" style="display:none"/></label>' +
+      '      <button type="button" class="rf-btn" id="ac-rot-l" style="padding:3px 8px;font-size:.72rem">↺ 90°</button>' +
+      '      <button type="button" class="rf-btn" id="ac-rot-r" style="padding:3px 8px;font-size:.72rem">↻ 90°</button>' +
+      '      <button type="button" class="rf-btn" id="ac-crop-reset" style="padding:3px 8px;font-size:.72rem">Reset</button>' +
+      '      <button type="button" class="rf-btn rf-btn-primary" id="ac-crop-apply" style="padding:3px 9px;font-size:.72rem">Apply Crop</button>' +
+      '    </div>' +
+      '  </div>' +
+      '  <div class="ac-canvas-stage" id="ac-canvas-stage">' +
+      '    <canvas id="ac-editor-canvas" width="420" height="260"></canvas>' +
+      '    <div id="ac-no-img-hint" style="position:absolute;font-size:.78rem;color:rgb(var(--text-secondary));pointer-events:none">Upload or press Ctrl+V to paste a photo</div>' +
+      '  </div>' +
+      '  <div class="ac-slider-row">' +
+      '    <label>Brightness (<span id="ac-bri-v">100%</span>)<input type="range" id="ac-bri" min="50" max="160" value="100"/></label>' +
+      '    <label>Contrast (<span id="ac-con-v">100%</span>)<input type="range" id="ac-con" min="50" max="160" value="100"/></label>' +
+      '  </div>' +
+      '  <div id="ac-crop-status" style="font-size:.72rem;color:#34d399;display:none"></div>' +
+      '</div>' +
+      '<div class="ac-card">' +
+      '  <div class="ac-card-head"><span>👤 Identity &amp; Group Folder</span></div>' +
+      '  <div style="display:flex;gap:8px;margin-bottom:4px">' +
+      '    <label style="display:flex;align-items:center;gap:5px;font-size:.78rem;cursor:pointer"><input type="radio" name="ac-enr-mode" value="new" checked/> New Person</label>' +
+      '    <label style="display:flex;align-items:center;gap:5px;font-size:.78rem;cursor:pointer"><input type="radio" name="ac-enr-mode" value="existing"/> Existing Enrolled Person</label>' +
+      '  </div>' +
+      '  <div class="ac-form-grid">' +
+      '    <div class="ac-field" id="ac-new-name-wrap"><label>Full Name *</label><input id="ac-enr-name" class="rf-input" style="width:100%" placeholder="e.g. Datuk Seri …" value="' + esc(d.suggested_identity || '') + '"/></div>' +
+      '    <div class="ac-field" id="ac-exist-name-wrap" style="display:none"><label>Select Enrolled Person *</label>' +
+      '      <select id="ac-enr-existing" class="rf-input" style="width:100%">' +
+      '        <option value="">— Choose person —</option>' +
+      people.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('') +
+      '      </select>' +
+      '    </div>' +
+      '    <div class="ac-field"><label>Group Folder</label>' +
+      '      <select id="ac-enr-group" class="rf-input" style="width:100%">' +
+      '        <option value="">Unassigned</option>' +
+      groups.map(function (g) { return '<option value="' + esc(g.slug || g.name) + '">' + esc(g.name) + '</option>'; }).join('') +
+      '      </select>' +
+      '    </div>' +
+      '  </div>' +
+      '</div>' +
+      '<div class="ac-card">' +
+      '  <div class="ac-card-head"><span>🌐 Public Details (Visible in Chat)</span></div>' +
+      '  <div class="ac-form-grid">' +
+      '    <div class="ac-field"><label>Description / Role</label><input id="ac-pub-desc" class="rf-input" style="width:100%" placeholder="e.g. Archivist, Official Event"/></div>' +
+      '    <div class="ac-field"><label>Location</label><input id="ac-pub-loc" class="rf-input" style="width:100%" placeholder="e.g. Arkib Negara Malaysia"/></div>' +
+      '    <div class="ac-field"><label>Photograph By</label><input id="ac-pub-photog" class="rf-input" style="width:100%" placeholder="Photographer name"/></div>' +
+      '    <div class="ac-field"><label>Date</label><input id="ac-pub-date" class="rf-input" style="width:100%" placeholder="YYYY-MM-DD"/></div>' +
+      '  </div>' +
+      '  <div class="ac-field"><label>Notes</label><input id="ac-enr-notes" class="rf-input" style="width:100%" placeholder="Optional notes…"/></div>' +
+      '</div>' +
+      '<div class="ac-private-box">' +
+      '  <div class="ac-private-head"><span>🔒 Private / Restricted Details (Admin Only)</span><span style="font-size:.68rem;font-weight:500">Hidden from Chat</span></div>' +
+      '  <div class="ac-form-grid">' +
+      '    <div class="ac-field"><label>No. KP / NRIC</label><input id="ac-priv-nokp" class="rf-input" style="width:100%" placeholder="e.g. 880101-14-XXXX"/></div>' +
+      '    <div class="ac-field"><label>No. Telefon / Phone</label><input id="ac-priv-phone" class="rf-input" style="width:100%" placeholder="e.g. +6012-XXXXXXX"/></div>' +
+      '    <div class="ac-field"><label>Emel / Email</label><input id="ac-priv-email" class="rf-input" style="width:100%" placeholder="name@domain.my"/></div>' +
+      '    <div class="ac-field"><label>Tarikh Lahir / DOB</label><input id="ac-priv-dob" class="rf-input" style="width:100%" placeholder="YYYY-MM-DD"/></div>' +
+      '  </div>' +
+      '  <div class="ac-field"><label>Alamat / Address</label><input id="ac-priv-addr" class="rf-input" style="width:100%" placeholder="Home address (restricted)"/></div>' +
+      '</div>';
+
+    footer.innerHTML =
+      '<span style="font-size:.74rem;color:rgb(var(--text-secondary))">' +
+      (ac.isAdmin ? 'Admin session — enrolls face vector &amp; profile directly.' : 'Guest mode — submits REQ-* for Admin approval.') +
+      '</span>' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="ac-enr-submit">' +
+      (ac.isAdmin ? '✅ Enroll Now' : '📤 Submit Enrollment for Approval') +
+      '</button>';
+
+    // Toggle New vs Existing Person
+    body.querySelectorAll('input[name="ac-enr-mode"]').forEach(function (rad) {
+      rad.addEventListener('change', function () {
+        ac.enrollMode = rad.value;
+        document.getElementById('ac-new-name-wrap').style.display = ac.enrollMode === 'new' ? 'block' : 'none';
+        document.getElementById('ac-exist-name-wrap').style.display = ac.enrollMode === 'existing' ? 'block' : 'none';
+      });
+    });
+
+    // HTML5 Canvas Editor
+    var canvas = document.getElementById('ac-editor-canvas');
+    var ctx = canvas.getContext('2d');
+    var hintEl = document.getElementById('ac-no-img-hint');
+
+    function drawEditor() {
+      var img = ac.enrollImg;
+      if (!img) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (hintEl) hintEl.style.display = 'block';
+        return;
+      }
+      if (hintEl) hintEl.style.display = 'none';
+      var rot = ((ac.rotateDeg % 360) + 360) % 360;
+      var swapped = (rot === 90 || rot === 270);
+      var srcW = swapped ? img.naturalHeight : img.naturalWidth;
+      var srcH = swapped ? img.naturalWidth : img.naturalHeight;
+      var maxW = 460;
+      var maxH = 300;
+      var scale = Math.min(maxW / Math.max(1, srcW), maxH / Math.max(1, srcH), 1);
+      var cw = Math.max(120, Math.round(srcW * scale));
+      var ch = Math.max(100, Math.round(srcH * scale));
+      if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw;
+        canvas.height = ch;
+      }
+
+      ctx.save();
+      ctx.clearRect(0, 0, cw, ch);
+      ctx.filter = 'brightness(' + ac.brightness + '%) contrast(' + ac.contrast + '%)';
+      ctx.translate(cw / 2, ch / 2);
+      ctx.rotate((rot * Math.PI) / 180);
+      var drawW = swapped ? ch : cw;
+      var drawH = swapped ? cw : ch;
+      ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+      ctx.restore();
+
+      if (!ac.cropRect) {
+        // Pre-seed crop box around YuNet's detected face_box_xywh (with generous 35% margin) when unrotated
+        var fb = d.face_box_xywh;
+        if (Array.isArray(fb) && fb.length === 4 && rot === 0 && img.naturalWidth > 0) {
+          var sx = cw / img.naturalWidth;
+          var sy = ch / img.naturalHeight;
+          var pad = Math.max(fb[2], fb[3]) * 0.35;
+          var rx = Math.max(0, (fb[0] - pad) * sx);
+          var ry = Math.max(0, (fb[1] - pad) * sy);
+          var rw = Math.min(cw - rx, (fb[2] + pad * 2) * sx);
+          var rh = Math.min(ch - ry, (fb[3] + pad * 2) * sy);
+          ac.cropRect = { x: rx, y: ry, w: Math.max(40, rw), h: Math.max(40, rh) };
+        } else {
+          ac.cropRect = { x: Math.round(cw * 0.12), y: Math.round(ch * 0.08), w: Math.round(cw * 0.76), h: Math.round(ch * 0.84) };
+        }
+      }
+
+      // Dim outside crop rectangle & draw crisp blue handles
+      var c = ac.cropRect;
+      ctx.save();
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.52)';
+      ctx.fillRect(0, 0, cw, c.y);
+      ctx.fillRect(0, c.y + c.h, cw, ch - (c.y + c.h));
+      ctx.fillRect(0, c.y, c.x, c.h);
+      ctx.fillRect(c.x + c.w, c.y, cw - (c.x + c.w), c.h);
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(c.x, c.y, c.w, c.h);
+      ctx.fillStyle = '#60a5fa';
+      ctx.fillRect(c.x + c.w - 8, c.y + c.h - 8, 10, 10);
+      ctx.restore();
+    }
+
+    function exportCroppedDataUrl() {
+      var img = ac.enrollImg;
+      if (!img) return '';
+      var rot = ((ac.rotateDeg % 360) + 360) % 360;
+      var swapped = (rot === 90 || rot === 270);
+      var fullW = swapped ? img.naturalHeight : img.naturalWidth;
+      var fullH = swapped ? img.naturalWidth : img.naturalHeight;
+      var off = document.createElement('canvas');
+      off.width = fullW;
+      off.height = fullH;
+      var octx = off.getContext('2d');
+      octx.filter = 'brightness(' + ac.brightness + '%) contrast(' + ac.contrast + '%)';
+      octx.translate(fullW / 2, fullH / 2);
+      octx.rotate((rot * Math.PI) / 180);
+      octx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+
+      var c = ac.cropRect || { x: 0, y: 0, w: canvas.width, h: canvas.height };
+      var scaleX = fullW / Math.max(1, canvas.width);
+      var scaleY = fullH / Math.max(1, canvas.height);
+      var sx = Math.max(0, Math.round(c.x * scaleX));
+      var sy = Math.max(0, Math.round(c.y * scaleY));
+      var sw = Math.max(24, Math.min(fullW - sx, Math.round(c.w * scaleX)));
+      var sh = Math.max(24, Math.min(fullH - sy, Math.round(c.h * scaleY)));
+
+      var out = document.createElement('canvas');
+      var maxSide = 1024;
+      var outScale = Math.min(1, maxSide / Math.max(sw, sh));
+      out.width = Math.max(24, Math.round(sw * outScale));
+      out.height = Math.max(24, Math.round(sh * outScale));
+      out.getContext('2d').drawImage(off, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      return out.toDataURL('image/jpeg', 0.92);
+    }
+
+    function loadEditorImage(src) {
+      var img = new Image();
+      img.crossOrigin = 'use-credentials';
+      img.onload = function () {
+        ac.enrollImg = img;
+        ac.cropRect = null;
+        ac.croppedDataUrl = '';
+        drawEditor();
+      };
+      img.onerror = function () {
+        ac.enrollImg = null;
+        drawEditor();
+      };
+      img.src = src;
+    }
+
+    if (ac.enrollImgSrc) loadEditorImage(ac.enrollImgSrc);
+    else drawEditor();
+
+    // Drag / resize crop box on canvas
+    function canvasPos(ev) {
+      var r = canvas.getBoundingClientRect();
+      return {
+        x: (ev.clientX - r.left) * (canvas.width / Math.max(1, r.width)),
+        y: (ev.clientY - r.top) * (canvas.height / Math.max(1, r.height))
+      };
+    }
+    canvas.addEventListener('mousedown', function (ev) {
+      if (!ac.enrollImg || !ac.cropRect) return;
+      var p = canvasPos(ev);
+      var c = ac.cropRect;
+      var nearCorner = Math.abs(p.x - (c.x + c.w)) <= 16 && Math.abs(p.y - (c.y + c.h)) <= 16;
+      var inside = p.x >= c.x && p.x <= c.x + c.w && p.y >= c.y && p.y <= c.y + c.h;
+      ac.dragMode = nearCorner ? 'resize' : (inside ? 'move' : 'new');
+      ac.dragStart = p;
+      ac.cropStart = { x: c.x, y: c.y, w: c.w, h: c.h };
+    });
+    window.addEventListener('mousemove', function (ev) {
+      if (!ac.dragMode || !ac.open || ac.mode !== 'enroll') return;
+      var p = canvasPos(ev);
+      var s = ac.cropStart;
+      var dx = p.x - ac.dragStart.x;
+      var dy = p.y - ac.dragStart.y;
+      if (ac.dragMode === 'move') {
+        ac.cropRect = {
+          x: Math.max(0, Math.min(canvas.width - s.w, s.x + dx)),
+          y: Math.max(0, Math.min(canvas.height - s.h, s.y + dy)),
+          w: s.w,
+          h: s.h
+        };
+      } else if (ac.dragMode === 'resize') {
+        ac.cropRect = {
+          x: s.x,
+          y: s.y,
+          w: Math.max(36, Math.min(canvas.width - s.x, s.w + dx)),
+          h: Math.max(36, Math.min(canvas.height - s.y, s.h + dy))
+        };
+      } else {
+        var nx = Math.max(0, Math.min(ac.dragStart.x, p.x));
+        var ny = Math.max(0, Math.min(ac.dragStart.y, p.y));
+        ac.cropRect = {
+          x: nx,
+          y: ny,
+          w: Math.max(32, Math.min(canvas.width - nx, Math.abs(dx))),
+          h: Math.max(32, Math.min(canvas.height - ny, Math.abs(dy)))
+        };
+      }
+      drawEditor();
+    });
+    window.addEventListener('mouseup', function () { ac.dragMode = null; });
+
+    document.getElementById('ac-enr-file').addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () { loadEditorImage(reader.result); };
+      reader.readAsDataURL(f);
+    });
+    document.getElementById('ac-rot-l').onclick = function () { ac.rotateDeg -= 90; ac.cropRect = null; drawEditor(); };
+    document.getElementById('ac-rot-r').onclick = function () { ac.rotateDeg += 90; ac.cropRect = null; drawEditor(); };
+    document.getElementById('ac-crop-reset').onclick = function () {
+      ac.rotateDeg = 0; ac.brightness = 100; ac.contrast = 100; ac.cropRect = null; ac.croppedDataUrl = '';
+      document.getElementById('ac-bri').value = 100; document.getElementById('ac-bri-v').textContent = '100%';
+      document.getElementById('ac-con').value = 100; document.getElementById('ac-con-v').textContent = '100%';
+      var st = document.getElementById('ac-crop-status'); if (st) st.style.display = 'none';
+      drawEditor();
+    };
+    document.getElementById('ac-bri').addEventListener('input', function (e) {
+      ac.brightness = parseInt(e.target.value, 10) || 100;
+      document.getElementById('ac-bri-v').textContent = ac.brightness + '%';
+      drawEditor();
+    });
+    document.getElementById('ac-con').addEventListener('input', function (e) {
+      ac.contrast = parseInt(e.target.value, 10) || 100;
+      document.getElementById('ac-con-v').textContent = ac.contrast + '%';
+      drawEditor();
+    });
+    document.getElementById('ac-crop-apply').onclick = function () {
+      if (!ac.enrollImg) { acToast('Load or paste a photo first.', false); return; }
+      ac.croppedDataUrl = exportCroppedDataUrl();
+      var st = document.getElementById('ac-crop-status');
+      if (st) { st.style.display = 'block'; st.textContent = '✅ Crop & adjustments locked for submission.'; }
+      acToast('Crop applied — ready to submit.', true);
+    };
+
+    // Allow Ctrl+V image paste straight into Enrollment Canvas
+    ac._loadEditorImage = loadEditorImage;
+
+    // Submit Enrollment
+    document.getElementById('ac-enr-submit').onclick = async function () {
+      var btn = this;
+      var isExist = ac.enrollMode === 'existing';
+      var existingId = isExist ? document.getElementById('ac-enr-existing').value.trim() : '';
+      var newName = isExist ? '' : document.getElementById('ac-enr-name').value.trim();
+      var target = existingId || newName;
+      if (!target) { acToast('Please enter or select a person name.', false); return; }
+      var imgB64 = ac.croppedDataUrl || (ac.enrollImg ? exportCroppedDataUrl() : '');
+      if (!imgB64 && (!ac.sessionId || ac.sessionId === 'new')) {
+        acToast('Upload or paste a photo first.', false);
+        return;
+      }
+
+      var pub = {
+        description: document.getElementById('ac-pub-desc').value.trim(),
+        location: document.getElementById('ac-pub-loc').value.trim(),
+        photograph_by: document.getElementById('ac-pub-photog').value.trim(),
+        date: document.getElementById('ac-pub-date').value.trim()
+      };
+      var priv = {
+        no_kp: document.getElementById('ac-priv-nokp').value.trim(),
+        phone: document.getElementById('ac-priv-phone').value.trim(),
+        email: document.getElementById('ac-priv-email').value.trim(),
+        dob: document.getElementById('ac-priv-dob').value.trim(),
+        address: document.getElementById('ac-priv-addr').value.trim()
+      };
+
+      btn.disabled = true;
+      try {
+        var r = await acApi('/canvas/api/submit-enrollment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: ac.sessionId,
+            image_base64: imgB64,
+            identity_name: newName,
+            existing_identity: existingId || null,
+            group_folder: document.getElementById('ac-enr-group').value,
+            public_fields: pub,
+            private_fields: priv,
+            notes: document.getElementById('ac-enr-notes').value.trim()
+          })
+        });
+        if (r.ok && r.data) {
+          if (r.data.is_admin) {
+            acToast('✅ Enrolled directly: ' + (r.data.identity || target), true);
+          } else {
+            acToast('📤 Submitted for Admin approval: ' + (r.data.request_id || 'REQ') + ' (' + target + ')', true);
+          }
+        } else {
+          acToast('Error: ' + (r.data && r.data.reason || 'Enrollment failed'), false);
+        }
+      } catch (err) {
+        acToast('Error: ' + err.message, false);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
+  // ─── Rail Quick-Toggle Button & Global #arkib-canvas:<mode>:<id> Router ───
+  function createCanvasRailButton() {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = RAIL_BTN_ID;
+    btn.setAttribute('data-testid', 'nav-panel-arkib-canvas');
+    btn.setAttribute('aria-label', 'Arkib Canvas');
+    btn.setAttribute('aria-pressed', ac.open ? 'true' : 'false');
+    btn.className = 'ac-rail-btn flex h-9 w-9 items-center justify-center rounded-lg transition-colors' + (ac.open ? ' ac-active' : '');
+    btn.innerHTML =
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5" aria-hidden="true">' +
+      '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>' +
+      '</svg>' +
+      '<span class="rf-rail-tooltip">Arkib Canvas</span>';
+    btn.addEventListener('mouseenter', function () {
+      var tip = btn.querySelector('.rf-rail-tooltip');
+      if (!tip) return;
+      var rect = btn.getBoundingClientRect();
+      tip.style.top = Math.round(rect.top + rect.height / 2 - (tip.offsetHeight || 28) / 2) + 'px';
+      tip.style.left = Math.round(rect.right + 12) + 'px';
+    });
+    btn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (ac.open) closeCanvas();
+      else openCanvas(ac.mode || 'ocr', 'latest');
+    });
+    return btn;
+  }
+
+  function mountCanvasButton() {
+    var adminBtn = document.getElementById('rf-admin-rail-btn');
+    if (!adminBtn || !adminBtn.parentElement) return;
+    var existing = document.getElementById(RAIL_BTN_ID);
+    if (existing) {
+      if (existing.previousElementSibling !== adminBtn) adminBtn.insertAdjacentElement('afterend', existing);
+      return;
+    }
+    adminBtn.insertAdjacentElement('afterend', createCanvasRailButton());
+  }
+
+  // Intercept any chat link matching `#arkib-canvas:<mode>:<id>`
+  document.addEventListener('click', function (ev) {
+    var a = ev.target && ev.target.closest ? ev.target.closest('a[href*="#arkib-canvas:"]') : null;
+    if (!a) return;
+    var parsed = parseCanvasHash(a.getAttribute('href') || '');
+    if (!parsed) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    openCanvas(parsed.mode, parsed.id);
+  }, true);
+
+  window.addEventListener('hashchange', function () {
+    var parsed = parseCanvasHash(window.location.hash || '');
+    if (parsed) openCanvas(parsed.mode, parsed.id);
+  });
+
+  document.addEventListener('paste', function (ev) {
+    if (!ac.open || ac.mode !== 'enroll' || !ac._loadEditorImage) return;
+    var cd = ev.clipboardData || window.clipboardData;
+    if (!cd || !cd.items) return;
+    for (var i = 0; i < cd.items.length; i++) {
+      var item = cd.items[i];
+      if (item && item.type && item.type.indexOf('image/') === 0) {
+        var f = item.getAsFile();
+        if (f) {
+          ev.preventDefault();
+          var reader = new FileReader();
+          reader.onload = function () { ac._loadEditorImage(reader.result); acToast('Photo pasted into Enrollment Canvas', true); };
+          reader.readAsDataURL(f);
+          return;
+        }
+      }
+    }
+  });
+
+  var acObserver = new MutationObserver(mountCanvasButton);
+  acObserver.observe(document.documentElement, { childList: true, subtree: true });
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountCanvasButton);
+  else mountCanvasButton();
+
+  var initParsed = parseCanvasHash(window.location.hash || '');
+  if (initParsed) setTimeout(function () { openCanvas(initParsed.mode, initParsed.id); }, 450);
 })();

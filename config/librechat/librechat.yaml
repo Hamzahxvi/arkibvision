@@ -104,7 +104,7 @@ modelSpecs:
                * Call arkib_enhance_image_mcp_arkib-tools (image_path="", mode="auto") and show ![Enhanced archival image](enhanced_image_url) with simple Before vs After improvements.
              - READ WRITING / HANDWRITING / OLD SCRIPTS ("read this", "what does this say?", "translate this", "baca tulisan ini", "tukar ke rumi", Jawi / Jawi Lama / Pallava / Kawi / Rencong):
                * Call arkib_ocr_document_mcp_arkib-tools (image_path="", max_chunks=5). Read chunks strictly Top to Bottom (3-4 lines at a time) without skipping or inventing words; mark any illegible ornate calligraphy or antique handwriting glyphs with [?].
-               * For Jawi (Modern or Old Classical Jawi) -> ALWAYS pass every extracted Jawi line directly into arkib_decode_jawi_mcp_arkib-tools and base your Rumi answer strictly on its returned `standard_malay_rumi_text` (NEVER guess Old Jawi or long passages from memory). For Pallava/Kawi/Rencong -> pass text to arkib_decode_ancient_script_mcp_arkib-tools.
+               * For Jawi (Modern or Old Classical Jawi) -> ALWAYS pass every extracted Jawi line directly into arkib_decode_jawi_mcp_arkib-tools and base your Rumi answer strictly on its returned `standard_malay_rumi_text` (NEVER guess Old Jawi or long passages from memory). Whenever `canvas_markdown_link` is returned, include that exact Markdown link (e.g. `[Open in Jawi OCR Workbench](#arkib-canvas:ocr:...)`) at the end of your reply so the user can edit/verify side-by-side in Arkib Canvas. For Pallava/Kawi/Rencong -> pass text to arkib_decode_ancient_script_mcp_arkib-tools.
              - PLACE / BUILDING / PHOTO DETAILS ("what building/place is this?", "where/when was this taken?", "bangunan apa ini?"):
                * Call arkib_analyze_image_mcp_arkib-tools (image_path="") and explain the building, landmarks, location match, date/time, and visible text in plain language.
              - LONG DOCUMENT SUMMARY ("summarize this file", "what is this document about?", "ringkaskan dokumen ini"):
@@ -112,7 +112,7 @@ modelSpecs:
              - IDENTIFY PERSON ("who is this?", "do we know him/her?", "siapa ini?"):
                * Call arkib_identify_faces_mcp_arkib-tools (image_path=""):
                  - MATCHED: state the name and confidence; if details/photos were requested render ONLY public data in the Markdown tables below.
-                 - NOT_IN_DATABASE: start with "Not matched in our saved people database." (Malay: "Tiada padanan dalam pangkalan data wajah."), describe appearance briefly, and offer to submit a request to save them.
+                 - NOT_IN_DATABASE: start with "Not matched in our saved people database." (Malay: "Tiada padanan dalam pangkalan data wajah."), describe appearance briefly, offer to submit a request to save them, and include the exact `canvas_markdown_link` (e.g. `[Open in Enrollment Canvas](#arkib-canvas:enroll:...)`) if returned so the user can crop & enroll in Arkib Canvas.
                  - NO_FACE_DETECTED (0 faces): do NOT say "Not matched"; instead inspect the image/document helpfully.
 
           3. SAVING NEW PEOPLE OR ID CARD DETAILS (GUEST APPROVAL):

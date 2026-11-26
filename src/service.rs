@@ -8,6 +8,9 @@ use crate::archives::{
     search_locations, summarize_file_info, summarize_with_ollama,
 };
 use crate::biometrics::FaceEngine;
+use crate::canvas::{
+    LexiconPair, apply_ocr_edit_to_archive, cleanup_stale_canvas_sessions, save_canvas_session,
+};
 use crate::config::{
     AUTO_GALLERY_MAX_IMAGES, AppConfig, MAX_AUTO_IMAGE_AGE_SECS, OLLAMA_UNIFORM_NUM_CTX,
     PERCEPTUAL_HASH_DISTANCE, is_image_ext,
@@ -864,6 +867,138 @@ impl ArkibService {
         }
     }
 
+    /// Stages a Guest OCR transcription edit (`ocr_correction`) for Admin approval without touching `documents/` or the FST lexicon.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stage_ocr_correction_request(
+        &self,
+        session_id: &str,
+        document_slug: Option<&str>,
+        document_title: Option<&str>,
+        edited_jawi_text: &str,
+        edited_rumi_text: &str,
+        lexicon_suggestions: &[LexiconPair],
+        notes: &str,
+    ) -> Value {
+        let req_id = format!(
+            "REQ-{}",
+            Uuid::new_v4().simple().to_string()[..8].to_uppercase()
+        );
+        let now = Utc::now().to_rfc3339();
+        let display_name = document_title
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| document_slug.map(str::trim).filter(|s| !s.is_empty()))
+            .unwrap_or("Jawi OCR Correction");
+        let entry = json!({
+            "request_id": req_id,
+            "type": "ocr_correction",
+            "identity": display_name,
+            "session_id": session_id,
+            "document_slug": document_slug,
+            "document_title": document_title,
+            "edited_jawi_text": edited_jawi_text,
+            "edited_rumi_text": edited_rumi_text,
+            "lexicon_suggestions": lexicon_suggestions,
+            "notes": notes,
+            "submitted_by": "guest",
+            "submitted_at": now,
+            "status": "pending",
+        });
+        {
+            let _guard = self.pending_lock.lock().expect("pending lock");
+            let mut reqs = fs::read_to_string(&self.cfg.pending_file)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            reqs.insert(req_id.clone(), entry.clone());
+            self.save_pending_requests_unlocked(&reqs);
+        }
+        self.append_audit_history(&entry);
+        json!({
+            "status": "staged_for_admin_review",
+            "request_id": req_id,
+            "type": "ocr_correction",
+            "is_admin": false,
+            "message": format!("OCR correction request {req_id} has been submitted for Admin approval."),
+        })
+    }
+
+    /// Stages a Guest Canvas enrollment (`face_enrollment`) strictly into `pending_requests/staged/`
+    /// and `requests.json` (never writing directly to `arkib_vectors.json` or `profiles/`).
+    pub fn stage_canvas_enrollment_request(
+        &self,
+        identity: &str,
+        image_path: &Path,
+        proposed_metadata: Map<String, Value>,
+        notes: &str,
+    ) -> Value {
+        let clean = self.canonical_identity(identity);
+        let req_id = format!(
+            "REQ-{}",
+            Uuid::new_v4().simple().to_string()[..8].to_uppercase()
+        );
+        let ext = image_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg");
+        let staged_dir = self.cfg.pending_dir.join("staged");
+        let _ = fs::create_dir_all(&staged_dir);
+        let staged_source = staged_dir.join(format!("{req_id}_source.{ext}"));
+        let _ = fs::copy(image_path, &staged_source);
+        // Mirror into pending_images_dir so existing Admin Portal `/admin/images/source/<req_id>` renders cleanly.
+        let mirror_source = self
+            .cfg
+            .pending_images_dir
+            .join(format!("{req_id}_source.{ext}"));
+        let _ = fs::copy(image_path, &mirror_source);
+
+        let staged_crop = if let Ok((crop_bytes, _)) = self.engine.primary_face_bytes(image_path) {
+            let cp = self
+                .cfg
+                .pending_images_dir
+                .join(format!("{req_id}_crop.jpg"));
+            let _ = fs::write(&cp, crop_bytes);
+            cp.to_string_lossy().to_string()
+        } else {
+            String::new()
+        };
+
+        let now = Utc::now().to_rfc3339();
+        let entry = json!({
+            "request_id": req_id,
+            "type": "face_enrollment",
+            "identity": clean,
+            "staged_image_path": staged_source.to_string_lossy(),
+            "staged_crop_path": staged_crop,
+            "proposed_metadata": Value::Object(proposed_metadata.clone()),
+            "notes": notes,
+            "submitted_by": "guest",
+            "submitted_at": now,
+            "status": "pending",
+        });
+        {
+            let _guard = self.pending_lock.lock().expect("pending lock");
+            let mut reqs = fs::read_to_string(&self.cfg.pending_file)
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            reqs.insert(req_id.clone(), entry.clone());
+            self.save_pending_requests_unlocked(&reqs);
+        }
+        self.append_audit_history(&entry);
+        json!({
+            "status": "staged_for_admin_review",
+            "request_id": req_id,
+            "type": "face_enrollment",
+            "identity": clean,
+            "is_admin": false,
+            "proposed_metadata": Value::Object(proposed_metadata),
+            "message": format!("Enrollment request {req_id} for '{clean}' has been submitted for Admin approval."),
+        })
+    }
+
     fn create_metadata_update_request(
         &self,
         identity: &str,
@@ -1166,10 +1301,44 @@ impl ArkibService {
                 })
             })
             .collect();
+        let primary_box = detections.first().map(|d| json!(d.box_xywh));
+        let dims = image::image_dimensions(&resolved)
+            .ok()
+            .map(|(w, h)| json!({ "width": w, "height": h }));
+        let mut sess = Map::new();
+        sess.insert(
+            "source_image_path".to_string(),
+            Value::String(resolved.to_string_lossy().to_string()),
+        );
+        sess.insert(
+            "file".to_string(),
+            Value::String(
+                resolved
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string(),
+            ),
+        );
+        if let Some(b) = primary_box {
+            sess.insert("face_box_xywh".to_string(), b);
+        }
+        if let Some(d) = dims {
+            sess.insert("image_dimensions".to_string(), d);
+        }
+        let canvas_id = save_canvas_session(&self.cfg, "enroll", sess).ok();
+        let canvas_link = canvas_id
+            .as_ref()
+            .map(|id| format!("#arkib-canvas:enroll:{id}"));
+        let canvas_md = canvas_link
+            .as_ref()
+            .map(|l| format!("[Open in Enrollment Canvas]({l})"));
         json!({
             "file": resolved.file_name().and_then(|s| s.to_str()).unwrap_or(""),
             "faces_detected": faces.len(),
             "faces": faces,
+            "canvas_link": canvas_link,
+            "canvas_markdown_link": canvas_md,
         })
     }
 
@@ -1179,14 +1348,53 @@ impl ArkibService {
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
         match build_ocr_document_chunks(&self.cfg, &resolved, max_chunks) {
-            Ok(v) => v,
+            Ok(mut v) => {
+                let mut sess = Map::new();
+                sess.insert(
+                    "source_image_path".to_string(),
+                    Value::String(resolved.to_string_lossy().to_string()),
+                );
+                sess.insert("file".to_string(), v["file"].clone());
+                sess.insert(
+                    "image_dimensions".to_string(),
+                    v["image_dimensions"].clone(),
+                );
+                sess.insert("has_rubrication".to_string(), v["has_rubrication"].clone());
+                sess.insert("chunks".to_string(), v["chunks"].clone());
+                if let Ok(cid) = save_canvas_session(&self.cfg, "ocr", sess)
+                    && let Some(obj) = v.as_object_mut()
+                {
+                    let link = format!("#arkib-canvas:ocr:{cid}");
+                    obj.insert("canvas_link".to_string(), Value::String(link.clone()));
+                    obj.insert(
+                        "canvas_markdown_link".to_string(),
+                        Value::String(format!("[Open in Jawi OCR Workbench]({link})")),
+                    );
+                }
+                v
+            }
             Err(reason) => json!({ "status": "error", "reason": reason }),
         }
     }
 
     pub fn tool_decode_jawi(&self, text: &str) -> Value {
-        decode_jawi_text(text.to_string())
-            .unwrap_or_else(|e| json!({ "status": "error", "reason": e }))
+        let mut res = decode_jawi_text(text.to_string())
+            .unwrap_or_else(|e| json!({ "status": "error", "reason": e }));
+        if res.get("status").and_then(Value::as_str) != Some("error") {
+            let mut sess = Map::new();
+            sess.insert("raw_jawi_text".to_string(), Value::String(text.to_string()));
+            if let Ok(cid) = save_canvas_session(&self.cfg, "ocr", sess)
+                && let Some(obj) = res.as_object_mut()
+            {
+                let link = format!("#arkib-canvas:ocr:{cid}");
+                obj.insert("canvas_link".to_string(), Value::String(link.clone()));
+                obj.insert(
+                    "canvas_markdown_link".to_string(),
+                    Value::String(format!("[Open in Jawi OCR Workbench]({link})")),
+                );
+            }
+        }
+        res
     }
 
     pub fn tool_decode_ancient_script(&self, text: &str, script_hint: &str) -> Value {
@@ -1489,10 +1697,15 @@ impl ArkibService {
                 }
             }
         }
+        let (stale_canvas_removed, stale_canvas_bytes) =
+            cleanup_stale_canvas_sessions(&self.cfg, 24 * 60 * 60);
+        removed_files += stale_canvas_removed;
+        freed_bytes += stale_canvas_bytes;
         self.clear_identification_cache();
         json!({
             "status": "cleared",
             "removed_files": removed_files,
+            "stale_canvas_sessions_removed": stale_canvas_removed,
             "freed_bytes": freed_bytes,
             "freed_mb": ((freed_bytes as f64) / (1024.0 * 1024.0) * 100.0).round() / 100.0,
         })
@@ -1730,6 +1943,38 @@ impl ArkibService {
             None
         };
 
+        let mut enroll_sess = Map::new();
+        enroll_sess.insert(
+            "source_image_path".to_string(),
+            Value::String(resolved.to_string_lossy().to_string()),
+        );
+        enroll_sess.insert(
+            "file".to_string(),
+            Value::String(
+                resolved
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string(),
+            ),
+        );
+        if let Some(first_box) = clean_matches.first().and_then(|m| m.get("box_xywh")) {
+            enroll_sess.insert("face_box_xywh".to_string(), first_box.clone());
+        }
+        if let Ok((w, h)) = image::image_dimensions(&resolved) {
+            enroll_sess.insert(
+                "image_dimensions".to_string(),
+                json!({ "width": w, "height": h }),
+            );
+        }
+        enroll_sess.insert("matched_identities".to_string(), json!(matched_names));
+        let enroll_canvas_link = save_canvas_session(&self.cfg, "enroll", enroll_sess)
+            .ok()
+            .map(|id| format!("#arkib-canvas:enroll:{id}"));
+        let enroll_canvas_md = enroll_canvas_link
+            .as_ref()
+            .map(|l| format!("[Open in Enrollment Canvas]({l})"));
+
         self.cache_identification(&resolved, safe_threshold, &clean_matches);
         json!({
             "file": resolved.file_name().and_then(|s| s.to_str()).unwrap_or(""),
@@ -1739,6 +1984,8 @@ impl ArkibService {
             "matched_profiles": matched_profiles,
             "ocr_document_chunks": ocr_chunks,
             "display_instruction": build_display_instruction(db_status),
+            "canvas_link": enroll_canvas_link,
+            "canvas_markdown_link": enroll_canvas_md,
             "gallery_image_saved": gallery_saved,
             "applied_threshold": (f64::from(safe_threshold) * 10000.0).round() / 10000.0,
             "matches_count": clean_matches.len(),
@@ -1759,7 +2006,27 @@ impl ArkibService {
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
         let meta = parse_proposed_metadata(proposed_metadata);
-        self.create_enrollment_request(identity, &resolved, meta, notes)
+        let mut res = self.create_enrollment_request(identity, &resolved, meta, notes);
+        let mut sess = Map::new();
+        sess.insert(
+            "source_image_path".to_string(),
+            Value::String(resolved.to_string_lossy().to_string()),
+        );
+        sess.insert(
+            "suggested_identity".to_string(),
+            Value::String(identity.trim().to_string()),
+        );
+        if let Ok(cid) = save_canvas_session(&self.cfg, "enroll", sess)
+            && let Some(obj) = res.as_object_mut()
+        {
+            let link = format!("#arkib-canvas:enroll:{cid}");
+            obj.insert("canvas_link".to_string(), Value::String(link.clone()));
+            obj.insert(
+                "canvas_markdown_link".to_string(),
+                Value::String(format!("[Open in Enrollment Canvas]({link})")),
+            );
+        }
+        res
     }
 
     pub fn tool_request_update_metadata(
@@ -1967,6 +2234,17 @@ impl ArkibService {
         admin_key: &str,
         comment: &str,
     ) -> Value {
+        self.review_pending_request_with_opts(request_id, action, admin_key, comment, true)
+    }
+
+    pub fn review_pending_request_with_opts(
+        &self,
+        request_id: &str,
+        action: &str,
+        admin_key: &str,
+        comment: &str,
+        add_to_lexicon: bool,
+    ) -> Value {
         if !self.verify_admin(admin_key) {
             return json!({
                 "status": "unauthorized",
@@ -2057,8 +2335,9 @@ impl ArkibService {
             .cloned()
             .unwrap_or_default();
 
+        let mut extra_result: Option<Value> = None;
         if act == "approve" {
-            if req_type == "enrollment" {
+            if req_type == "enrollment" || req_type == "face_enrollment" {
                 let staged_path = req
                     .get("staged_image_path")
                     .and_then(Value::as_str)
@@ -2074,7 +2353,11 @@ impl ArkibService {
                     );
                     let st = res.get("status").and_then(Value::as_str).unwrap_or("");
                     if st != "enrolled_by_admin" && st != "unchanged" {
-                        return res;
+                        // If face already matches an enrolled identity or adding photo to existing identity, fallback to admin_add_profile_image
+                        let add_res = self.admin_add_profile_image(&identity, p);
+                        if add_res.get("status").and_then(Value::as_str) != Some("image_added") {
+                            return res;
+                        }
                     }
                 }
                 if !proposed.is_empty() {
@@ -2086,6 +2369,44 @@ impl ArkibService {
                         "",
                         &self.cfg.admin_key,
                     );
+                }
+            } else if req_type == "ocr_correction" {
+                let doc_slug = req.get("document_slug").and_then(Value::as_str);
+                let doc_title =
+                    req.get("document_title")
+                        .and_then(Value::as_str)
+                        .or(if identity.is_empty() {
+                            None
+                        } else {
+                            Some(identity.as_str())
+                        });
+                let edited_jawi = req
+                    .get("edited_jawi_text")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let edited_rumi = req
+                    .get("edited_rumi_text")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let notes = req.get("notes").and_then(Value::as_str).unwrap_or("");
+                let pairs: Vec<LexiconPair> = req
+                    .get("lexicon_suggestions")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+                match apply_ocr_edit_to_archive(
+                    &self.cfg,
+                    doc_slug,
+                    doc_title,
+                    edited_jawi,
+                    edited_rumi,
+                    notes,
+                    &pairs,
+                    add_to_lexicon,
+                ) {
+                    Ok(v) => extra_result = Some(v),
+                    Err(reason) => {
+                        return json!({ "status": "error", "reason": reason });
+                    }
                 }
             } else if !proposed.is_empty() {
                 let meta_str = serde_json::to_string(&Value::Object(proposed)).unwrap_or_default();
@@ -2139,6 +2460,7 @@ impl ArkibService {
             "request_id": req_key,
             "identity": identity,
             "type": req_type,
+            "details": extra_result,
         })
     }
 

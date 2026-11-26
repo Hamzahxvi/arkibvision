@@ -4,6 +4,7 @@ mod admin;
 mod ancient_scripts;
 mod archives;
 mod biometrics;
+mod canvas;
 mod config;
 mod conservation;
 mod forensics;
@@ -158,13 +159,18 @@ async fn main() {
         return;
     }
 
-    let admin_routes = match admin::admin_router(service.clone()) {
+    let shared_admin_state = admin::AdminState {
+        service: service.clone(),
+        sessions: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+    };
+    let admin_routes = match admin::admin_router(shared_admin_state.clone()) {
         Ok(r) => r,
         Err(err) => {
             eprintln!("Fatal Admin Portal error: {err}");
             std::process::exit(1);
         }
     };
+    let canvas_routes = canvas::canvas_router(shared_admin_state);
 
     let health_route = Router::new()
         .route("/health", get(health_handler))
@@ -172,6 +178,7 @@ async fn main() {
 
     let app: Router = mcp_sse::mcp_router(service.clone())
         .merge(admin_routes)
+        .merge(canvas_routes)
         .merge(health_route)
         .layer(middleware::from_fn_with_state(
             service.clone(),

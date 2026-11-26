@@ -56,7 +56,7 @@ impl<S> Drop for ManagedSseStream<S> {
     }
 }
 
-fn is_allowed_host(host: &str) -> bool {
+pub(crate) fn is_allowed_host(host: &str) -> bool {
     let bare = host
         .split(':')
         .next()

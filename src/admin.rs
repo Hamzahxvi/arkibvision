@@ -73,6 +73,10 @@ fn valid_session_token(
     None
 }
 
+pub fn is_admin_request(headers: &HeaderMap, sessions: &Mutex<HashMap<String, u64>>) -> bool {
+    valid_session_token(headers, sessions).is_some()
+}
+
 fn is_allowed_origin(origin: &str, librechat_url: &str) -> bool {
     let o = origin.trim().trim_end_matches('/');
     o.eq_ignore_ascii_case(librechat_url.trim_end_matches('/'))
@@ -80,7 +84,11 @@ fn is_allowed_origin(origin: &str, librechat_url: &str) -> bool {
         || o.eq_ignore_ascii_case("http://127.0.0.1:3080")
 }
 
-async fn cors_middleware(State(state): State<AdminState>, req: Request, next: Next) -> Response {
+pub async fn cors_middleware(
+    State(state): State<AdminState>,
+    req: Request,
+    next: Next,
+) -> Response {
     let origin = req
         .headers()
         .get(header::ORIGIN)
@@ -150,12 +158,7 @@ async fn auth_middleware(State(state): State<AdminState>, req: Request, next: Ne
     next.run(req).await
 }
 
-pub fn admin_router(service: Arc<ArkibService>) -> Result<Router, String> {
-    let state = AdminState {
-        service,
-        sessions: Arc::new(Mutex::new(HashMap::new())),
-    };
-
+pub fn admin_router(state: AdminState) -> Result<Router, String> {
     let router = Router::new()
         // Redirect legacy /admin URL straight into LibreChat's integrated Admin Portal
         .route("/admin", get(admin_redirect_to_librechat))
@@ -345,7 +348,7 @@ async fn admin_api_login(
         guard.insert(token.clone(), now + ADMIN_SESSION_TTL_SECS);
     }
     let cookie = format!(
-        "{ADMIN_SESSION_COOKIE}={token}; Max-Age={ADMIN_SESSION_TTL_SECS}; HttpOnly; SameSite=Lax; Path=/admin"
+        "{ADMIN_SESSION_COOKIE}={token}; Max-Age={ADMIN_SESSION_TTL_SECS}; HttpOnly; SameSite=Lax; Path=/"
     );
     let mut resp = (
         StatusCode::OK,
@@ -372,7 +375,7 @@ async fn admin_api_logout(State(state): State<AdminState>, headers: HeaderMap) -
     )
         .into_response();
     if let Ok(val) = HeaderValue::from_str(&format!(
-        "{ADMIN_SESSION_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/admin"
+        "{ADMIN_SESSION_COOKIE}=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/"
     )) {
         resp.headers_mut().append(header::SET_COOKIE, val);
     }
@@ -392,6 +395,11 @@ async fn admin_api_requests(State(state): State<AdminState>) -> Json<Value> {
                 "submitted_at": req.get("submitted_at").and_then(Value::as_str).unwrap_or(""),
                 "metadata": req.get("proposed_metadata").cloned().unwrap_or_else(|| json!({})),
                 "note": req.get("notes").and_then(Value::as_str).unwrap_or(""),
+                "document_slug": req.get("document_slug").cloned().unwrap_or(Value::Null),
+                "document_title": req.get("document_title").cloned().unwrap_or(Value::Null),
+                "edited_jawi_text": req.get("edited_jawi_text").cloned().unwrap_or(Value::Null),
+                "edited_rumi_text": req.get("edited_rumi_text").cloned().unwrap_or(Value::Null),
+                "lexicon_suggestions": req.get("lexicon_suggestions").cloned().unwrap_or_else(|| json!([])),
             })
         })
         .collect();
@@ -1094,13 +1102,27 @@ async fn admin_delete_profile_image(
     .into_response()
 }
 
+#[derive(Default, Deserialize)]
+struct ApproveOpts {
+    #[serde(default)]
+    add_to_lexicon: Option<bool>,
+}
+
 async fn admin_approve(
     State(state): State<AdminState>,
     AxumPath(req_id): AxumPath<String>,
+    body: Option<Json<ApproveOpts>>,
 ) -> Response {
+    let add_to_lexicon = body.and_then(|b| b.0.add_to_lexicon).unwrap_or(true);
     let svc = state.service.clone();
     let res = tokio::task::spawn_blocking(move || {
-        svc.tool_review_pending_request(&req_id, "approve", &svc.cfg.admin_key, "")
+        svc.review_pending_request_with_opts(
+            &req_id,
+            "approve",
+            &svc.cfg.admin_key,
+            "",
+            add_to_lexicon,
+        )
     })
     .await
     .unwrap_or_else(|e| json!({ "status": "error", "reason": e.to_string() }));
