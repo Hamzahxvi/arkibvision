@@ -11,7 +11,7 @@ pub const AUTO_GALLERY_MIN_SCORE: f32 = 0.90;
 pub const AUTO_GALLERY_MAX_IMAGES: usize = 15;
 pub const PERCEPTUAL_HASH_DISTANCE: i64 = 16;
 pub const MAX_AUTO_IMAGE_AGE_SECS: u64 = 60;
-pub const ADMIN_SESSION_COOKIE: &str = "rojakface_admin_session";
+pub const ADMIN_SESSION_COOKIE: &str = "arkib_admin_session";
 pub const ADMIN_SESSION_TTL_SECS: u64 = 8 * 60 * 60;
 pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp"];
 pub const DOCUMENT_EXTS: &[&str] = &[
@@ -67,8 +67,15 @@ pub fn is_document_ext(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn env_with_fallback(primary: &str, legacy: &str) -> Option<String> {
+    env::var(primary)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| env::var(legacy).ok().filter(|v| !v.trim().is_empty()))
+}
+
 fn find_project_root() -> PathBuf {
-    if let Ok(explicit) = env::var("ROJAKFACE_ROOT") {
+    if let Some(explicit) = env_with_fallback("ARKIB_ROOT", "ROJAKFACE_ROOT") {
         let p = PathBuf::from(explicit);
         if p.is_dir() {
             return p;
@@ -135,7 +142,7 @@ fn find_ort_dylib(project_root: &Path) -> PathBuf {
 }
 
 fn find_yunet_model(project_root: &Path) -> PathBuf {
-    if let Ok(p) = env::var("ROJAKFACE_YUNET_MODEL") {
+    if let Some(p) = env_with_fallback("ARKIB_YUNET_MODEL", "ROJAKFACE_YUNET_MODEL") {
         let pb = PathBuf::from(p);
         if pb.is_file() {
             return pb;
@@ -145,6 +152,9 @@ fn find_yunet_model(project_root: &Path) -> PathBuf {
     let candidates = [
         project_root.join("models").join("yunet_face_detector.onnx"),
         home.join(".cache")
+            .join("arkib")
+            .join("yunet_face_detector.onnx"),
+        home.join(".cache")
             .join("rojakface")
             .join("yunet_face_detector.onnx"),
     ];
@@ -153,13 +163,13 @@ fn find_yunet_model(project_root: &Path) -> PathBuf {
         .find(|p| p.is_file())
         .unwrap_or_else(|| {
             home.join(".cache")
-                .join("rojakface")
+                .join("arkib")
                 .join("yunet_face_detector.onnx")
         })
 }
 
 fn find_clip_model(project_root: &Path) -> PathBuf {
-    if let Ok(p) = env::var("ROJAKFACE_CLIP_MODEL") {
+    if let Some(p) = env_with_fallback("ARKIB_CLIP_MODEL", "ROJAKFACE_CLIP_MODEL") {
         let pb = PathBuf::from(p);
         if pb.is_file() {
             return pb;
@@ -194,16 +204,21 @@ fn find_clip_model(project_root: &Path) -> PathBuf {
 }
 
 fn load_or_create_admin_key(project_root: &Path) -> String {
-    if let Ok(k) = env::var("ROJAKFACE_ADMIN_KEY") {
-        let trimmed = k.trim();
+    if let Some(k) = env_with_fallback("ARKIB_ADMIN_KEY", "ROJAKFACE_ADMIN_KEY") {
+        return k.trim().to_string();
+    }
+    let key_file = project_root.join(".arkib_admin_key");
+    if let Ok(content) = fs::read_to_string(&key_file) {
+        let trimmed = content.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
-    let key_file = project_root.join(".rojakface_admin_key");
-    if let Ok(content) = fs::read_to_string(&key_file) {
+    let legacy_key_file = project_root.join(".rojakface_admin_key");
+    if let Ok(content) = fs::read_to_string(&legacy_key_file) {
         let trimmed = content.trim();
         if !trimmed.is_empty() {
+            let _ = fs::write(&key_file, trimmed);
             return trimmed.to_string();
         }
     }
@@ -227,7 +242,11 @@ impl AppConfig {
         let pending_dir = interim_dir.join("pending_requests");
         let pending_images_dir = pending_dir.join("images");
         let pending_file = pending_dir.join("requests.json");
-        let vectors_file = processed_dir.join("rojakface_vectors.json");
+        let vectors_file = processed_dir.join("arkib_vectors.json");
+        let legacy_vectors_file = processed_dir.join("rojakface_vectors.json");
+        if !vectors_file.is_file() && legacy_vectors_file.is_file() {
+            let _ = fs::rename(&legacy_vectors_file, &vectors_file);
+        }
         let location_vectors_file = processed_dir.join("location_vectors.json");
         let checksum_manifest_file = processed_dir.join("checksum_manifest.json");
         let people_groups_file = processed_dir.join("people_groups.json");
@@ -255,19 +274,20 @@ impl AppConfig {
             librechat_dir.join("uploads"),
         ];
 
-        let host = env::var("ROJAKFACE_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-        let port = env::var("ROJAKFACE_PORT")
-            .ok()
+        let host = env_with_fallback("ARKIB_HOST", "ROJAKFACE_HOST")
+            .unwrap_or_else(|| "0.0.0.0".to_string());
+        let port = env_with_fallback("ARKIB_PORT", "ROJAKFACE_PORT")
             .and_then(|s| s.parse::<u16>().ok())
             .unwrap_or(8005);
-        let admin_user = env::var("ROJAKFACE_ADMIN_USER").unwrap_or_else(|_| "admin".to_string());
-        let admin_pass =
-            env::var("ROJAKFACE_ADMIN_PASS").unwrap_or_else(|_| "admin123".to_string());
+        let admin_user = env_with_fallback("ARKIB_ADMIN_USER", "ROJAKFACE_ADMIN_USER")
+            .unwrap_or_else(|| "admin".to_string());
+        let admin_pass = env_with_fallback("ARKIB_ADMIN_PASS", "ROJAKFACE_ADMIN_PASS")
+            .unwrap_or_else(|| "admin123".to_string());
         let admin_key = load_or_create_admin_key(&project_root);
-        let ollama_url = env::var("ROJAKFACE_OLLAMA_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:11434/api/chat".to_string());
-        let vision_model = env::var("ROJAKFACE_VISION_MODEL")
-            .unwrap_or_else(|_| "qwen3-vl:4b-instruct-16k".to_string());
+        let ollama_url = env_with_fallback("ARKIB_OLLAMA_URL", "ROJAKFACE_OLLAMA_URL")
+            .unwrap_or_else(|| "http://127.0.0.1:11434/api/chat".to_string());
+        let vision_model = env_with_fallback("ARKIB_VISION_MODEL", "ROJAKFACE_VISION_MODEL")
+            .unwrap_or_else(|| "qwen3-vl:4b-instruct-16k".to_string());
 
         let ort_dylib_path = find_ort_dylib(&project_root);
         let yunet_model_path = find_yunet_model(&project_root);

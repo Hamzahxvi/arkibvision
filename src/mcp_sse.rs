@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::service::RojakFaceService;
+use crate::service::ArkibService;
 use axum::extract::{Query, Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct McpState {
-    pub service: Arc<RojakFaceService>,
+    pub service: Arc<ArkibService>,
     pub sessions: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
 }
 
@@ -83,7 +83,7 @@ async fn dns_rebinding_guard(req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
-pub fn mcp_router(service: Arc<RojakFaceService>) -> Router {
+pub fn mcp_router(service: Arc<ArkibService>) -> Router {
     let state = McpState {
         service,
         sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -154,7 +154,7 @@ async fn messages_handler(
     StatusCode::ACCEPTED
 }
 
-async fn handle_jsonrpc(service: &Arc<RojakFaceService>, req: Value) -> Option<Value> {
+async fn handle_jsonrpc(service: &Arc<ArkibService>, req: Value) -> Option<Value> {
     let id = req.get("id").cloned();
     let method = req.get("method").and_then(Value::as_str).unwrap_or("");
     let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -177,7 +177,7 @@ async fn handle_jsonrpc(service: &Arc<RojakFaceService>, req: Value) -> Option<V
                     "tools": { "listChanged": false },
                 },
                 "serverInfo": {
-                    "name": "RojakFace-Service",
+                    "name": "ArkibVision-Service",
                     "version": env!("CARGO_PKG_VERSION"),
                 },
             }))
@@ -244,12 +244,12 @@ fn arg_bool(args: &Value, key: &str, default: bool) -> bool {
 }
 
 async fn dispatch_tool(
-    service: &Arc<RojakFaceService>,
+    service: &Arc<ArkibService>,
     name: &str,
     args: Value,
 ) -> Result<Value, String> {
     match name {
-        "rojakface_search_identity" => {
+        "arkib_search_identity" => {
             let identity = arg_str(&args, "identity");
             let query = arg_str(&args, "query");
             let limit = arg_i64(&args, "limit", 0);
@@ -258,7 +258,7 @@ async fn dispatch_tool(
                 .tool_search_identity(&identity, &query, limit, photos_only)
                 .await)
         }
-        "rojakface_summarize_document" => {
+        "arkib_summarize_document" => {
             let file_path = arg_str(&args, "file_path");
             let text = arg_str(&args, "text");
             let language = arg_str(&args, "language");
@@ -266,16 +266,16 @@ async fn dispatch_tool(
                 .tool_summarize_document(&file_path, &text, &language)
                 .await)
         }
-        "rojakface_system_health" => Ok(service.tool_system_health().await),
-        "rojakface_analyze_image" => {
+        "arkib_system_health" => Ok(service.tool_system_health().await),
+        "arkib_analyze_image" => {
             let image_path = arg_str(&args, "image_path");
             Ok(service.tool_analyze_image(&image_path).await)
         }
-        "rojakface_detect_authenticity" => {
+        "arkib_detect_authenticity" => {
             let file_path = arg_str(&args, "file_path");
             Ok(service.tool_detect_authenticity(&file_path).await)
         }
-        "rojakface_assess_conservation" => {
+        "arkib_assess_conservation" => {
             let image_path = arg_str(&args, "image_path");
             Ok(service.tool_assess_conservation(&image_path).await)
         }
@@ -283,76 +283,72 @@ async fn dispatch_tool(
             let svc = service.clone();
             let tool = other.to_string();
             tokio::task::spawn_blocking(move || match tool.as_str() {
-                "rojakface_detect_faces" => {
-                    Ok(svc.tool_detect_faces(&arg_str(&args, "image_path")))
-                }
-                "rojakface_ocr_document" => Ok(svc.tool_ocr_document(
+                "arkib_detect_faces" => Ok(svc.tool_detect_faces(&arg_str(&args, "image_path"))),
+                "arkib_ocr_document" => Ok(svc.tool_ocr_document(
                     &arg_str(&args, "image_path"),
                     arg_i64(&args, "max_chunks", 5),
                 )),
-                "rojakface_decode_jawi" => Ok(svc.tool_decode_jawi(&arg_str(&args, "text"))),
-                "rojakface_decode_ancient_script" => Ok(svc.tool_decode_ancient_script(
+                "arkib_decode_jawi" => Ok(svc.tool_decode_jawi(&arg_str(&args, "text"))),
+                "arkib_decode_ancient_script" => Ok(svc.tool_decode_ancient_script(
                     &arg_str(&args, "text"),
                     &arg_str(&args, "script"),
                 )),
-                "rojakface_enhance_image" => {
+                "arkib_enhance_image" => {
                     Ok(svc
                         .tool_enhance_image(&arg_str(&args, "image_path"), &arg_str(&args, "mode")))
                 }
-                "rojakface_verify_integrity" => {
+                "arkib_verify_integrity" => {
                     Ok(svc.tool_verify_integrity(arg_bool(&args, "update_manifest", true)))
                 }
-                "rojakface_search_locations" => {
-                    Ok(svc.tool_search_locations(&arg_str(&args, "query")))
-                }
-                "rojakface_search_documents" => {
+                "arkib_search_locations" => Ok(svc.tool_search_locations(&arg_str(&args, "query"))),
+                "arkib_search_documents" => {
                     Ok(svc
                         .tool_search_documents(&arg_str(&args, "query"), &arg_str(&args, "script")))
                 }
-                "rojakface_identify_faces" => Ok(svc.tool_identify_faces(
+                "arkib_identify_faces" => Ok(svc.tool_identify_faces(
                     &arg_str(&args, "image_path"),
                     arg_f32(&args, "threshold", 0.88),
                     arg_bool(&args, "save_new_image", true),
                 )),
-                "rojakface_request_enrollment" => Ok(svc.tool_request_enrollment(
+                "arkib_request_enrollment" => Ok(svc.tool_request_enrollment(
                     &arg_str(&args, "identity"),
                     &arg_str(&args, "image_path"),
                     &arg_str(&args, "proposed_metadata"),
                     &arg_str(&args, "notes"),
                 )),
-                "rojakface_request_update_metadata" => Ok(svc.tool_request_update_metadata(
+                "arkib_request_update_metadata" => Ok(svc.tool_request_update_metadata(
                     &arg_str(&args, "identity"),
                     &arg_str(&args, "proposed_metadata"),
                     &arg_str(&args, "notes"),
                     &arg_str(&args, "admin_key"),
                 )),
-                "rojakface_enroll_named_identity" => Ok(svc.tool_enroll_named_identity(
+                "arkib_enroll_named_identity" => Ok(svc.tool_enroll_named_identity(
                     &arg_str(&args, "identity"),
                     &arg_str(&args, "image_path"),
                     &arg_str(&args, "admin_key"),
                     &arg_str(&args, "proposed_metadata"),
                 )),
-                "rojakface_enroll_or_learn" => Ok(svc.tool_enroll_or_learn(
+                "arkib_enroll_or_learn" => Ok(svc.tool_enroll_or_learn(
                     &arg_str(&args, "image_path"),
                     arg_f32(&args, "threshold", 0.88),
                     &arg_str(&args, "admin_key"),
                 )),
-                "rojakface_list_pending_requests" => {
+                "arkib_list_pending_requests" => {
                     Ok(svc.tool_list_pending_requests(&arg_str(&args, "status")))
                 }
-                "rojakface_review_pending_request" => Ok(svc.tool_review_pending_request(
+                "arkib_review_pending_request" => Ok(svc.tool_review_pending_request(
                     &arg_str(&args, "request_id"),
                     &arg_str(&args, "action"),
                     &arg_str(&args, "admin_key"),
                     &arg_str(&args, "comment"),
                 )),
-                "rojakface_rename_identity" => Ok(svc.tool_rename_identity(
+                "arkib_rename_identity" => Ok(svc.tool_rename_identity(
                     &arg_str(&args, "old_identity"),
                     &arg_str(&args, "new_identity"),
                     &arg_str(&args, "admin_key"),
                 )),
-                "rojakface_list_identities" => Ok(svc.tool_list_identities()),
-                "rojakface_delete_identity" => Ok(svc.tool_delete_identity(
+                "arkib_list_identities" => Ok(svc.tool_list_identities()),
+                "arkib_delete_identity" => Ok(svc.tool_delete_identity(
                     &arg_str(&args, "identity"),
                     arg_bool(&args, "purge_files", true),
                     &arg_str(&args, "admin_key"),
@@ -368,7 +364,7 @@ async fn dispatch_tool(
 pub fn tool_definitions() -> Vec<Value> {
     vec![
         json!({
-            "name": "rojakface_detect_faces",
+            "name": "arkib_detect_faces",
             "description": "Detect faces in an image using YuNet. Leave image_path empty for chat-attached images.",
             "inputSchema": {
                 "type": "object",
@@ -378,8 +374,8 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_ocr_document",
-            "description": "Read or transcribe text, handwriting, letters, certificates, or old manuscripts (Modern/Old Jawi, Pallava, Kawi, Rencong, Malay, English, Tamil, Mandarin, Sanskrit) from an uploaded image by slicing dense pages into 3-4 line strips to prevent long-context hallucination. Always leave image_path empty (\"\") for chat uploads, and ALWAYS pass extracted Jawi text into rojakface_decode_jawi.",
+            "name": "arkib_ocr_document",
+            "description": "Read or transcribe text, handwriting, letters, certificates, or old manuscripts (Modern/Old Jawi, Pallava, Kawi, Rencong, Malay, English, Tamil, Mandarin, Sanskrit) from an uploaded image by slicing dense pages into 3-4 line strips to prevent long-context hallucination. Always leave image_path empty (\"\") for chat uploads, and ALWAYS pass extracted Jawi text into arkib_decode_jawi.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -389,7 +385,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_decode_jawi",
+            "name": "arkib_decode_jawi",
             "description": "MANDATORY deterministic decoder for ALL Modern Jawi and Old Classical Jawi (Jawi Lama / Hikayat / Surat Diraja / multi-font Unicode & calligraphic kashida variants). Always call this tool on Jawi text or Jawi OCR output instead of translating from memory, and strictly follow its standard_malay_rumi_text without inventing lines.",
             "inputSchema": {
                 "type": "object",
@@ -400,7 +396,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_identify_faces",
+            "name": "arkib_identify_faces",
             "description": "Recognize or check who is in an uploaded photo against saved people in the database ('who is this?', 'do we know him/her?', 'siapa dalam gambar ini?'). Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
@@ -412,7 +408,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_request_enrollment",
+            "name": "arkib_request_enrollment",
             "description": "Guest / User tool: Submit an enrollment request for an unknown face. Staged for Admin verification.",
             "inputSchema": {
                 "type": "object",
@@ -426,7 +422,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_request_update_metadata",
+            "name": "arkib_request_update_metadata",
             "description": "Request a metadata update. Guest requests are queued for Admin Portal approval; do not ask the user for an admin key.",
             "inputSchema": {
                 "type": "object",
@@ -440,7 +436,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_enroll_named_identity",
+            "name": "arkib_enroll_named_identity",
             "description": "Enroll a face for an administrator. Guest requests are queued for Admin Portal approval; never ask the user for an admin key.",
             "inputSchema": {
                 "type": "object",
@@ -454,7 +450,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_enroll_or_learn",
+            "name": "arkib_enroll_or_learn",
             "description": "Direct unsupervised learning. Restricted to admins to avoid false enrollments.",
             "inputSchema": {
                 "type": "object",
@@ -466,7 +462,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_list_pending_requests",
+            "name": "arkib_list_pending_requests",
             "description": "List enrollment and metadata requests with simple #1, #2 numbering for one-word approval (All Roles).",
             "inputSchema": {
                 "type": "object",
@@ -476,7 +472,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_review_pending_request",
+            "name": "arkib_review_pending_request",
             "description": "Approve or reject a pending request by number ('1'), person name ('Farid Azizan'), 'latest', or full ID (Admin only).",
             "inputSchema": {
                 "type": "object",
@@ -490,7 +486,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_rename_identity",
+            "name": "arkib_rename_identity",
             "description": "Rename an enrolled identity in vector store and filesystem (Admin only).",
             "inputSchema": {
                 "type": "object",
@@ -503,7 +499,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_list_identities",
+            "name": "arkib_list_identities",
             "description": "List all enrolled identities currently stored in the vector database and their reference vector counts (All Roles).",
             "inputSchema": {
                 "type": "object",
@@ -511,7 +507,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_search_identity",
+            "name": "arkib_search_identity",
             "description": "Search the local profile database for an enrolled person (case-insensitive), with optional visual attribute query, photo count limit, and photos_only mode. Put the person's name in `identity` and ONLY clothing/visual filters (e.g. 'pakai songkok', 'cermin mata') in `query`.",
             "inputSchema": {
                 "type": "object",
@@ -525,7 +521,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_delete_identity",
+            "name": "arkib_delete_identity",
             "description": "Remove an enrolled identity and all of its vectors from the database (Admin only).",
             "inputSchema": {
                 "type": "object",
@@ -538,7 +534,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_decode_ancient_script",
+            "name": "arkib_decode_ancient_script",
             "description": "Recognize, decode, and transliterate historical Malay & Southeast Asian scripts (Jawi, Pallava, Kawi, Rencong / Surat Ulu) into searchable digital text with archival historical notes.",
             "inputSchema": {
                 "type": "object",
@@ -550,7 +546,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_analyze_image",
+            "name": "arkib_analyze_image",
             "description": "All-in-one smart photo & archival check: use for general requests like 'check this', 'what is this?', 'what building/place is this?', 'where was this taken?', 'tell me about this photo', 'semak gambar ini'. Checks file details, date/time/location, authenticity/duplicates, quality/damage, and matches saved buildings or archive halls. Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
@@ -560,7 +556,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_detect_authenticity",
+            "name": "arkib_detect_authenticity",
             "description": "Deep multi-layer authenticity, AI watermark, and fraud check: inspects C2PA/JUMBF Content Credentials, IPTC DigitalSourceType, XMP/EXIF/PNG metadata, bare stripped JPEG headers, pixel-level ELA splicing/noise/blockiness/LSB watermark probes, archive duplicates, AND runs a dedicated local visual AI audit for visible AI/stock watermarks, impossible composites, and garbled text ('is this real or fake?', 'is this AI?', 'check watermark/metadata', 'do we already have this?', 'gambar ini tulen atau palsu?'). Always leave file_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
@@ -570,7 +566,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_summarize_document",
+            "name": "arkib_summarize_document",
             "description": "Summarize or explain a long document or pasted text in simple points ('summarize this', 'what is this document about?', 'give me the main points', 'ringkaskan dokumen ini'). Extracts key topics, names, dates, events, and authenticity status.",
             "inputSchema": {
                 "type": "object",
@@ -582,7 +578,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_search_locations",
+            "name": "arkib_search_locations",
             "description": "Find or list saved places, buildings, landmarks, rooms, galleries, or wings (e.g. Arkib Negara Malaysia / National Archives of Malaysia). Use for 'show locations', 'list places', 'senarai lokasi', 'cari dewan'.",
             "inputSchema": {
                 "type": "object",
@@ -592,7 +588,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_search_documents",
+            "name": "arkib_search_documents",
             "description": "Find or list saved archival documents, manuscripts, letters, or records ('show documents', 'find files about...', 'senarai dokumen', 'cari manuskrip').",
             "inputSchema": {
                 "type": "object",
@@ -603,7 +599,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_assess_conservation",
+            "name": "arkib_assess_conservation",
             "description": "Check photo/scan quality (clarity, brightness, readability), spot damage (tears, fading, mould/fungus, yellowing/old paper) rated light/medium/heavy, check if real/AI/duplicate, and suggest how to repair, clean, dry, coat, or preserve the item ('is this damaged/spoilt?', 'how to fix/preserve this old document?', 'gambar ini rosak tak?', 'semak kualiti & kerosakan'). Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
@@ -613,7 +609,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_enhance_image",
+            "name": "arkib_enhance_image",
             "description": "Improve, clean up, brighten, sharpen, or restore a blurry, dark, faded, or yellowed photo/scan ('make this clearer', 'fix this dark/old photo', 'brighten/sharpen this', 'jelaskan/baiki gambar ini'). Always leave image_path empty (\"\") for chat uploads.",
             "inputSchema": {
                 "type": "object",
@@ -624,7 +620,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_verify_integrity",
+            "name": "arkib_verify_integrity",
             "description": "Check if all saved archive files are safe, intact, not corrupted or changed, and find any duplicate files ('are our files safe?', 'check for broken/corrupted/duplicate files', 'semak fail rosak atau pendua', 'audit integriti fail').",
             "inputSchema": {
                 "type": "object",
@@ -634,7 +630,7 @@ pub fn tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
-            "name": "rojakface_system_health",
+            "name": "arkib_system_health",
             "description": "Check how the system/server is running: speed, memory, CPU, storage space, problems/overload, and what actions to take ('how is the system doing?', 'is the server okay or slow?', 'any system issues?', 'sistem ok ke?', 'kenapa lambat?').",
             "inputSchema": {
                 "type": "object",
@@ -653,7 +649,7 @@ mod tests {
         let tools = tool_definitions();
         assert_eq!(tools.len(), 24);
         for t in &tools {
-            assert!(t["name"].as_str().unwrap_or("").starts_with("rojakface_"));
+            assert!(t["name"].as_str().unwrap_or("").starts_with("arkib_"));
             assert_eq!(t["inputSchema"]["type"].as_str(), Some("object"));
         }
         assert!(is_allowed_host("localhost:8005"));

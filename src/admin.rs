@@ -6,7 +6,7 @@ use crate::config::{
     is_image_ext,
 };
 use crate::metadata::value_to_trimmed_string;
-use crate::service::RojakFaceService;
+use crate::service::ArkibService;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
@@ -27,7 +27,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct AdminState {
-    pub service: Arc<RojakFaceService>,
+    pub service: Arc<ArkibService>,
     pub sessions: Arc<Mutex<HashMap<String, u64>>>,
 }
 
@@ -153,7 +153,7 @@ async fn auth_middleware(State(state): State<AdminState>, req: Request, next: Ne
     next.run(req).await
 }
 
-pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
+pub fn admin_router(service: Arc<ArkibService>) -> Result<Router, String> {
     let state = AdminState {
         service,
         sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -300,10 +300,7 @@ pub fn admin_router(service: Arc<RojakFaceService>) -> Result<Router, String> {
 }
 
 async fn admin_redirect_to_librechat(State(state): State<AdminState>) -> Redirect {
-    Redirect::temporary(&format!(
-        "{}/#rojakface-admin",
-        state.service.cfg.librechat_url
-    ))
+    Redirect::temporary(&format!("{}/#arkib-admin", state.service.cfg.librechat_url))
 }
 
 #[derive(Deserialize)]

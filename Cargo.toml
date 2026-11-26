@@ -1,9 +1,9 @@
 [package]
-name = "rojakface-server"
+name = "arkib-server"
 version = "2.0.0"
 edition = "2024"
 rust-version = "1.97"
-description = "100% Pure-Rust RojakFace Enterprise Vision, Biometric Identity, Multilingual OCR MCP Server & Admin Portal"
+description = "100% Pure-Rust ArkibVision Enterprise Archival Vision, Biometric Identity, Multilingual OCR MCP Server & Admin Portal"
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }

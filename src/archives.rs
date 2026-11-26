@@ -1916,7 +1916,7 @@ mod tests {
     #[test]
     fn test_people_group_create_rename_and_delete() {
         let base =
-            std::env::temp_dir().join(format!("rojakface_groups_test_{}", Uuid::new_v4().simple()));
+            std::env::temp_dir().join(format!("arkib_groups_test_{}", Uuid::new_v4().simple()));
         let pdir = base.join("profiles");
         let p1 = pdir.join("Ali_Bin_Abu");
         fs::create_dir_all(&p1).unwrap();

@@ -4,6 +4,7 @@ __pycache__/
 *.py[cod]
 *.log
 *.zip
+.arkib_admin_key
 .rojakface_admin_key
 .rust-anything/
 data/interim/

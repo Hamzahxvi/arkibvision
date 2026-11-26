@@ -1,5 +1,5 @@
 {
-  "vector_store": "data/processed/rojakface_vectors.json",
+  "vector_store": "data/processed/arkib_vectors.json",
   "vector_dimension": 768,
   "min_clip_identify_threshold": 0.88,
   "auto_gallery_min_score": 0.90,

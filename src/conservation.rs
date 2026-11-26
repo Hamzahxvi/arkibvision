@@ -414,7 +414,7 @@ pub fn analyze_image_quality_and_conservation(path: &Path) -> Result<Value, Stri
             "actions": [
                 "Eliminate UV/daylight exposure; store in opaque archival boxes and display only under <= 50 lux UV-filtered lighting.",
                 "Create a lossless high-DPI archival master scan (minimum 400–600 DPI) before further ink degradation.",
-                "Use `rojakface_enhance_image` (mode='auto' or 'manuscript_ocr') for non-destructive digital legibility recovery.",
+                "Use `arkib_enhance_image` (mode='auto' or 'manuscript_ocr') for non-destructive digital legibility recovery.",
             ],
         }));
     }
@@ -425,7 +425,7 @@ pub fn analyze_image_quality_and_conservation(path: &Path) -> Result<Value, Stri
             "treatment": "Digital Re-Capture & Automated Quality Enhancement",
             "actions": [
                 "Re-scan with even diffuse overhead lighting at >= 400 DPI if physical item is accessible.",
-                "Run `rojakface_enhance_image` to correct lighting, remove yellowing cast, and sharpen text edges.",
+                "Run `arkib_enhance_image` to correct lighting, remove yellowing cast, and sharpen text edges.",
             ],
         }));
     }

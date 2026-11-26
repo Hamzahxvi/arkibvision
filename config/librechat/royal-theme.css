@@ -1,4 +1,4 @@
-/* White & Royal Blue (Light) + Dark Slate & Royal Blue (Dark) matching RojakFace Admin Portal */
+/* White & Royal Blue (Light) + Dark Slate & Royal Blue (Dark) matching ArkibVision Admin Portal */
 :root,
 html,
 html.light {
@@ -183,7 +183,7 @@ main table td img {
   display: none !important;
 }
 
-/* Integrated RojakFace Admin Portal button (under MCP Settings in LibreChat rail) & stage */
+/* Integrated ArkibVision Admin Portal button (under MCP Settings in LibreChat rail) & stage */
 .rf-admin-rail-btn {
   position: relative;
   color: #ffffff !important;

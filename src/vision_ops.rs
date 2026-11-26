@@ -417,7 +417,7 @@ pub fn build_ocr_document_chunks(
         "total_chunks": chunks.len(),
         "total_detected_text_lines": total_detected_lines,
         "chunks": chunks,
-        "anti_hallucination_guide": "Read the document/handwriting strictly chunk-by-chunk from Top to Bottom (3-4 lines per strip), matching the detected_text_lines count in each chunk. Transcribe ONLY characters visibly present in the image. Never invent extra lines, never guess missing words from memory, and mark any illegible calligraphic/handwritten glyphs with [?]. If the text contains Jawi (Modern or Old Classical Jawi), ALWAYS pass the exact extracted Jawi lines into rojakface_decode_jawi instead of translating by memory.",
+        "anti_hallucination_guide": "Read the document/handwriting strictly chunk-by-chunk from Top to Bottom (3-4 lines per strip), matching the detected_text_lines count in each chunk. Transcribe ONLY characters visibly present in the image. Never invent extra lines, never guess missing words from memory, and mark any illegible calligraphic/handwritten glyphs with [?]. If the text contains Jawi (Modern or Old Classical Jawi), ALWAYS pass the exact extracted Jawi lines into arkib_decode_jawi instead of translating by memory.",
     }))
 }
 

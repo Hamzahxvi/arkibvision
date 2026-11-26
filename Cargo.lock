@@ -36,6 +36,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "arkib-server"
+version = "2.0.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "flate2",
+ "futures-util",
+ "image",
+ "kamadak-exif",
+ "mime_guess",
+ "ort",
+ "rand 0.9.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sysinfo",
+ "tokio",
+ "tokio-stream",
+ "uuid",
+ "walkdir",
+ "zip",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1339,33 +1366,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rojakface-server"
-version = "2.0.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "chrono",
- "flate2",
- "futures-util",
- "image",
- "kamadak-exif",
- "mime_guess",
- "ort",
- "rand 0.9.5",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "sysinfo",
- "tokio",
- "tokio-stream",
- "uuid",
- "walkdir",
- "zip",
 ]
 
 [[package]]

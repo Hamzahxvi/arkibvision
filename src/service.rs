@@ -49,7 +49,7 @@ struct CacheEntry {
     cached_from: String,
 }
 
-pub struct RojakFaceService {
+pub struct ArkibService {
     pub cfg: AppConfig,
     pub engine: Arc<FaceEngine>,
     pub store: Arc<VectorStore>,
@@ -120,7 +120,7 @@ fn find_docker_binary() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
-impl RojakFaceService {
+impl ArkibService {
     pub fn new(cfg: AppConfig) -> Result<Self, String> {
         ensure_default_location_groups(&cfg);
         ensure_default_locations(&cfg);
@@ -514,7 +514,7 @@ impl RojakFaceService {
         existing_meta.insert("identity".to_string(), Value::String(identity.to_string()));
         existing_meta
             .entry("database".to_string())
-            .or_insert_with(|| Value::String("rojakface_vectors".to_string()));
+            .or_insert_with(|| Value::String("arkib_vectors".to_string()));
         existing_meta.insert("vector_count".to_string(), json!(vector_count));
         existing_meta.insert(
             "stored_original_image_count".to_string(),
@@ -1824,7 +1824,7 @@ impl RojakFaceService {
         if !self.verify_admin(admin_key) {
             return json!({
                 "status": "rejected",
-                "reason": "Direct unsupervised learning is restricted to Admins. Guest users must use rojakface_request_enrollment.",
+                "reason": "Direct unsupervised learning is restricted to Admins. Guest users must use arkib_request_enrollment.",
             });
         }
         let resolved = match self.resolve_image_path(image_path) {

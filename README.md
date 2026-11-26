@@ -1,8 +1,8 @@
-# RojakFace Enterprise Vision, Biometric Identity & Archival Forensics Platform (Pure Rust)
+# ArkibVision Enterprise Vision, Biometric Identity & Archival Forensics Platform (Pure Rust)
 
 An **air-gapped, 100% on-premise multimodal AI & archival governance platform** written in **100% safe Rust (`#![forbid(unsafe_code)]`, 0% Python)** that integrates **Biometric Face Recognition**, **Privacy-Aware Identity & Visual Photo Retrieval**, **Historical Script OCR (Jawi, Pallava, Kawi, Rencong)**, **4-Layer Deep Authenticity & AI Watermark Forensics**, **Archival Conservation / Damage Healing & Digital Enhancement**, **Managed Location & Document Folders**, and **Live System Performance Monitoring** natively inside **LibreChat** (`http://localhost:3080`) — including the integrated **Admin Portal** right under the **MCP Settings** icon — powered by a single compiled **Rust Axum + Tokio MCP SSE & Headless JSON API Server** (`http://0.0.0.0:8005/sse`).
 
-![RojakFace Pipeline Architecture Diagram](reports/pipeline_diagram.svg)
+![ArkibVision Pipeline Architecture Diagram](reports/pipeline_diagram.svg)
 
 ---
 
@@ -24,31 +24,31 @@ An **air-gapped, 100% on-premise multimodal AI & archival governance platform** 
 
 ## 1. Key Features
 
-- **100% Pure Safe Rust Backend (`#![forbid(unsafe_code)]`, Zero Python Runtime)**: Compiles to a single ~9 MB native release binary (`rojakface-server.exe`) with `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, `strip = true`, targeted `tokio` features, sub-second startup, graceful `Ctrl+C` shutdown, and a `GET /health` endpoint.
+- **100% Pure Safe Rust Backend (`#![forbid(unsafe_code)]`, Zero Python Runtime)**: Compiles to a single ~9 MB native release binary (`arkib-server.exe`) with `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, `strip = true`, targeted `tokio` features, sub-second startup, graceful `Ctrl+C` shutdown, and a `GET /health` endpoint.
 - **100% Air-Gapped Local AI (Zero Cloud Dependencies)**: Runs entirely on local hardware using **Ollama (`qwen3-vl:4b-instruct-16k`)**, native **ONNX Runtime (`ort`, `GraphOptimizationLevel::Level3`)** for **YuNet** face detection and **CLIP ViT-B/32 (768-D)** embeddings, and an embedded **Pre-Normalized Zero-Clone Top-K SIMD Cosine Vector Store**.
 - **Biometric Face Recognition & Auto-Gallery Capture**: Identifies enrolled individuals with an anti-false-positive cosine threshold (`>= 0.88`) and automatically captures new high-confidence (`>= 0.90`), non-duplicate face angles using unified 16×16 perceptual average hashing (`aHash`).
 - **Direct Database & Bilingual Visual Attribute Search**: Case- and spacing-insensitive identity lookup supporting photo count limits (*"2 photos only"*), photos-only rendering, and bilingual English/Malay visual attribute queries (*"photo that wear songkok"*, *"pakai cermin mata"*) via per-profile `visual_index.json` + async Ollama vision fallback.
 - **Public vs. Private Data Boundary**: Profile attributes are divided into **Public Data** (rendered in centered Markdown tables in chat) and **Private Data** (`license_no`, `dob`, `date_of_birth`, `ic`, `nric`, `passport`, `ssn`, `phone`, `email`, `exp`, `no_kp`, `tarikh_lahir`, strictly hidden from chat and editable only inside the Admin Portal).
 - **Historical Malay & Ancient Script OCR & Transliteration**:
-  - **Adaptive Line-Valley Chunker** (`rojakface_ocr_document`): Projects horizontal edge energy in microseconds and slices tall/dense manuscripts along natural whitespace valleys (`Top`, `Middle`, `Bottom`) with auto-contrast and `1.4×` sharpening.
-  - **Jawi, Pallava, Kawi & Rencong Script Decoder** (`rojakface_decode_jawi`, `rojakface_decode_ancient_script`): Restores 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`), transliterates Unicode **Kawi** (`U+11F00–U+11F5F`) and **Rencong / Surat Ulu** (`U+A930–U+A95F`), normalizes **Pallava** Old Malay / Srivijaya inscriptions with archival glossary notes, and produces searchable digital text.
-- **Computer Vision, Archival Location Recognition & Managed Folders (`rojakface_analyze_image`, `rojakface_search_locations`)**:
+  - **Adaptive Line-Valley Chunker** (`arkib_ocr_document`): Projects horizontal edge energy in microseconds and slices tall/dense manuscripts along natural whitespace valleys (`Top`, `Middle`, `Bottom`) with auto-contrast and `1.4×` sharpening.
+  - **Jawi, Pallava, Kawi & Rencong Script Decoder** (`arkib_decode_jawi`, `arkib_decode_ancient_script`): Restores 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`), transliterates Unicode **Kawi** (`U+11F00–U+11F5F`) and **Rencong / Surat Ulu** (`U+A930–U+A95F`), normalizes **Pallava** Old Malay / Srivijaya inscriptions with archival glossary notes, and produces searchable digital text.
+- **Computer Vision, Archival Location Recognition & Managed Folders (`arkib_analyze_image`, `arkib_search_locations`)**:
   - Recognizes buildings, landmarks, and specific halls/wings/galleries (e.g. **Arkib Negara Malaysia / National Archives of Malaysia**) using CLIP ViT-B/32 768-D embeddings against managed **Location Folders**.
   - Extracts full technical & EXIF metadata (file name, size, MIME, dimensions, Date/Time, Camera Make/Model, GPS coordinates, Software, PNG `tEXt`/`iTXt`/`zTXt` chunks, SHA-256, perceptual `aHash`).
-- **4-Layer Deep Authenticity, AI Watermark & Copy/Fraud Detection (`rojakface_detect_authenticity`)**:
+- **4-Layer Deep Authenticity, AI Watermark & Copy/Fraud Detection (`arkib_detect_authenticity`)**:
   - Combines archive duplicate matching (SHA-256 + 16×16 `aHash`), deep C2PA/JUMBF/IPTC/XMP/PNG/JPEG container structure inspection, pixel-level forensics (8×8 ELA, local noise CV, 8×8 JPEG blockiness, lossless LSB probe), and a dedicated zero-temperature observation-first Vision-AI audit to detect **AI-generated**, **digitally manipulated/composite**, **copied/re-encoded external-source**, and **original camera** images.
-- **Automatic Description, Archival Summarization & Managed Document Folders (`rojakface_summarize_document`, `rojakface_search_documents`)**:
+- **Automatic Description, Archival Summarization & Managed Document Folders (`arkib_summarize_document`, `arkib_search_documents`)**:
   - Parses **TXT, MD, CSV, JSON, HTML, XML, DOCX, PDF, and image scans** in pure Rust, generating structured archival summaries, key topics, names, dates, events, script type, and deep authenticity status.
-- **Duplicate Prevention & SHA-256 Checksum Integrity (`rojakface_verify_integrity`)**:
+- **Duplicate Prevention & SHA-256 Checksum Integrity (`arkib_verify_integrity`)**:
   - Guards location photo and document uploads against both exact SHA-256 and perceptual 16×16 `aHash` duplicates across all archive roots (`409 Conflict` with override confirmation in Admin Portal) and audits `data/processed/checksum_manifest.json` for corruption, tampering, missing files, and archive duplicates.
-- **Image Quality, Archival Damage Detection, Healing Advice & Digital Enhancement (`rojakface_assess_conservation`, `rojakface_enhance_image`)**:
+- **Image Quality, Archival Damage Detection, Healing Advice & Digital Enhancement (`arkib_assess_conservation`, `arkib_enhance_image`)**:
   - Scores **resolution**, **lighting/exposure**, and **readability/sharpness** (`0–100`).
   - Detects **tear**, **faded**, **mold**, and **aging** classified as **`none` / `light` / `medium` / `heavy`**.
   - Recommends physical conservation treatments (**fungal removal**, **controlled drying**, **Japanese Kozo tissue mending**, **deacidification**, **protective coating/sizing**, **UV-filtered storage**) and enhances scans digitally with Before vs. After metrics.
-- **Administration System Performance & Overload Monitoring (`rojakface_system_health`)**:
+- **Administration System Performance & Overload Monitoring (`arkib_system_health`)**:
   - Live telemetry (`sysinfo`) of CPU %, RAM GB/%, Disk GB/%, Server Process RSS MB, Ollama ping latency, request throughput, error rates, and RAII-guarded in-flight concurrency — detects abnormalities and overload (`HEALTHY` / `WARNING` / `CRITICAL_OVERLOAD`) with concrete recommended actions plus one-click integrity check and temp cache cleanup.
 - **Native LibreChat-Embedded Admin Portal with Maintainable Group Folders**:
-  - Embedded natively inside LibreChat (`http://localhost:3080`) via the Shield-Check icon directly under **MCP Settings** (exact LibreChat font family, floating tooltip, and Light/Dark CSS variables; standalone `http://127.0.0.1:8005/admin` redirects straight into `http://localhost:3080/#rojakface-admin`).
+  - Embedded natively inside LibreChat (`http://localhost:3080`) via the Shield-Check icon directly under **MCP Settings** (exact LibreChat font family, floating tooltip, and Light/Dark CSS variables; standalone `http://127.0.0.1:8005/admin` redirects straight into `http://localhost:3080/#arkib-admin`).
   - Organizes **Enrolled People** (`Staff`, `External Entity`), **Archival Locations** (`Arkib Negara Malaysia`, `Historical Landmarks`), and **Archival Documents** (`Historical Manuscripts`, `Official Records`) into searchable, maintainable group folders with safe **⋮ Three-Dot Menus**, **Trash Can icons**, **Custom Confirmation Modals**, and **Ghost Red Delete buttons**.
 
 ---
@@ -98,7 +98,7 @@ flowchart TD
 
 ## 3. 4-Layer Deep Authenticity & AI Watermark Engine
 
-Every authenticity check (`rojakface_detect_authenticity`, `rojakface_analyze_image`, `rojakface_assess_conservation`, `rojakface_summarize_document`, and the Admin Portal **System & Lab** tab) runs four complementary local forensic layers and fuses them deterministically in Rust:
+Every authenticity check (`arkib_detect_authenticity`, `arkib_analyze_image`, `arkib_assess_conservation`, `arkib_summarize_document`, and the Admin Portal **System & Lab** tab) runs four complementary local forensic layers and fuses them deterministically in Rust:
 
 1. **Layer 1 — Archive Duplicate & Integrity Matching**:
    - Exact **SHA-256** match and unified **16×16 perceptual `aHash`** near-duplicate detection across `profiles/`, `locations/`, and `documents/`.
@@ -157,9 +157,9 @@ Copy-Item config\librechat\admin-embed.js ..\LibreChat\images\admin-embed.js -Fo
 ```
 
 ### Step 4 — Optional First-Time Batch Face Enrollment (Pure Rust)
-Seed the embedded vector store (`data/processed/rojakface_vectors.json`) and profile galleries from `data/raw/staff_enroll/`:
+Seed the embedded vector store (`data/processed/arkib_vectors.json`) and profile galleries from `data/raw/staff_enroll/`:
 ```powershell
-.\target\release\rojakface-server.exe --enroll-dir data\raw\staff_enroll
+.\target\release\arkib-server.exe --enroll-dir data\raw\staff_enroll
 ```
 
 ---
@@ -168,26 +168,26 @@ Seed the embedded vector store (`data/processed/rojakface_vectors.json`) and pro
 
 ### One-Click Launch & Shutdown (Windows)
 ```powershell
-# Start Ollama + rojakface-server.exe (8005) + LibreChat (3080)
+# Start Ollama + arkib-server.exe (8005) + LibreChat (3080)
 cmd /c start.bat
 
-# Stop rojakface-server.exe cleanly
+# Stop arkib-server.exe cleanly
 cmd /c stop.bat
 ```
 
 ### Manual CLI Commands & Health Check
 ```powershell
 # Run the MCP SSE + Headless Admin JSON API server
-.\target\release\rojakface-server.exe
+.\target\release\arkib-server.exe
 
 # Health check endpoint
 curl http://127.0.0.1:8005/health
 
 # Offline biometric face identification check on any image
-.\target\release\rojakface-server.exe --verify-face path\to\portrait.jpg
+.\target\release\arkib-server.exe --verify-face path\to\portrait.jpg
 
 # Batch enroll all subdirectories under a folder (<dir>/<Person Name>/*.jpg)
-.\target\release\rojakface-server.exe --enroll-dir data\raw\staff_enroll
+.\target\release\arkib-server.exe --enroll-dir data\raw\staff_enroll
 ```
 
 ---
@@ -198,30 +198,30 @@ Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/mess
 
 | Pipeline | MCP Tool | Description |
 | :--- | :--- | :--- |
-| **Pipeline A: Biometric Face ID** | `rojakface_identify_faces` | YuNet face detection + 768-D CLIP embeddings + zero-clone SIMD cosine match (`>= 0.88`), auto-gallery capture (`>= 0.90`), returns `MATCHED`, `NOT_IN_DATABASE`, or `NO_FACE_DETECTED` (with `ocr_document_chunks`). |
-| | `rojakface_detect_faces` | Low-level YuNet bounding box `[x, y, w, h]` and confidence inspection. |
-| **Pipeline B: People, Locations & Documents Search** | `rojakface_search_identity` | Case/spacing-insensitive profile lookup supporting `limit`, `photos_only`, and bilingual English/Malay visual `query`. |
-| | `rojakface_list_identities` | Lists all enrolled identities grouped by People Group Folder (`Staff`, `External Entity`, custom) and reference vector counts. |
-| | `rojakface_search_locations` | Searches/lists managed archival **Location** folders (e.g. Arkib Negara Malaysia halls/wings/rooms) with coordinates, history, and gallery photos. |
-| | `rojakface_search_documents` | Searches/lists managed archival **Document** folders (with group folder metadata) by title, reference code, script, topic, or extracted digital text. |
-| **Pipeline C: Historical Script OCR, Vision & Deep Authenticity** | `rojakface_ocr_document` | Adaptive horizontal edge-energy line-valley chunking with autocontrast & `1.4×` sharpening (`/images/ocr-chunks/`). |
-| | `rojakface_decode_jawi` | Decodes Jawi script or rough transliterations into corrected 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`) and Standard Bahasa Melayu (Rumi). |
-| | `rojakface_decode_ancient_script` | Auto-detects & transliterates **Jawi**, **Pallava**, **Kawi** (`U+11F00–U+11F5F`), and **Rencong / Surat Ulu** (`U+A930–U+A95F`) with archival Old Malay glossary notes. |
-| | `rojakface_analyze_image` | All-in-one concurrent check: extracts full file/EXIF/GPS/PNG metadata, runs the **4-layer deep authenticity check**, assesses archival quality & damage, counts faces, and matches buildings/landmarks via CLIP 768-D against managed Locations. |
-| | `rojakface_detect_authenticity` | **4-layer forensic authenticity & AI watermark detector**: archive duplicates (SHA-256 + `aHash`), C2PA/IPTC/XMP/PNG/bare-JPEG header inspection, ELA/noise/blockiness/LSB pixel forensics, and zero-temp Vision-AI forensic audit. |
-| | `rojakface_summarize_document` | Multi-format (TXT/MD/CSV/JSON/HTML/DOCX/PDF/Image) automatic archival description & structured summary (topics, names, dates, events, and deep authenticity). |
-| **Pipeline D: Archival Conservation, Integrity & Ops** | `rojakface_assess_conservation` | Concurrently evaluates resolution, lighting, readability, detects tear/faded/mold/aging (`none`/`light`/`medium`/`heavy`), runs the **4-layer deep authenticity check**, and suggests physical healing treatments. |
-| | `rojakface_enhance_image` | Digitally enhances dark, yellowed, or faded archival images (gray-world de-yellowing, gamma lighting, autocontrast, unsharp mask) with Before vs. After quality scores. |
-| | `rojakface_verify_integrity` | Audits SHA-256 file integrity across `profiles/`, `locations/`, and `documents/` against `checksum_manifest.json` to flag corruption, tampering, missing files, and exact duplicates. |
-| | `rojakface_system_health` | Live administration telemetry (CPU, RAM, Disk, RSS, Ollama latency, workload/errors) with abnormality/overload detection (`HEALTHY`/`WARNING`/`CRITICAL_OVERLOAD`) and recommended actions. |
-| **Pipeline E: Role-Based Governance** | `rojakface_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
-| | `rojakface_request_update_metadata` | Stages a Guest metadata/MyKad/ID-card update request (`REQ-*`), auto-classifying English & Malay sensitive keys as `private`. |
-| | `rojakface_list_pending_requests` | Lists pending, approved, or rejected staging requests. |
-| | `rojakface_review_pending_request` | Admin-key guarded approval/rejection tool. |
-| | `rojakface_enroll_named_identity` | Admin direct enrollment tool (auto-stages for Guests). |
-| | `rojakface_enroll_or_learn` | Admin batch learning tool. |
-| | `rojakface_rename_identity` | Admin rename across vector store, profiles, and gallery. |
-| | `rojakface_delete_identity` | Admin delete across vector store and stored files. |
+| **Pipeline A: Biometric Face ID** | `arkib_identify_faces` | YuNet face detection + 768-D CLIP embeddings + zero-clone SIMD cosine match (`>= 0.88`), auto-gallery capture (`>= 0.90`), returns `MATCHED`, `NOT_IN_DATABASE`, or `NO_FACE_DETECTED` (with `ocr_document_chunks`). |
+| | `arkib_detect_faces` | Low-level YuNet bounding box `[x, y, w, h]` and confidence inspection. |
+| **Pipeline B: People, Locations & Documents Search** | `arkib_search_identity` | Case/spacing-insensitive profile lookup supporting `limit`, `photos_only`, and bilingual English/Malay visual `query`. |
+| | `arkib_list_identities` | Lists all enrolled identities grouped by People Group Folder (`Staff`, `External Entity`, custom) and reference vector counts. |
+| | `arkib_search_locations` | Searches/lists managed archival **Location** folders (e.g. Arkib Negara Malaysia halls/wings/rooms) with coordinates, history, and gallery photos. |
+| | `arkib_search_documents` | Searches/lists managed archival **Document** folders (with group folder metadata) by title, reference code, script, topic, or extracted digital text. |
+| **Pipeline C: Historical Script OCR, Vision & Deep Authenticity** | `arkib_ocr_document` | Adaptive horizontal edge-energy line-valley chunking with autocontrast & `1.4×` sharpening (`/images/ocr-chunks/`). |
+| | `arkib_decode_jawi` | Decodes Jawi script or rough transliterations into corrected 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`) and Standard Bahasa Melayu (Rumi). |
+| | `arkib_decode_ancient_script` | Auto-detects & transliterates **Jawi**, **Pallava**, **Kawi** (`U+11F00–U+11F5F`), and **Rencong / Surat Ulu** (`U+A930–U+A95F`) with archival Old Malay glossary notes. |
+| | `arkib_analyze_image` | All-in-one concurrent check: extracts full file/EXIF/GPS/PNG metadata, runs the **4-layer deep authenticity check**, assesses archival quality & damage, counts faces, and matches buildings/landmarks via CLIP 768-D against managed Locations. |
+| | `arkib_detect_authenticity` | **4-layer forensic authenticity & AI watermark detector**: archive duplicates (SHA-256 + `aHash`), C2PA/IPTC/XMP/PNG/bare-JPEG header inspection, ELA/noise/blockiness/LSB pixel forensics, and zero-temp Vision-AI forensic audit. |
+| | `arkib_summarize_document` | Multi-format (TXT/MD/CSV/JSON/HTML/DOCX/PDF/Image) automatic archival description & structured summary (topics, names, dates, events, and deep authenticity). |
+| **Pipeline D: Archival Conservation, Integrity & Ops** | `arkib_assess_conservation` | Concurrently evaluates resolution, lighting, readability, detects tear/faded/mold/aging (`none`/`light`/`medium`/`heavy`), runs the **4-layer deep authenticity check**, and suggests physical healing treatments. |
+| | `arkib_enhance_image` | Digitally enhances dark, yellowed, or faded archival images (gray-world de-yellowing, gamma lighting, autocontrast, unsharp mask) with Before vs. After quality scores. |
+| | `arkib_verify_integrity` | Audits SHA-256 file integrity across `profiles/`, `locations/`, and `documents/` against `checksum_manifest.json` to flag corruption, tampering, missing files, and exact duplicates. |
+| | `arkib_system_health` | Live administration telemetry (CPU, RAM, Disk, RSS, Ollama latency, workload/errors) with abnormality/overload detection (`HEALTHY`/`WARNING`/`CRITICAL_OVERLOAD`) and recommended actions. |
+| **Pipeline E: Role-Based Governance** | `arkib_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
+| | `arkib_request_update_metadata` | Stages a Guest metadata/MyKad/ID-card update request (`REQ-*`), auto-classifying English & Malay sensitive keys as `private`. |
+| | `arkib_list_pending_requests` | Lists pending, approved, or rejected staging requests. |
+| | `arkib_review_pending_request` | Admin-key guarded approval/rejection tool. |
+| | `arkib_enroll_named_identity` | Admin direct enrollment tool (auto-stages for Guests). |
+| | `arkib_enroll_or_learn` | Admin batch learning tool. |
+| | `arkib_rename_identity` | Admin rename across vector store, profiles, and gallery. |
+| | `arkib_delete_identity` | Admin delete across vector store and stored files. |
 
 ---
 
@@ -229,8 +229,8 @@ Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/mess
 
 Open **LibreChat (`http://localhost:3080`)** and click the **Admin Portal** shield-check icon directly underneath **MCP Settings** in the left navigation rail:
 
-- **Native LibreChat Theme & Layout**: Rendered directly inside LibreChat using LibreChat's exact Light/Dark CSS variables (no separate standalone `:8005/admin` page or iframe; visiting `http://127.0.0.1:8005/admin` automatically redirects `307` to `http://localhost:3080/#rojakface-admin`).
-- **Session Auth**: Constant-time credential verification (`POST /admin/api/login`) with 8-hour `HttpOnly; SameSite=Lax` session cookies (`ROJAKFACE_ADMIN_USER` / `ROJAKFACE_ADMIN_PASS`).
+- **Native LibreChat Theme & Layout**: Rendered directly inside LibreChat using LibreChat's exact Light/Dark CSS variables (no separate standalone `:8005/admin` page or iframe; visiting `http://127.0.0.1:8005/admin` automatically redirects `307` to `http://localhost:3080/#arkib-admin`).
+- **Session Auth**: Constant-time credential verification (`POST /admin/api/login`) with 8-hour `HttpOnly; SameSite=Lax` session cookies (`ARKIB_ADMIN_USER` / `ARKIB_ADMIN_PASS`).
 - **Maintainable Group Folders (with Instant Folder Search)**:
   - **Enrolled People Group Folders** (`Staff`, `External Entity`, plus custom folders), **Location Group Folders** (`Arkib Negara Malaysia`, `Historical Landmarks`, plus custom folders), and **Document Group Folders** (`Historical Manuscripts`, `Official Records`, plus custom folders): search folders instantly, create, rename, assign via dropdown-chevron selector on each card, or delete safely (deleting a folder moves items to `Unassigned` without deleting records).
 - **Misclick-Safe Destructive UX**:
@@ -271,7 +271,7 @@ Clients do not need IT jargon — everyday wording is automatically mapped to th
 ## 10. Project Structure
 
 ```text
-├── Cargo.toml                      # Pure-Rust package manifest (rojakface-server v2.0.0)
+├── Cargo.toml                      # Pure-Rust package manifest (arkib-server v2.0.0)
 ├── Cargo.lock                      # Reproducible Rust dependency lockfile
 ├── src/                            # 100% safe Rust (#![forbid(unsafe_code)])
 │   ├── main.rs                     # Tokio + Axum server, /health, RAII monitor guard, graceful shutdown & CLI
@@ -299,8 +299,8 @@ Clients do not need IT jargon — everyday wording is automatically mapped to th
 ├── reports/
 │   └── pipeline_diagram.svg        # Pure-Rust architecture diagram
 ├── Dockerfile                      # Multi-stage Pure-Rust Docker image with HEALTHCHECK
-├── start.bat                       # One-click launch (Ollama + rojakface-server.exe + LibreChat)
-├── stop.bat                        # One-click shutdown for rojakface-server.exe
+├── start.bat                       # One-click launch (Ollama + arkib-server.exe + LibreChat)
+├── stop.bat                        # One-click shutdown for arkib-server.exe
 └── README.md
 ```
 
@@ -310,16 +310,16 @@ Clients do not need IT jargon — everyday wording is automatically mapped to th
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `ROJAKFACE_HOST` | `0.0.0.0` | Bind host for MCP SSE, `/health`, & Admin JSON API |
-| `ROJAKFACE_PORT` | `8005` | Port for `/sse`, `/health`, and `/admin/api/*` |
-| `ROJAKFACE_ADMIN_USER` | `admin` | Admin Portal login username |
-| `ROJAKFACE_ADMIN_PASS` | `admin123` | Admin Portal login password (override in production) |
-| `ROJAKFACE_ADMIN_KEY` | *(persisted in `.rojakface_admin_key`)* | Internal secret key for Admin-only MCP operations |
-| `ROJAKFACE_OLLAMA_URL` | `http://127.0.0.1:11434/api/chat` | Local Ollama endpoint for visual search, summarization & visual forensic audit |
-| `ROJAKFACE_VISION_MODEL` | `qwen3-vl:4b-instruct-16k` | Local Ollama multimodal model |
+| `ARKIB_HOST` | `0.0.0.0` | Bind host for MCP SSE, `/health`, & Admin JSON API |
+| `ARKIB_PORT` | `8005` | Port for `/sse`, `/health`, and `/admin/api/*` |
+| `ARKIB_ADMIN_USER` | `admin` | Admin Portal login username |
+| `ARKIB_ADMIN_PASS` | `admin123` | Admin Portal login password (override in production) |
+| `ARKIB_ADMIN_KEY` | *(persisted in `.arkib_admin_key`)* | Internal secret key for Admin-only MCP operations |
+| `ARKIB_OLLAMA_URL` | `http://127.0.0.1:11434/api/chat` | Local Ollama endpoint for visual search, summarization & visual forensic audit |
+| `ARKIB_VISION_MODEL` | `qwen3-vl:4b-instruct-16k` | Local Ollama multimodal model |
 | `ORT_DYLIB_PATH` | *(auto-discovered in `models/runtime/`)* | Path to `onnxruntime.dll` / `libonnxruntime.so` |
-| `ROJAKFACE_YUNET_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `yunet_face_detector.onnx` |
-| `ROJAKFACE_CLIP_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `patch32_v1.onnx` |
+| `ARKIB_YUNET_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `yunet_face_detector.onnx` |
+| `ARKIB_CLIP_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `patch32_v1.onnx` |
 | `LIBRECHAT_DIR` | `../LibreChat` | Path to sibling LibreChat directory |
 | `LIBRECHAT_URL` | `http://localhost:3080` | Base URL for profile gallery, OCR chunks, enhanced images & Admin Portal redirect |
 
@@ -332,8 +332,8 @@ Clients do not need IT jargon — everyday wording is automatically mapped to th
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 
-# Run all 17 unit tests (biometrics, vector store, vision ops, Jawi, ancient scripts,
-# forensics/duplicate guard/visual fusion, conservation, archives/groups, monitor, MCP catalog)
+# Run all 21 unit tests (biometrics, vector store, vision ops & dense Jawi chunking, Modern/Old Jawi,
+# ancient scripts, forensics/duplicate guard/visual fusion, conservation, archives/groups, monitor, MCP catalog)
 cargo test
 
 # Build optimized release binary

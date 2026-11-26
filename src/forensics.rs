@@ -1666,7 +1666,7 @@ mod tests {
     #[test]
     fn test_checksum_integrity_audit_and_tamper_detection() {
         let base = std::env::temp_dir().join(format!(
-            "rojakface_integrity_test_{}",
+            "arkib_integrity_test_{}",
             uuid::Uuid::new_v4().simple()
         ));
         let root = base.join("docs");
@@ -1694,10 +1694,8 @@ mod tests {
 
     #[test]
     fn test_find_duplicate_in_archives_exact_and_near_duplicate() {
-        let base = std::env::temp_dir().join(format!(
-            "rojakface_dup_test_{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("arkib_dup_test_{}", uuid::Uuid::new_v4().simple()));
         let root = base.join("imgs");
         fs::create_dir_all(&root).unwrap();
 

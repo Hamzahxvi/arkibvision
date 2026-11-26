@@ -471,20 +471,26 @@
     <link rel="modulepreload" crossorigin href="./assets/forms.D-hiyJj6.js">
     <link rel="modulepreload" crossorigin href="./assets/Settings.Doop2Zwb.js">
     <link rel="stylesheet" crossorigin href="./assets/index.ByLu9DqT.css">
-  <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js" defer></script>  <link rel="stylesheet" href="/images/royal-theme.css?v=11" />
-    <script src="/images/admin-embed.js?v=8" defer></script>
+  <link rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials"><script id="vite-plugin-pwa:register-sw" src="./registerSW.js" defer></script>  <link rel="stylesheet" href="/images/royal-theme.css?v=12" />
+    <script src="/images/admin-embed.js?v=9" defer></script>
     <script>
       (function () {
         try {
-          var required = 'rojakface-tools';
+          var required = 'arkib-tools';
+          var legacy = 'rojakface-tools';
           var ensureMcp = function (key) {
             var raw = localStorage.getItem(key);
             var arr = [];
             try { arr = JSON.parse(raw || '[]'); } catch (e) { arr = []; }
             if (!Array.isArray(arr)) arr = [];
-            if (arr.indexOf(required) === -1) {
-              arr.push(required);
-              localStorage.setItem(key, JSON.stringify(arr));
+            var filtered = arr.filter(function (item) { return item !== legacy; });
+            var changed = filtered.length !== arr.length;
+            if (filtered.indexOf(required) === -1) {
+              filtered.push(required);
+              changed = true;
+            }
+            if (changed) {
+              localStorage.setItem(key, JSON.stringify(filtered));
             }
           };
           ensureMcp('LAST_MCP_new');

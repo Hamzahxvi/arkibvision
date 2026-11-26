@@ -288,7 +288,7 @@
     if (!state.authed) {
       stage.innerHTML =
         '<div class="rf-login-wrap"><div class="rf-login-card">' +
-        '<span class="rf-pill">🛡️ ROJAKFACE · ADMIN PORTAL</span>' +
+        '<span class="rf-pill">🛡️ ARKIBVISION · ADMIN PORTAL</span>' +
         '<h2>Sign in to Admin Portal</h2>' +
         '<p>Manage approvals, enrolled people, archival locations, documents, file integrity, and system health right inside LibreChat.</p>' +
         '<div id="rf-login-err" class="rf-err-banner" style="display:none"></div>' +
@@ -322,7 +322,7 @@
           await refreshAll(false);
           toast('Signed in to Admin Portal');
         } catch (e) {
-          err.textContent = 'Could not reach local RojakFace service (port 8005).';
+          err.textContent = 'Could not reach local ArkibVision service (port 8005).';
           err.style.display = 'block';
         }
       });
@@ -1982,7 +1982,7 @@
     var btn = document.createElement('button');
     btn.type = 'button';
     btn.id = BTN_ID;
-    btn.setAttribute('data-testid', 'nav-panel-rojakface-admin');
+    btn.setAttribute('data-testid', 'nav-panel-arkib-admin');
     btn.setAttribute('aria-label', 'Admin Portal');
     btn.setAttribute('aria-pressed', state.open ? 'true' : 'false');
     btn.className = 'rf-admin-rail-btn flex h-9 w-9 items-center justify-center rounded-lg transition-colors' + (state.open ? ' rf-active' : '');
@@ -2070,7 +2070,7 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountAdminButton);
   else mountAdminButton();
 
-  if (window.location.hash === '#rojakface-admin') {
+  if (window.location.hash === '#arkib-admin' || window.location.hash === '#rojakface-admin') {
     setTimeout(openAdmin, 450);
   }
 })();

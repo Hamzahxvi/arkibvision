@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-set "SERVER_EXE=%~dp0target\release\rojakface-server.exe"
+set "SERVER_EXE=%~dp0target\release\arkib-server.exe"
 if not exist "%SERVER_EXE%" (
     where cargo >nul 2>nul
     if errorlevel 1 (
@@ -11,7 +11,7 @@ if not exist "%SERVER_EXE%" (
         pause
         exit /b 1
     )
-    echo Building RojakFace Pure-Rust server ^(cargo build --release^)...
+    echo Building ArkibVision Pure-Rust server ^(cargo build --release^)...
     cargo build --release
     if errorlevel 1 (
         echo [ERROR] Cargo build failed.
@@ -22,7 +22,7 @@ if not exist "%SERVER_EXE%" (
 
 for %%I in ("%~dp0..\LibreChat") do set "LIBRECHAT_DIR=%%~fI"
 
-echo Starting RojakFace Pure-Rust MCP Server ^& LibreChat workspace...
+echo Starting ArkibVision Pure-Rust MCP Server ^& LibreChat workspace...
 
 REM 1. Ensure Ollama is running
 powershell -NoProfile -Command "try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 11434); $c.Close(); exit 0 } catch { exit 1 }"
@@ -39,17 +39,17 @@ if errorlevel 1 (
     echo Ollama is already running on port 11434.
 )
 
-REM 2. Start RojakFace Pure-Rust MCP & Admin Server (port 8005)
+REM 2. Start ArkibVision Pure-Rust MCP & Admin Server (port 8005)
 powershell -NoProfile -Command "try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8005); $c.Close(); exit 0 } catch { exit 1 }"
 if errorlevel 1 (
-    echo Starting RojakFace Pure-Rust MCP Service ^(port 8005^)...
+    echo Starting ArkibVision Pure-Rust MCP Service ^(port 8005^)...
     powershell -NoProfile -Command "Start-Process -FilePath '%SERVER_EXE%' -WorkingDirectory '%~dp0.' -WindowStyle Minimized"
 ) else (
-    echo RojakFace MCP Service is already running on port 8005.
+    echo ArkibVision MCP Service is already running on port 8005.
 )
 
-REM 3. Wait for RojakFace MCP (port 8005) before starting LibreChat
-echo Waiting for RojakFace MCP ^(port 8005^)...
+REM 3. Wait for ArkibVision MCP (port 8005) before starting LibreChat
+echo Waiting for ArkibVision MCP ^(port 8005^)...
 powershell -NoProfile -Command ^
   "for ($i = 0; $i -lt 30; $i++) {" ^
   "  try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 8005); $c.Close(); break } catch { Start-Sleep -Milliseconds 300 }" ^
@@ -80,5 +80,5 @@ powershell -NoProfile -Command ^
   "}" ^
   "if ($ready) { Start-Process 'http://localhost:3080' } else { Write-Host '[ERROR] LibreChat did not respond on port 3080 within 60s.' }"
 
-echo Done. Use stop.bat to close RojakFace MCP.
+echo Done. Use stop.bat to close ArkibVision MCP.
 exit /b 0

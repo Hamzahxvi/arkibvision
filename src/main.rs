@@ -16,7 +16,7 @@ mod vector_store;
 mod vision_ops;
 
 use crate::config::AppConfig;
-use crate::service::RojakFaceService;
+use crate::service::ArkibService;
 use axum::extract::{Request, State};
 use axum::middleware::{self, Next};
 use axum::response::Response;
@@ -30,13 +30,13 @@ use std::time::Instant;
 
 /// RAII guard so cancelled/dropped HTTP requests never leak `in_flight` counts.
 struct InFlightGuard {
-    service: Arc<RojakFaceService>,
+    service: Arc<ArkibService>,
     started: Instant,
     completed: bool,
 }
 
 impl InFlightGuard {
-    fn new(service: Arc<RojakFaceService>) -> Self {
+    fn new(service: Arc<ArkibService>) -> Self {
         service.monitor.begin_request();
         Self {
             service,
@@ -62,7 +62,7 @@ impl Drop for InFlightGuard {
 }
 
 async fn monitor_middleware(
-    State(service): State<Arc<RojakFaceService>>,
+    State(service): State<Arc<ArkibService>>,
     req: Request,
     next: Next,
 ) -> Response {
@@ -76,14 +76,14 @@ async fn monitor_middleware(
     resp
 }
 
-async fn health_handler(State(service): State<Arc<RojakFaceService>>) -> Json<Value> {
+async fn health_handler(State(service): State<Arc<ArkibService>>) -> Json<Value> {
     let identities = service.store.list_counts().len();
     let vectors = service.store.total_vectors();
     let locations = archives::list_locations(&service.cfg).len();
     let documents = archives::list_documents(&service.cfg).len();
     Json(json!({
         "status": "ok",
-        "service": "rojakface-server",
+        "service": "arkib-server",
         "version": env!("CARGO_PKG_VERSION"),
         "runtime": "rust",
         "identities": identities,
@@ -95,7 +95,7 @@ async fn health_handler(State(service): State<Arc<RojakFaceService>>) -> Json<Va
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
-    println!("Shutdown signal received; stopping RojakFace server gracefully...");
+    println!("Shutdown signal received; stopping ArkibVision server gracefully...");
 }
 
 #[tokio::main]
@@ -103,7 +103,7 @@ async fn main() {
     let cfg = AppConfig::load();
     let args: Vec<String> = std::env::args().collect();
 
-    let service = match RojakFaceService::new(cfg.clone()) {
+    let service = match ArkibService::new(cfg.clone()) {
         Ok(s) => Arc::new(s),
         Err(err) => {
             eprintln!("Fatal startup error: {err}");
@@ -158,7 +158,7 @@ async fn main() {
 
     let addr_str = format!("{}:{}", cfg.host, cfg.port);
     let addr: SocketAddr = addr_str.parse().unwrap_or_else(|_| {
-        eprintln!("Invalid ROJAKFACE_HOST:ROJAKFACE_PORT '{addr_str}'");
+        eprintln!("Invalid ARKIB_HOST:ARKIB_PORT '{addr_str}'");
         std::process::exit(1);
     });
 
@@ -173,14 +173,14 @@ async fn main() {
     let ident_count = service.store.list_counts().len();
     let vec_count = service.store.total_vectors();
     println!(
-        "RojakFace Pure-Rust MCP Server v{} listening on http://{}/sse (0% Python, {} identities / {} vectors)",
+        "ArkibVision Pure-Rust MCP Server v{} listening on http://{}/sse (0% Python, {} identities / {} vectors)",
         env!("CARGO_PKG_VERSION"),
         addr,
         ident_count,
         vec_count
     );
     println!(
-        "Admin Portal: Integrated inside LibreChat ({}/#rojakface-admin) | Health: http://127.0.0.1:{}/health",
+        "Admin Portal: Integrated inside LibreChat ({}/#arkib-admin) | Health: http://127.0.0.1:{}/health",
         cfg.librechat_url, cfg.port
     );
     println!("Roles Active: Guest (default, staging review) | Admin (valid admin_key required)");
