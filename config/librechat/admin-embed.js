@@ -3112,10 +3112,43 @@
     }
   });
 
-  var acObserver = new MutationObserver(mountCanvasButton);
+  function upgradeCanvasLinks() {
+    var links = document.querySelectorAll('a[href*="#arkib-canvas:"]:not([data-ac-card="1"])');
+    links.forEach(function (a) {
+      var parsed = parseCanvasHash(a.getAttribute('href') || '');
+      if (!parsed) return;
+      a.setAttribute('data-ac-card', '1');
+      var isOcr = parsed.mode === 'ocr';
+      var title = isOcr ? 'Jawi OCR Workbench' : 'Identity Enrollment Canvas';
+      var sub = isOcr
+        ? 'Edit Jawi & Rumi side-by-side · Export DOCX / PDF'
+        : 'Crop photo, set group folder & enroll to archive';
+      var iconSvg = isOcr
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>'
+        : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h2"/><path d="M15 12h2"/><path d="M7 16c.5-1.5 2-2 4-2s3.5.5 4 2"/></svg>';
+      a.innerHTML =
+        '<span class="ac-cc-left">' +
+        '  <span class="ac-cc-icon">' + iconSvg + '</span>' +
+        '  <span class="ac-cc-meta">' +
+        '    <span class="ac-cc-title">' + title + '</span>' +
+        '    <span class="ac-cc-sub">' + sub + '</span>' +
+        '  </span>' +
+        '</span>' +
+        '<span class="ac-cc-open">Open ↗</span>';
+    });
+  }
+
+  var acObserver = new MutationObserver(function () {
+    mountCanvasButton();
+    upgradeCanvasLinks();
+  });
   acObserver.observe(document.documentElement, { childList: true, subtree: true });
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountCanvasButton);
-  else mountCanvasButton();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { mountCanvasButton(); upgradeCanvasLinks(); });
+  } else {
+    mountCanvasButton();
+    upgradeCanvasLinks();
+  }
 
   // Do NOT auto-reopen stale session text on a fresh /c/new page reload; clear stale hash if on /c/new
   var initParsed = parseCanvasHash(window.location.hash || '');
