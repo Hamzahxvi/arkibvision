@@ -9,6 +9,7 @@
 use crate::admin::{AdminState, cors_middleware, is_admin_request};
 use crate::archives;
 use crate::config::AppConfig;
+use crate::export::{ExportDocumentInput, build_docx_bytes, build_pdf_bytes};
 use crate::jawi::decode_jawi_text;
 use crate::mcp_sse::is_allowed_host;
 use crate::metadata::{default_detail_visibility, profile_slug, value_to_trimmed_string};
@@ -120,6 +121,10 @@ pub fn canvas_router(state: AdminState) -> Router {
         .route("/canvas/api/session/{kind}/{id}", get(canvas_get_session))
         .route("/canvas/api/image/{id}", get(canvas_serve_image))
         .route("/canvas/api/jawi-preview", post(canvas_jawi_preview))
+        .route(
+            "/canvas/api/export-transcription/{format}",
+            post(canvas_export_transcription),
+        )
         .route("/canvas/api/submit-ocr-edit", post(canvas_submit_ocr_edit))
         .route(
             "/canvas/api/submit-enrollment",
@@ -571,11 +576,21 @@ pub fn apply_ocr_edit_to_archive(
     meta.entry("created_at".to_string())
         .or_insert_with(|| Value::String(Utc::now().to_rfc3339()));
 
-    let pretty = serde_json::to_string_pretty(&Value::Object(meta))
+    let pretty = serde_json::to_string_pretty(&Value::Object(meta.clone()))
         .map_err(|e| format!("Serialize document.json failed: {e}"))?;
     let tmp = meta_path.with_extension("json.tmp");
     fs::write(&tmp, pretty).map_err(|e| format!("Write document tmp failed: {e}"))?;
     fs::rename(&tmp, &meta_path).map_err(|e| format!("Rename document failed: {e}"))?;
+
+    // Automatically write a downloadable .docx file into the document folder so it is immediately usable (never 0 files).
+    let export_in = ExportDocumentInput::from_doc_value(&Value::Object(meta));
+    if let Ok(docx_bytes) = build_docx_bytes(&export_in) {
+        let docx_path = doc_dir.join("files").join(format!("{target_slug}.docx"));
+        let docx_tmp = docx_path.with_extension("docx.tmp");
+        if fs::write(&docx_tmp, docx_bytes).is_ok() {
+            let _ = fs::rename(&docx_tmp, &docx_path);
+        }
+    }
 
     let lexicon_added = if add_to_lexicon {
         append_verified_lexicon_pairs(cfg, lexicon_suggestions)?
@@ -589,6 +604,94 @@ pub fn apply_ocr_edit_to_archive(
         "verified_by_human": true,
         "lexicon_added": lexicon_added,
     }))
+}
+
+#[derive(Deserialize)]
+struct ExportTranscriptionReq {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    jawi_text: String,
+    #[serde(default)]
+    rumi_text: String,
+    #[serde(default)]
+    notes: String,
+}
+
+async fn canvas_export_transcription(
+    AxumPath(format): AxumPath<String>,
+    Json(payload): Json<ExportTranscriptionReq>,
+) -> Response {
+    let fmt = format.trim().to_ascii_lowercase();
+    if fmt != "docx" && fmt != "pdf" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Format must be 'docx' or 'pdf'." })),
+        )
+            .into_response();
+    }
+    let title = if payload.title.trim().is_empty() {
+        "Jawi Archival Transcription".to_string()
+    } else {
+        payload.title.trim().to_string()
+    };
+    let structured = archives::extract_document_structure(if payload.rumi_text.trim().is_empty() {
+        &payload.jawi_text
+    } else {
+        &payload.rumi_text
+    });
+    let doc_input = ExportDocumentInput {
+        title: title.clone(),
+        reference_code: String::new(),
+        group: String::new(),
+        script_type: "jawi".to_string(),
+        verified_by_human: false,
+        hijri_date: structured["hijri_date"].as_str().unwrap_or("").to_string(),
+        gregorian_date_masihi: structured["gregorian_date_masihi"]
+            .as_str()
+            .unwrap_or("")
+            .to_string(),
+        jawi_text: payload.jawi_text,
+        rumi_text: payload.rumi_text,
+        summary: String::new(),
+        notes: payload.notes,
+    };
+    let slug = {
+        let s = profile_slug(&title);
+        if s.is_empty() {
+            "jawi_transcription".to_string()
+        } else {
+            s
+        }
+    };
+    let built = if fmt == "docx" {
+        build_docx_bytes(&doc_input).map(|b| {
+            (
+                b,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                format!("{slug}.docx"),
+            )
+        })
+    } else {
+        build_pdf_bytes(&doc_input).map(|b| (b, "application/pdf", format!("{slug}.pdf")))
+    };
+    match built {
+        Ok((bytes, mime, fname)) => {
+            let mut resp = Response::new(Body::from(bytes));
+            if let Ok(hv) = HeaderValue::from_str(mime) {
+                resp.headers_mut().insert(header::CONTENT_TYPE, hv);
+            }
+            if let Ok(cd) = HeaderValue::from_str(&format!("attachment; filename=\"{fname}\"")) {
+                resp.headers_mut().insert(header::CONTENT_DISPOSITION, cd);
+            }
+            resp
+        }
+        Err(reason) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+    }
 }
 
 async fn canvas_submit_ocr_edit(

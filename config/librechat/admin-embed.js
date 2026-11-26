@@ -1309,6 +1309,8 @@
           '<div class="rf-meta">' + (d.file_count || 0) + ' file(s)' + verdict + '</div>' +
           '<div class="rf-actions">' +
           '<select class="rf-move-sel" data-rf-move-d="' + esc(d.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
+          '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl('/admin/api/documents/' + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx" title="Download as Word (.docx) with RTL Jawi &amp; Rumi">📄 DOCX</a>' +
+          '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl('/admin/api/documents/' + encodeURIComponent(d.slug) + '/export/pdf')) + '" download="' + esc(d.slug) + '.pdf" title="Download as Archival PDF (.pdf)">📕 PDF</a>' +
           '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-d="' + esc(d.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
           '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-d="' + esc(d.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
@@ -2462,9 +2464,10 @@
       '</div>';
 
     footer.innerHTML =
-      '<span style="font-size:.74rem;color:rgb(var(--text-secondary))">' +
-      (ac.isAdmin ? 'Admin mode — saves directly to Archive Documents.' : 'Guest mode — submits for Admin approval.') +
-      '</span>' +
+      '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">' +
+      '  <button type="button" class="rf-btn" id="ac-dl-docx" style="padding:5px 10px;font-size:.75rem" title="Download Jawi + Rumi as Word (.docx)">📄 DOCX</button>' +
+      '  <button type="button" class="rf-btn" id="ac-dl-pdf" style="padding:5px 10px;font-size:.75rem" title="Download Rumi + Metadata as PDF (.pdf)">📕 PDF</button>' +
+      '</div>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="ac-ocr-submit">' +
       (ac.isAdmin ? '✅ Save Verified Transcription' : '📤 Submit Correction for Approval') +
       '</button>';
@@ -2586,6 +2589,38 @@
       renderLexList();
     };
     renderLexList();
+
+    // Instant DOCX / PDF export straight from Jawi OCR Workbench
+    var downloadExport = async function (fmt) {
+      var jawiVal = jawiTa.value.trim();
+      var rumiVal = rumiTa.value.trim();
+      if (!jawiVal && !rumiVal) { acToast('Enter Jawi or Rumi text before downloading.', false); return; }
+      var titleVal = (document.getElementById('ac-ocr-title') && document.getElementById('ac-ocr-title').value.trim()) || 'Jawi Archival Transcription';
+      var notesVal = (document.getElementById('ac-ocr-notes') && document.getElementById('ac-ocr-notes').value.trim()) || '';
+      try {
+        var resp = await fetch(API_ORIGIN + '/canvas/api/export-transcription/' + fmt, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: titleVal, jawi_text: jawiVal, rumi_text: rumiVal, notes: notesVal })
+        });
+        if (!resp.ok) { acToast('Export failed (' + resp.status + ')', false); return; }
+        var blob = await resp.blob();
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = titleVal.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '.' + fmt;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+        acToast('✅ Downloaded ' + fmt.toUpperCase() + ' file!', true);
+      } catch (err) {
+        acToast('Export error: ' + err.message, false);
+      }
+    };
+    document.getElementById('ac-dl-docx').onclick = function () { downloadExport('docx'); };
+    document.getElementById('ac-dl-pdf').onclick = function () { downloadExport('pdf'); };
 
     // Submit OCR Edit
     document.getElementById('ac-ocr-submit').onclick = async function () {

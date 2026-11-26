@@ -7,6 +7,7 @@ mod biometrics;
 mod canvas;
 mod config;
 mod conservation;
+mod export;
 mod forensics;
 mod jawi;
 mod mcp_sse;

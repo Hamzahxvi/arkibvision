@@ -263,6 +263,10 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
             post(admin_summarize_document),
         )
         .route(
+            "/admin/api/documents/{slug}/export/{format}",
+            get(admin_export_document),
+        )
+        .route(
             "/admin/document-files/{slug}/{*filename}",
             get(admin_document_file),
         )
@@ -1639,6 +1643,63 @@ async fn admin_summarize_document(
 }
 
 // ─── System Performance Monitor, Checksum Integrity & Conservation Endpoints ─
+
+async fn admin_export_document(
+    State(state): State<AdminState>,
+    AxumPath((slug, format)): AxumPath<(String, String)>,
+) -> Response {
+    let fmt = format.trim().to_ascii_lowercase();
+    if fmt != "docx" && fmt != "pdf" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Export format must be 'docx' or 'pdf'." })),
+        )
+            .into_response();
+    }
+    let cfg = state.service.cfg.clone();
+    let slug_c = slug.clone();
+    let doc_opt = tokio::task::spawn_blocking(move || archives::load_document(&cfg, &slug_c))
+        .await
+        .ok()
+        .flatten();
+    let Some(doc) = doc_opt else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": "Document not found." })),
+        )
+            .into_response();
+    };
+    let export_in = crate::export::ExportDocumentInput::from_doc_value(&doc);
+    let built = if fmt == "docx" {
+        crate::export::build_docx_bytes(&export_in).map(|b| {
+            (
+                b,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                format!("{slug}.docx"),
+            )
+        })
+    } else {
+        crate::export::build_pdf_bytes(&export_in)
+            .map(|b| (b, "application/pdf", format!("{slug}.pdf")))
+    };
+    match built {
+        Ok((bytes, mime, fname)) => {
+            let mut resp = Response::new(Body::from(bytes));
+            if let Ok(hv) = HeaderValue::from_str(mime) {
+                resp.headers_mut().insert(header::CONTENT_TYPE, hv);
+            }
+            if let Ok(cd) = HeaderValue::from_str(&format!("attachment; filename=\"{fname}\"")) {
+                resp.headers_mut().insert(header::CONTENT_DISPOSITION, cd);
+            }
+            resp
+        }
+        Err(reason) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+    }
+}
 
 async fn admin_system_health(State(state): State<AdminState>) -> Json<Value> {
     Json(state.service.tool_system_health().await)
