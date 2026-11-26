@@ -1,6 +1,10 @@
 #![forbid(unsafe_code)]
 
-use crate::config::AppConfig;
+use crate::config::{
+    AUTO_GALLERY_MIN_SCORE, AUTO_GALLERY_MIN_SCORE_MOBILEFACENET, AppConfig,
+    MIN_CLIP_IDENTIFY_THRESHOLD, MIN_MOBILEFACENET_IDENTIFY_THRESHOLD,
+};
+use crate::vector_store::normalize_l2;
 use crate::vision_ops::{encode_jpeg, load_rgb_image, load_rgb_image_from_bytes};
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage};
@@ -14,10 +18,137 @@ const YUNET_INPUT_SIZE: u32 = 640;
 const YUNET_SCORE_THRESHOLD: f32 = 0.70;
 const YUNET_NMS_THRESHOLD: f32 = 0.30;
 const MIN_EMBED_SIZE: i32 = 40;
+const ARCFACE_SIZE: u32 = 112;
 const CLIP_MEAN: [f32; 3] = [0.481_454_66, 0.457_827_5, 0.408_210_73];
 const CLIP_STD: [f32; 3] = [0.268_629_54, 0.261_302_6, 0.275_777_1];
 
-type RawFaceBox = (f32, f32, f32, f32, f32);
+/// Standard InsightFace / ArcFace 112×112 5-point facial landmark template:
+/// `[left_eye, right_eye, nose_tip, left_mouth, right_mouth]` (viewer's perspective).
+pub const ARCFACE_REF_112: [(f32, f32); 5] = [
+    (38.2946, 51.6963),
+    (73.5318, 51.5014),
+    (56.0252, 71.7366),
+    (41.5493, 92.3655),
+    (70.7299, 92.2041),
+];
+
+#[derive(Clone, Copy, Debug)]
+struct RawFaceDetection {
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    score: f32,
+    landmarks: Option<[(f32, f32); 5]>,
+}
+
+/// 2D 4-DOF similarity transform (`scale + rotation + translation`):
+/// `x' = a*x - b*y + tx`, `y' = b*x + a*y + ty`.
+#[derive(Clone, Copy, Debug)]
+pub struct Similarity2D {
+    pub a: f32,
+    pub b: f32,
+    pub tx: f32,
+    pub ty: f32,
+}
+
+impl Similarity2D {
+    /// Estimates the least-squares 4-DOF Umeyama similarity transform mapping `src` points
+    /// onto `dst` points (`ARCFACE_REF_112`). Returns `None` if source points are degenerate.
+    pub fn estimate(src: &[(f32, f32); 5], dst: &[(f32, f32); 5]) -> Option<Self> {
+        let n = 5.0_f64;
+        let (mut msx, mut msy, mut mdx, mut mdy) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+        for i in 0..5 {
+            msx += f64::from(src[i].0);
+            msy += f64::from(src[i].1);
+            mdx += f64::from(dst[i].0);
+            mdy += f64::from(dst[i].1);
+        }
+        msx /= n;
+        msy /= n;
+        mdx /= n;
+        mdy /= n;
+
+        let mut var_s = 0.0_f64;
+        let mut num_a = 0.0_f64;
+        let mut num_b = 0.0_f64;
+        for i in 0..5 {
+            let sx = f64::from(src[i].0) - msx;
+            let sy = f64::from(src[i].1) - msy;
+            let dx = f64::from(dst[i].0) - mdx;
+            let dy = f64::from(dst[i].1) - mdy;
+            var_s += sx * sx + sy * sy;
+            num_a += sx * dx + sy * dy;
+            num_b += sx * dy - sy * dx;
+        }
+        if var_s <= 1e-6 {
+            return None;
+        }
+        let a = num_a / var_s;
+        let b = num_b / var_s;
+        if (a * a + b * b) <= 1e-8 {
+            return None;
+        }
+        let tx = mdx - (a * msx - b * msy);
+        let ty = mdy - (b * msx + a * msy);
+        Some(Self {
+            a: a as f32,
+            b: b as f32,
+            tx: tx as f32,
+            ty: ty as f32,
+        })
+    }
+
+    #[cfg(test)]
+    pub fn apply(&self, x: f32, y: f32) -> (f32, f32) {
+        (
+            self.a * x - self.b * y + self.tx,
+            self.b * x + self.a * y + self.ty,
+        )
+    }
+
+    /// Maps destination coordinate `(dx, dy)` back to source image coordinate `(sx, sy)`.
+    pub fn invert_apply(&self, dx: f32, dy: f32) -> (f32, f32) {
+        let det = (self.a * self.a + self.b * self.b).max(1e-8);
+        let ux = dx - self.tx;
+        let uy = dy - self.ty;
+        let sx = (self.a * ux + self.b * uy) / det;
+        let sy = (-self.b * ux + self.a * uy) / det;
+        (sx, sy)
+    }
+}
+
+/// Bilinear-warps `src` into a landmark-aligned `112×112` RGB face image using `sim`.
+pub fn warp_face_112(src: &RgbImage, sim: &Similarity2D) -> RgbImage {
+    let (sw, sh) = src.dimensions();
+    let max_x = sw.saturating_sub(1) as i32;
+    let max_y = sh.saturating_sub(1) as i32;
+    RgbImage::from_fn(ARCFACE_SIZE, ARCFACE_SIZE, |dx, dy| {
+        let (sx, sy) = sim.invert_apply(dx as f32, dy as f32);
+        if sx < -0.5 || sy < -0.5 || sx > (sw as f32) - 0.5 || sy > (sh as f32) - 0.5 {
+            return Rgb([0, 0, 0]);
+        }
+        let x0 = (sx.floor() as i32).clamp(0, max_x) as u32;
+        let y0 = (sy.floor() as i32).clamp(0, max_y) as u32;
+        let x1 = (x0 as i32 + 1).clamp(0, max_x) as u32;
+        let y1 = (y0 as i32 + 1).clamp(0, max_y) as u32;
+        let fx = (sx - sx.floor()).clamp(0.0, 1.0);
+        let fy = (sy - sy.floor()).clamp(0.0, 1.0);
+
+        let p00 = src.get_pixel(x0, y0).0;
+        let p10 = src.get_pixel(x1, y0).0;
+        let p01 = src.get_pixel(x0, y1).0;
+        let p11 = src.get_pixel(x1, y1).0;
+        let mut out = [0u8; 3];
+        for ch in 0..3 {
+            let top = f32::from(p00[ch]) * (1.0 - fx) + f32::from(p10[ch]) * fx;
+            let bot = f32::from(p01[ch]) * (1.0 - fx) + f32::from(p11[ch]) * fx;
+            let val = top * (1.0 - fy) + bot * fy;
+            out[ch] = val.round().clamp(0.0, 255.0) as u8;
+        }
+        Rgb(out)
+    })
+}
 
 #[derive(Clone, Debug)]
 pub struct DetectedFace {
@@ -30,6 +161,7 @@ pub struct DetectedFace {
 pub struct FaceEngine {
     _env: ort::environment::Environment,
     yunet: Mutex<Session>,
+    mobilefacenet: Option<(Mutex<Session>, String)>,
     clip: Mutex<Session>,
 }
 
@@ -77,6 +209,25 @@ impl FaceEngine {
             .commit_from_file(&cfg.yunet_model_path)
             .map_err(|e| format!("Failed loading YuNet model: {e}"))?;
 
+        let mobilefacenet = if cfg.mobilefacenet_model_path.is_file() {
+            let sess = Session::builder(&env)
+                .map_err(|e| format!("MobileFaceNet session builder error: {e}"))?
+                .with_optimization_level(GraphOptimizationLevel::Level3)
+                .map_err(|e| format!("MobileFaceNet optimization error: {e}"))?
+                .with_intra_threads(threads)
+                .map_err(|e| format!("MobileFaceNet threads error: {e}"))?
+                .commit_from_file(&cfg.mobilefacenet_model_path)
+                .map_err(|e| format!("Failed loading MobileFaceNet model: {e}"))?;
+            let input_name = sess
+                .inputs()
+                .first()
+                .map(|i| i.name().to_string())
+                .unwrap_or_else(|| "input.1".to_string());
+            Some((Mutex::new(sess), input_name))
+        } else {
+            None
+        };
+
         let clip = Session::builder(&env)
             .map_err(|e| format!("CLIP session builder error: {e}"))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
@@ -89,8 +240,41 @@ impl FaceEngine {
         Ok(Self {
             _env: env,
             yunet: Mutex::new(yunet),
+            mobilefacenet,
             clip: Mutex::new(clip),
         })
+    }
+
+    pub fn face_model_name(&self) -> &'static str {
+        if self.mobilefacenet.is_some() {
+            "mobilefacenet_512"
+        } else {
+            "clip_vit_b32_768"
+        }
+    }
+
+    pub fn face_embedding_dim(&self) -> usize {
+        if self.mobilefacenet.is_some() {
+            512
+        } else {
+            768
+        }
+    }
+
+    pub fn default_identify_threshold(&self) -> f32 {
+        if self.mobilefacenet.is_some() {
+            MIN_MOBILEFACENET_IDENTIFY_THRESHOLD
+        } else {
+            MIN_CLIP_IDENTIFY_THRESHOLD
+        }
+    }
+
+    pub fn auto_gallery_threshold(&self) -> f32 {
+        if self.mobilefacenet.is_some() {
+            AUTO_GALLERY_MIN_SCORE_MOBILEFACENET
+        } else {
+            AUTO_GALLERY_MIN_SCORE
+        }
     }
 
     pub fn extract_features_from_path(&self, path: &Path) -> Result<Vec<DetectedFace>, String> {
@@ -135,13 +319,19 @@ impl FaceEngine {
             return Ok(Vec::new());
         }
 
-        let boxes = self.detect_yunet(img)?;
-        let mut results = Vec::with_capacity(boxes.len());
-        for (x1_f, y1_f, x2_f, y2_f, conf) in boxes {
-            let x = x1_f.floor() as i32;
-            let y = y1_f.floor() as i32;
-            let fw = (x2_f - x1_f).round() as i32;
-            let fh = (y2_f - y1_f).round() as i32;
+        let detections = self.detect_yunet(img)?;
+        let rgb_full = if self.mobilefacenet.is_some() {
+            Some(img.to_rgb8())
+        } else {
+            None
+        };
+        let mut results = Vec::with_capacity(detections.len());
+
+        for det in detections {
+            let x = det.x1.floor() as i32;
+            let y = det.y1.floor() as i32;
+            let fw = (det.x2 - det.x1).round() as i32;
+            let fh = (det.y2 - det.y1).round() as i32;
 
             let x1 = x.max(0) as u32;
             let y1 = y.max(0) as u32;
@@ -154,14 +344,27 @@ impl FaceEngine {
             let crop = img.crop_imm(x1, y1, x2 - x1, y2 - y1);
             let face_crop_jpeg = encode_jpeg(&crop, 92)?;
             let embedding = if fw.max(fh) >= MIN_EMBED_SIZE {
-                self.embed_clip(&crop)?
+                if self.mobilefacenet.is_some() {
+                    let aligned_112 = if let (Some(full_rgb), Some(kps)) =
+                        (&rgb_full, det.landmarks)
+                        && let Some(sim) = Similarity2D::estimate(&kps, &ARCFACE_REF_112)
+                    {
+                        warp_face_112(full_rgb, &sim)
+                    } else {
+                        crop.resize_exact(ARCFACE_SIZE, ARCFACE_SIZE, FilterType::CatmullRom)
+                            .to_rgb8()
+                    };
+                    self.embed_mobilefacenet(&aligned_112)?
+                } else {
+                    self.embed_clip(&crop)?
+                }
             } else {
                 Vec::new()
             };
 
             results.push(DetectedFace {
                 box_xywh: [x1 as i32, y1 as i32, fw, fh],
-                confidence: conf,
+                confidence: det.score,
                 embedding,
                 face_crop_jpeg,
             });
@@ -169,7 +372,7 @@ impl FaceEngine {
         Ok(results)
     }
 
-    fn detect_yunet(&self, img: &DynamicImage) -> Result<Vec<RawFaceBox>, String> {
+    fn detect_yunet(&self, img: &DynamicImage) -> Result<Vec<RawFaceDetection>, String> {
         let (orig_w, orig_h) = img.dimensions();
         let resized = img
             .resize_exact(YUNET_INPUT_SIZE, YUNET_INPUT_SIZE, FilterType::Triangle)
@@ -199,12 +402,12 @@ impl FaceEngine {
 
         let sx = (orig_w as f32) / (YUNET_INPUT_SIZE as f32);
         let sy = (orig_h as f32) / (YUNET_INPUT_SIZE as f32);
-        let mut raw_boxes: Vec<(f32, f32, f32, f32, f32)> = Vec::new();
+        let mut raw_boxes: Vec<RawFaceDetection> = Vec::new();
 
-        for (stride, cls_name, obj_name, bbox_name) in [
-            (8usize, "cls_8", "obj_8", "bbox_8"),
-            (16usize, "cls_16", "obj_16", "bbox_16"),
-            (32usize, "cls_32", "obj_32", "bbox_32"),
+        for (stride, cls_name, obj_name, bbox_name, kps_name) in [
+            (8usize, "cls_8", "obj_8", "bbox_8", "kps_8"),
+            (16usize, "cls_16", "obj_16", "bbox_16", "kps_16"),
+            (32usize, "cls_32", "obj_32", "bbox_32", "kps_32"),
         ] {
             let (_, cls_data) = outputs[cls_name]
                 .try_extract_tensor::<f32>()
@@ -215,6 +418,10 @@ impl FaceEngine {
             let (_, bbox_data) = outputs[bbox_name]
                 .try_extract_tensor::<f32>()
                 .map_err(|e| format!("YuNet {bbox_name} extract error: {e}"))?;
+            let kps_data: Option<&[f32]> = outputs
+                .get(kps_name)
+                .and_then(|v| v.try_extract_tensor::<f32>().ok())
+                .map(|(_, slice)| slice);
 
             let grid = sz / stride;
             let stride_f = stride as f32;
@@ -236,12 +443,64 @@ impl FaceEngine {
                     let y1 = (cy - bh * 0.5) * sy;
                     let x2 = (cx + bw * 0.5) * sx;
                     let y2 = (cy + bh * 0.5) * sy;
-                    raw_boxes.push((x1, y1, x2, y2, score));
+
+                    let landmarks = kps_data.and_then(|kps| {
+                        let k = idx * 10;
+                        if k + 9 >= kps.len() {
+                            return None;
+                        }
+                        let mut pts = [(0.0_f32, 0.0_f32); 5];
+                        for i in 0..5 {
+                            pts[i] = (
+                                (c as f32 + kps[k + i * 2]) * stride_f * sx,
+                                (r as f32 + kps[k + i * 2 + 1]) * stride_f * sy,
+                            );
+                        }
+                        Some(pts)
+                    });
+
+                    raw_boxes.push(RawFaceDetection {
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        score,
+                        landmarks,
+                    });
                 }
             }
         }
 
         Ok(nms(raw_boxes, YUNET_NMS_THRESHOLD))
+    }
+
+    fn embed_mobilefacenet(&self, aligned_112: &RgbImage) -> Result<Vec<f32>, String> {
+        let Some((sess_mutex, input_name)) = &self.mobilefacenet else {
+            return Err("MobileFaceNet session is not loaded.".to_string());
+        };
+        let sz = ARCFACE_SIZE as usize;
+        let plane = sz * sz;
+        let mut input = vec![0.0_f32; 3 * plane];
+        // InsightFace MobileFaceNet (w600k_mbf.onnx): RGB normalized (pixel - 127.5) / 128.0 in NCHW.
+        for y in 0..sz {
+            for x in 0..sz {
+                let p = aligned_112.get_pixel(x as u32, y as u32);
+                let idx = y * sz + x;
+                for ch in 0..3 {
+                    input[ch * plane + idx] = (f32::from(p[ch]) - 127.5) / 128.0;
+                }
+            }
+        }
+        let tensor = Tensor::from_array(([1usize, 3, sz, sz], input))
+            .map_err(|e| format!("MobileFaceNet input tensor error: {e}"))?;
+        let mut sess = sess_mutex.lock().expect("mobilefacenet lock");
+        let outputs = sess
+            .run(ort::inputs![input_name.as_str() => tensor])
+            .map_err(|e| format!("MobileFaceNet inference error: {e}"))?;
+        let (_, emb) = outputs[0]
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("MobileFaceNet output extract error: {e}"))?;
+        Ok(normalize_l2(emb))
     }
 
     fn embed_clip(&self, face: &DynamicImage) -> Result<Vec<f32>, String> {
@@ -294,27 +553,27 @@ fn square_pad(img: &RgbImage) -> RgbImage {
     canvas
 }
 
-fn iou(a: (f32, f32, f32, f32, f32), b: (f32, f32, f32, f32, f32)) -> f32 {
-    let ix1 = a.0.max(b.0);
-    let iy1 = a.1.max(b.1);
-    let ix2 = a.2.min(b.2);
-    let iy2 = a.3.min(b.3);
+fn iou(a: &RawFaceDetection, b: &RawFaceDetection) -> f32 {
+    let ix1 = a.x1.max(b.x1);
+    let iy1 = a.y1.max(b.y1);
+    let ix2 = a.x2.min(b.x2);
+    let iy2 = a.y2.min(b.y2);
     let inter = (ix2 - ix1).max(0.0) * (iy2 - iy1).max(0.0);
-    let area_a = (a.2 - a.0).max(0.0) * (a.3 - a.1).max(0.0);
-    let area_b = (b.2 - b.0).max(0.0) * (b.3 - b.1).max(0.0);
+    let area_a = (a.x2 - a.x1).max(0.0) * (a.y2 - a.y1).max(0.0);
+    let area_b = (b.x2 - b.x1).max(0.0) * (b.y2 - b.y1).max(0.0);
     let denom = area_a + area_b - inter;
     if denom <= 0.0 { 0.0 } else { inter / denom }
 }
 
-fn nms(mut boxes: Vec<RawFaceBox>, thresh: f32) -> Vec<RawFaceBox> {
-    boxes.sort_by(|a, b| b.4.total_cmp(&a.4));
-    let mut kept: Vec<RawFaceBox> = Vec::new();
-    for cand in boxes {
-        if kept.iter().all(|&k| iou(k, cand) <= thresh) {
-            kept.push(cand);
-        }
+fn nms(mut boxes: Vec<RawFaceDetection>, thresh: f32) -> Vec<RawFaceDetection> {
+    boxes.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let mut keep = Vec::new();
+    while let Some(best) = boxes.first().copied() {
+        keep.push(best);
+        boxes.remove(0);
+        boxes.retain(|b| iou(&best, b) < thresh);
     }
-    kept
+    keep
 }
 
 #[cfg(test)]
@@ -323,20 +582,55 @@ mod tests {
 
     #[test]
     fn test_square_pad_and_nms() {
-        let rect = RgbImage::from_pixel(40, 20, Rgb([128, 64, 32]));
-        let sq = square_pad(&rect);
-        assert_eq!(sq.dimensions(), (40, 40));
-        assert_eq!(*sq.get_pixel(0, 0), Rgb([0, 0, 0]));
-        assert_eq!(*sq.get_pixel(20, 20), Rgb([128, 64, 32]));
+        let img = RgbImage::from_pixel(10, 4, Rgb([255, 0, 0]));
+        let padded = square_pad(&img);
+        assert_eq!(padded.dimensions(), (10, 10));
 
+        let mk = |x1, y1, x2, y2, score| RawFaceDetection {
+            x1,
+            y1,
+            x2,
+            y2,
+            score,
+            landmarks: None,
+        };
         let boxes = vec![
-            (10.0, 10.0, 50.0, 50.0, 0.95),
-            (12.0, 12.0, 52.0, 52.0, 0.85), // overlapping -> suppressed
-            (100.0, 100.0, 140.0, 140.0, 0.90),
+            mk(0.0, 0.0, 10.0, 10.0, 0.95),
+            mk(1.0, 1.0, 11.0, 11.0, 0.80),
+            mk(50.0, 50.0, 60.0, 60.0, 0.90),
         ];
         let kept = nms(boxes, 0.30);
         assert_eq!(kept.len(), 2);
-        assert!((kept[0].4 - 0.95).abs() < 1e-6);
-        assert!((kept[1].4 - 0.90).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_5point_similarity_affine_alignment_and_warp() {
+        // Apply a known scale (2.0), rotation (+15 deg), and translation (+100, +40) to ARCFACE_REF_112
+        let angle = 15.0_f32.to_radians();
+        let scale = 2.0_f32;
+        let ca = scale * angle.cos();
+        let sa = scale * angle.sin();
+        let mut src_pts = [(0.0_f32, 0.0_f32); 5];
+        for i in 0..5 {
+            let (rx, ry) = ARCFACE_REF_112[i];
+            src_pts[i] = (ca * rx - sa * ry + 100.0, sa * rx + ca * ry + 40.0);
+        }
+
+        let sim = Similarity2D::estimate(&src_pts, &ARCFACE_REF_112).expect("similarity fit");
+        for i in 0..5 {
+            let (mx, my) = sim.apply(src_pts[i].0, src_pts[i].1);
+            assert!((mx - ARCFACE_REF_112[i].0).abs() < 1e-3);
+            assert!((my - ARCFACE_REF_112[i].1).abs() < 1e-3);
+            // Round-trip inverse check
+            let (ix, iy) = sim.invert_apply(mx, my);
+            assert!((ix - src_pts[i].0).abs() < 1e-2);
+            assert!((iy - src_pts[i].1).abs() < 1e-2);
+        }
+
+        let canvas = RgbImage::from_pixel(320, 320, Rgb([120, 130, 140]));
+        let warped = warp_face_112(&canvas, &sim);
+        assert_eq!(warped.dimensions(), (112, 112));
+        // Center nose point should sample cleanly from the uniform canvas
+        assert_eq!(warped.get_pixel(56, 72).0, [120, 130, 140]);
     }
 }

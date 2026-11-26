@@ -1,8 +1,9 @@
-//! Safe Rust Jawi-to-Rumi orthographic, morphological, and phonetic skeleton decoder.
+//! Safe Rust Jawi-to-Rumi orthographic, morphological, FST-backed lexicon, and Hijri colophon decoder.
 //!
 //! Supports both Modern Jawi (DBP) and Old Classical Jawi (*Jawi Lama* / *Hikayat* /
-//! *Surat Diraja* / archival manuscripts), normalizing multi-font Unicode variants
-//! (tatweel/kashida, Arabic/Persian/Urdu codepoints, harakat, and legacy Malaysian `پ`→`ڽ`).
+//! *Surat Diraja* / archival manuscripts), normalizing Unicode NFKC, Arabic Presentation
+//! Forms-A/B (`U+FB50..=U+FDFF`, `U+FE70..=U+FEFF`), BiDi control marks, tatweel/kashida,
+//! harakat, Persian/Urdu codepoints, and legacy Malaysian `پ`→`ڽ`.
 
 #![forbid(unsafe_code)]
 #![allow(dead_code)]
@@ -10,517 +11,90 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use fst::automaton::Levenshtein;
+use fst::{IntoStreamer, Map as FstMap, Streamer};
 use regex::Regex;
 use serde_json::{Value, json};
+use unicode_normalization::UnicodeNormalization;
 
-const JAWI_TOKEN_ENTRIES: &[(&str, (&str, &str))] = &[
-    // --- Classical & Al-Fatihah / OCR 3-dot restoration entries ---
-    ("ڤيمبوكأن", ("ڤيمبوكأن", "Pembukaan")),
-    ("فيمبوكان", ("ڤيمبوكأن", "Pembukaan")),
-    ("ڤمبوكأن", ("ڤمبوكأن", "Pembukaan")),
-    ("ديڠان", ("ديڠان", "dengan")),
-    ("ديغان", ("ديڠان", "dengan")),
-    ("دڠن", ("دڠن", "dengan")),
-    ("نامى", ("نامى", "nama")),
-    ("ناعى", ("نامى", "nama")),
-    ("نام", ("نام", "nama")),
-    ("اللاه", ("اللاه", "Allah")),
-    ("اللاء", ("اللاه", "Allah")),
-    ("الله", ("الله", "Allah")),
-    ("ياڠ", ("ياڠ", "yang")),
-    ("ياغ", ("ياڠ", "yang")),
-    ("يڠ", ("يڠ", "yang")),
-    ("ماهى", ("ماهى", "Maha")),
-    ("ماها", ("ماها", "Maha")),
-    ("مها", ("مها", "Maha")),
-    ("ڤيموراه", ("ڤيموراه", "Pemurah")),
-    ("فيموراه", ("ڤيموراه", "Pemurah")),
-    ("ڤموره", ("ڤموره", "Pemurah")),
-    ("لاݢي", ("لاݢي", "lagi")),
-    ("لاكي", ("لاݢي", "lagi")),
-    ("لاي", ("لاݢي", "lagi")),
-    ("لايى", ("لاݢي", "lagi")),
-    ("ميڠاسيهاني", ("ميڠاسيهاني", "Mengasihani")),
-    ("ميغاسيهاني", ("ميڠاسيهاني", "Mengasihani")),
-    ("ميخاسيهاني", ("ميڠاسيهاني", "Mengasihani")),
-    ("مڠاسيهني", ("مڠاسيهني", "Mengasihani")),
-    ("سيݢالى", ("سيݢالى", "Segala")),
-    ("سبكالى", ("سيݢالى", "Segala")),
-    ("سݢالا", ("سݢالا", "Segala")),
-    ("سݢل", ("سݢل", "segala")),
-    ("ڤوجي", ("ڤوجي", "puji")),
-    ("فوجي", ("ڤوجي", "puji")),
-    ("تيرتينتو", ("تيرتينتو", "tertentu")),
-    ("ترتنتو", ("ترتنتو", "tertentu")),
-    ("باݢي", ("باݢي", "bagi")),
-    ("باكي", ("باݢي", "bagi")),
-    ("بايى", ("باݢي", "bagi")),
-    ("توهان", ("توهان", "Tuhan")),
-    ("توهمان", ("توهان", "Tuhan")),
-    ("توهن", ("توهن", "Tuhan")),
-    ("ميميليهارى", ("ميميليهارى", "memelihara")),
-    ("ممليهارا", ("ممليهارا", "memelihara")),
-    ("دڤليهارا", ("دڤليهارا", "dipelihara")),
-    ("ڤليهارا", ("ڤليهارا", "pelihara")),
-    ("دان", ("دان", "dan")),
-    ("مينتادبيركان", ("مينتادبيركان", "mentadbirkan")),
-    ("مينتاديركان", ("مينتادبيركان", "mentadbirkan")),
-    ("منتدبيركن", ("منتدبيركن", "mentadbirkan")),
-    ("سيكاليان", ("سيكاليان", "sekalian")),
-    ("سيكليان", ("سيكاليان", "sekalian")),
-    ("سكالين", ("سكالين", "sekalian")),
-    ("سكلين", ("سكلين", "sekalian")),
-    ("ئعالام", ("ئعالام", "alam")),
-    ("نعالام", ("ئعالام", "alam")),
-    ("عالم", ("عالم", "alam")),
-    ("ميڠواسائي", ("ميڠواسائي", "menguasai")),
-    ("ميغواساي", ("ميڠواسائي", "menguasai")),
-    ("مڠواساءي", ("مڠواساءي", "menguasai")),
-    ("ڤيميرينتاهان", ("ڤيميرينتاهان", "pemerintahan")),
-    ("فيميرينتاهان", ("ڤيميرينتاهان", "pemerintahan")),
-    ("ڤمرينتاهن", ("ڤمرينتاهن", "pemerintahan")),
-    ("هاري", ("هاري", "hari")),
-    ("ڤيمبالاسان", ("ڤيمبالاسان", "pembalasan")),
-    ("فيمبالاسان", ("ڤيمبالاسان", "pembalasan")),
-    ("ڤمبالسن", ("ڤمبالسن", "pembalasan")),
-    ("ئاخيراة", ("ئاخيراة", "akhirat")),
-    ("تاخيرة", ("ئاخيراة", "akhirat")),
-    ("اخيرة", ("اخيرة", "akhirat")),
-    ("يڠكاولاه", ("يڠكاولاه", "Engkaulah")),
-    ("يغكولاه", ("يڠكاولاه", "Engkaulah")),
-    ("اڠكاولاه", ("اڠكاولاه", "Engkaulah")),
-    ("ساهاجى", ("ساهاجى", "sahaja")),
-    ("سهاج", ("سهاج", "sahaja")),
-    ("سهج", ("سهاج", "sahaja")),
-    ("ي", ("ي", "Ya")),
-    ("يا", ("يا", "Ya")),
-    ("كامي", ("كامي", "kami")),
-    ("كاي", ("كامي", "kami")),
-    ("سيمباه", ("سيمباه", "sembah")),
-    ("سمبه", ("سمبه", "sembah")),
-    ("كيڤادى", ("كيڤادى", "kepada")),
-    ("كيفادى", ("كيڤادى", "kepada")),
-    ("كڤد", ("كڤد", "kepada")),
-    ("ميمؤهؤن", ("ميمؤهؤن", "memohon")),
-    ("ميموؤهون", ("ميمؤهؤن", "memohon")),
-    ("مموهون", ("مموهون", "memohon")),
-    ("ڤيرتؤلؤڠان", ("ڤيرتؤلؤڠان", "pertolongan")),
-    ("فرترؤلؤغان", ("ڤيرتؤلؤڠان", "pertolongan")),
-    ("ڤرتولوڠن", ("ڤرتولوڠن", "pertolongan")),
-    ("تونجوكيلاه", ("تونجوكيلاه", "Tunjukilah")),
-    ("جالان", ("جالان", "jalan")),
-    ("جالن", ("جالن", "jalan")),
-    ("لوروس", ("لوروس", "lurus")),
-    ("يائيتو", ("يائيتو", "iaitu")),
-    ("يانيتو", ("يائيتو", "iaitu")),
-    ("ياءيت", ("ياءيت", "iaitu")),
-    ("ئؤراڠ٢", ("ئؤراڠ٢", "orang-orang")),
-    ("تؤراغ٢", ("ئؤراڠ٢", "orang-orang")),
-    ("اورڠ٢", ("اورڠ٢", "orang-orang")),
-    ("ئؤراڠ", ("ئؤراڠ", "orang")),
-    ("تؤراغ", ("ئؤراڠ", "orang")),
-    ("اورڠ", ("اورڠ", "orang")),
-    ("يڠكاو", ("يڠكاو", "Engkau")),
-    ("يغكاو", ("يڠكاو", "Engkau")),
-    ("اڠكاو", ("اڠكاو", "Engkau")),
-    ("تيلاه", ("تيلاه", "telah")),
-    ("تيالاه", ("تيلاه", "telah")),
-    ("تله", ("تله", "telah")),
-    ("كورنياكان", ("كورنياكان", "kurniakan")),
-    ("كورنياكن", ("كورنياكن", "kurniakan")),
-    ("نيعماة", ("نيعماة", "nikmat")),
-    ("نعمت", ("نعمت", "nikmat")),
-    ("ميرئكى", ("ميرئكى", "mereka")),
-    ("ميرتى", ("ميرئكى", "mereka")),
-    ("مريك", ("مريك", "mereka")),
-    ("بوكان", ("بوكان", "bukan")),
-    ("بوكن", ("بوكن", "bukan")),
-    ("موركائي", ("موركائي", "murkai")),
-    ("موركاي", ("موركائي", "murkai")),
-    ("ڤولى", ("ڤولى", "pula")),
-    ("فولى", ("ڤولى", "pula")),
-    ("ڤولا", ("ڤولا", "pula")),
-    ("ڤول", ("ڤول", "pula")),
-    ("سيسات", ("سيسات", "sesat")),
-    ("سست", ("سست", "sesat")),
-    // --- Core Modern & Old Jawi Function Words / Particles ---
-    ("د", ("د", "di")),
-    ("ك", ("ك", "ke")),
-    ("ڤد", ("ڤد", "pada")),
-    ("دالم", ("دالم", "dalam")),
-    ("درڤد", ("درڤد", "daripada")),
-    ("دريڤد", ("دريڤد", "daripada")),
-    ("دري", ("دري", "dari")),
-    ("اونتوق", ("اونتوق", "untuk")),
-    ("اونتوك", ("اونتوق", "untuk")),
-    ("اوليه", ("اوليه", "oleh")),
-    ("اوله", ("اوليه", "oleh")),
-    ("كران", ("كران", "kerana")),
-    ("كرن", ("كران", "kerana")),
-    ("تتاڤي", ("تتاڤي", "tetapi")),
-    ("تتڤي", ("تتاڤي", "tetapi")),
-    ("سڤرتي", ("سڤرتي", "seperti")),
-    ("اڤابيلا", ("اڤابيلا", "apabila")),
-    ("اڤبيل", ("اڤابيلا", "apabila")),
-    ("اداله", ("اداله", "adalah")),
-    ("اياله", ("اياله", "ialah")),
-    ("اد", ("اد", "ada")),
-    ("تيدق", ("تيدق", "tidak")),
-    ("تيداق", ("تيدق", "tidak")),
-    ("تياد", ("تياد", "tiada")),
-    ("تاء", ("تاء", "tak")),
-    ("اين", ("اين", "ini")),
-    ("ايت", ("ايت", "itu")),
-    ("جوݢ", ("جوݢ", "juga")),
-    ("جوݢا", ("جوݢ", "juga")),
-    ("ڤون", ("ڤون", "pun")),
-    ("اتاو", ("اتاو", "atau")),
-    ("سموا", ("سموا", "semua")),
-    ("ستياڤ", ("ستياڤ", "setiap")),
-    ("تياڤ", ("تياڤ", "tiap")),
-    ("انتارا", ("انتارا", "antara")),
-    ("انتار", ("انتارا", "antara")),
-    ("سباݢاي", ("سباݢاي", "sebagai")),
-    ("سباݢي", ("سباݢاي", "sebagai")),
-    ("سبارڠ", ("سبارڠ", "sebarang")),
-    ("اكن", ("اكن", "akan")),
-    ("سدڠ", ("سدڠ", "sedang")),
-    ("ماسيه", ("ماسيه", "masih")),
-    ("مسيه", ("ماسيه", "masih")),
-    ("بلوم", ("بلوم", "belum")),
-    ("سوده", ("سوده", "sudah")),
-    ("بوليه", ("بوليه", "boleh")),
-    ("بوله", ("بوليه", "boleh")),
-    ("داڤت", ("داڤت", "dapat")),
-    ("هاروس", ("هاروس", "harus")),
-    ("مستي", ("مستي", "mesti")),
-    ("هندق", ("هندق", "hendak")),
-    ("هندقله", ("هندقله", "hendaklah")),
-    ("ماهو", ("ماهو", "mahu")),
-    ("ڤرلو", ("ڤرلو", "perlu")),
-    ("سڠت", ("سڠت", "sangat")),
-    ("ساڠت", ("ساڠت", "sangat")),
-    ("امت", ("امت", "amat")),
-    ("ترلالو", ("ترلالو", "terlalu")),
-    ("لبيه", ("لبيه", "lebih")),
-    ("لبه", ("لبيه", "lebih")),
-    ("كورڠ", ("كورڠ", "kurang")),
-    ("سام", ("سام", "sama")),
-    ("لاءين", ("لاءين", "lain")),
-    ("بهارو", ("بهارو", "baharu")),
-    ("بارو", ("بارو", "baru")),
-    ("لام", ("لام", "lama")),
-    ("لاما", ("لاما", "lama")),
-    ("سنديري", ("سنديري", "sendiri")),
-    ("برسام", ("برسام", "bersama")),
-    ("سرتا", ("سرتا", "serta")),
-    ("سرت", ("سرتا", "serta")),
-    ("تنڤا", ("تنڤا", "tanpa")),
-    ("هيڠݢ", ("هيڠݢ", "hingga")),
-    ("سهيڠݢ", ("سهيڠݢ", "sehingga")),
-    ("سبلوم", ("سبلوم", "sebelum")),
-    ("سلڤس", ("سلڤس", "selepas")),
-    ("سسوده", ("سسوده", "sesudah")),
-    ("ستله", ("ستله", "setelah")),
-    ("كتيك", ("كتيك", "ketika")),
-    ("سماس", ("سماس", "semasa")),
-    ("منكالا", ("منكالا", "manakala")),
-    ("والاوڤون", ("والاوڤون", "walaupun")),
-    ("جك", ("جك", "jika")),
-    ("جيك", ("جيك", "jika")),
-    ("جكالو", ("جكالو", "jikalau")),
-    ("سكيرڽ", ("سكيرڽ", "sekiranya")),
-    ("سڤاي", ("سڤاي", "supaya")),
-    ("اݢر", ("اݢر", "agar")),
-    ("ملاينكن", ("ملاينكن", "melainkan")),
-    ("كچوالي", ("كچوالي", "kecuali")),
-    ("ترهادڤ", ("ترهادڤ", "terhadap")),
-    ("ملالوءي", ("ملالوءي", "melalui")),
-    ("منجادي", ("منجادي", "menjadi")),
-    ("سياڤا", ("سياڤا", "siapa")),
-    ("اڤ", ("اڤ", "apa")),
-    ("مان", ("مان", "mana")),
-    ("بيلا", ("بيلا", "bila")),
-    ("بݢايمان", ("بݢايمان", "bagaimana")),
-    ("مڠاڤ", ("مڠاڤ", "mengapa")),
-    ("كيت", ("كيت", "kita")),
-    ("ساي", ("ساي", "saya")),
-    ("اكو", ("اكو", "aku")),
-    ("ديا", ("ديا", "dia")),
-    ("بلياو", ("بلياو", "beliau")),
-    // --- Old Classical Jawi (Jawi Lama / Hikayat / Surat Diraja / Warkah Sultan) ---
-    ("مك", ("مك", "maka")),
-    ("تتكال", ("تتكال", "tatkala")),
-    ("تتكالا", ("تتكالا", "tatkala")),
-    ("شهدان", ("شهدان", "syahadan")),
-    ("شهيدان", ("شهدان", "syahadan")),
-    ("حتي", ("حتي", "hatta")),
-    ("حتا", ("حتا", "hatta")),
-    ("اركين", ("اركين", "arakian")),
-    ("برمول", ("برمول", "bermula")),
-    ("برمولا", ("برمولا", "bermula")),
-    ("سبرمول", ("سبرمول", "sebermula")),
-    ("ادڤون", ("ادڤون", "adapun")),
-    ("القصه", ("القصه", "alkisah")),
-    ("كلكين", ("كلكين", "kalakian")),
-    ("بهوا", ("بهوا", "bahawa")),
-    ("بهاوا", ("بهاوا", "bahawa")),
-    ("بهوسڽ", ("بهوسڽ", "bahawasanya")),
-    ("سسوڠݢوهڽ", ("سسوڠݢوهڽ", "sesungguhnya")),
-    ("دمكين", ("دمكين", "demikian")),
-    ("دمكينله", ("دمكينله", "demikianlah")),
-    ("بݢند", ("بݢند", "baginda")),
-    ("بݢيندا", ("بݢيندا", "baginda")),
-    ("تيته", ("تيته", "titah")),
-    ("برتيته", ("برتيته", "bertitah")),
-    ("منجنجوڠ", ("منجنجوڠ", "menjunjung")),
-    ("جنجوڠ", ("جنجوڠ", "junjung")),
-    ("مرڤك", ("مرڤك", "merafak")),
-    ("ڤاتيك", ("ڤاتيك", "patik")),
-    ("بيتا", ("بيتا", "beta")),
-    ("توانكو", ("توانكو", "Tuanku")),
-    ("تونكو", ("تونكو", "Tunku")),
-    ("دولي", ("دولي", "Duli")),
-    ("موليا", ("موليا", "Mulia")),
-    ("سري", ("سري", "seri")),
-    ("ڤادوك", ("ڤادوك", "Paduka")),
-    ("ڤدوك", ("ڤدوك", "Paduka")),
-    ("سلطان", ("سلطان", "sultan")),
-    ("راج", ("راج", "raja")),
-    ("راجا", ("راجا", "raja")),
-    ("بندهارا", ("بندهارا", "Bendahara")),
-    ("بندهار", ("بندهار", "Bendahara")),
-    ("تمڠݢوڠ", ("تمڠݢوڠ", "Temenggung")),
-    ("لقسمان", ("لقسمان", "Laksamana")),
-    ("لقسامان", ("لقسامان", "Laksamana")),
-    ("شاهبندر", ("شاهبندر", "Syahbandar")),
-    ("منتري", ("منتري", "menteri")),
-    ("ڤردان", ("ڤردان", "Perdana")),
-    ("ڤڠهولو", ("ڤڠهولو", "Penghulu")),
-    ("داتوق", ("داتوق", "Datuk")),
-    ("داتوء", ("داتوء", "Datuk")),
-    ("تون", ("تون", "Tun")),
-    ("تن", ("تن", "Tan")),
-    ("بسر", ("بسر", "besar")),
-    ("كچيل", ("كچيل", "kecil")),
-    ("دباليروڠ", ("دباليروڠ", "di balairung")),
-    ("باليروڠ", ("باليروڠ", "balairung")),
-    ("ايستان", ("ايستان", "istana")),
-    ("دايستان", ("دايستان", "di istana")),
-    ("برهيمڤون", ("برهيمڤون", "berhimpun")),
-    ("بركومڤول", ("بركومڤول", "berkumpul")),
-    ("مڠادڤ", ("مڠادڤ", "menghadap")),
-    ("مڠهادڤ", ("مڠهادڤ", "menghadap")),
-    ("ڤنوه", ("ڤنوه", "penuh")),
-    ("طاعة", ("طاعة", "taat")),
-    ("طاعت", ("طاعت", "taat")),
-    ("ستيا", ("ستيا", "setia")),
-    ("درهاك", ("درهاك", "derhaka")),
-    ("درهك", ("درهك", "derhaka")),
-    ("دولت", ("دولت", "daulat")),
-    ("بردولت", ("بردولت", "berdaulat")),
-    ("كراجأن", ("كراجأن", "kerajaan")),
-    ("كراجان", ("كراجأن", "kerajaan")),
-    ("كسولطانن", ("كسولطانن", "kesultanan")),
-    ("كسلطانن", ("كسلطانن", "kesultanan")),
-    ("نݢري", ("نݢري", "negeri")),
-    ("نݢارا", ("نݢارا", "Negara")),
-    ("نݢار", ("نݢارا", "negara")),
-    ("بڠسا", ("بڠسا", "bangsa")),
-    ("بڠس", ("بڠسا", "bangsa")),
-    ("رعية", ("رعية", "rakyat")),
-    ("رعيت", ("رعيت", "rakyat")),
-    ("همبا", ("همبا", "hamba")),
-    ("همب", ("همب", "hamba")),
-    ("تانه", ("تانه", "Tanah")),
-    ("اءير", ("اءير", "air")),
-    ("اير", ("اير", "air")),
-    ("ملايو", ("ملايو", "Melayu")),
-    ("مليسيا", ("مليسيا", "Malaysia")),
-    ("ڤرسكوتوان", ("ڤرسكوتوان", "Persekutuan")),
-    ("ڤرلمباݢأن", ("ڤرلمباݢأن", "Perlembagaan")),
-    ("عادت", ("عادت", "adat")),
-    ("استعادت", ("استعادت", "istiadat")),
-    ("اوندڠ", ("اوندڠ", "undang")),
-    ("شريعة", ("شريعة", "syariat")),
-    ("شريعت", ("شريعت", "syariat")),
-    ("حكوم", ("حكوم", "hukum")),
-    ("قانون", ("قانون", "kanun")),
-    ("ورقه", ("ورقه", "warkah")),
-    ("ورقة", ("ورقة", "warkah")),
-    ("سورت", ("سورت", "surat")),
-    ("چڤ", ("چڤ", "cap")),
-    ("موهور", ("موهور", "mohor")),
-    ("ڤرجنجين", ("ڤرجنجين", "perjanjian")),
-    ("ڤرجنجيان", ("ڤرجنجين", "perjanjian")),
-    ("تنداتاڠن", ("تنداتاڠن", "tandatangan")),
-    ("تنداتڠن", ("تنداتڠن", "tandatangan")),
-    ("دتنداتڠني", ("دتنداتڠني", "ditandatangani")),
-    ("دتنداتاڠني", ("دتنداتاڠني", "ditandatangani")),
-    ("ڤڠيشتيهارن", ("ڤڠيشتيهارن", "pengisytiharan")),
-    ("ڤمشهورن", ("ڤمشهورن", "pemasyhuran")),
-    ("ممشهوركن", ("ممشهوركن", "memasyhurkan")),
-    ("كمرديكأن", ("كمرديكأن", "kemerdekaan")),
-    ("كمرديكان", ("كمرديكأن", "kemerdekaan")),
-    ("مرديك", ("مرديك", "merdeka")),
-    ("مرديكا", ("مرديكا", "merdeka")),
-    ("سجاره", ("سجاره", "sejarah")),
-    ("برسجاره", ("برسجاره", "bersejarah")),
-    ("واريثن", ("واريثن", "warisan")),
-    ("بودايا", ("بودايا", "budaya")),
-    ("بوداي", ("بوداي", "budaya")),
-    ("بهاس", ("بهاس", "bahasa")),
-    ("بهاسا", ("بهاسا", "bahasa")),
-    ("جاوي", ("جاوي", "Jawi")),
-    ("رومي", ("رومي", "Rumi")),
-    ("توليسن", ("توليسن", "tulisan")),
-    ("اݢام", ("اݢام", "agama")),
-    ("اݢاما", ("اݢاما", "agama")),
-    ("اسلام", ("اسلام", "Islam")),
-    // --- Numbers, Dates, Months & Calendar ---
-    ("ساتو", ("ساتو", "satu")),
-    ("دوا", ("دوا", "dua")),
-    ("تيݢ", ("تيݢ", "tiga")),
-    ("تيݢا", ("تيݢ", "tiga")),
-    ("امڤت", ("امڤت", "empat")),
-    ("ليم", ("ليم", "lima")),
-    ("ليما", ("ليم", "lima")),
-    ("انم", ("انم", "enam")),
-    ("توجوه", ("توجوه", "tujuh")),
-    ("لاڤن", ("لاڤن", "lapan")),
-    ("سمبيلن", ("سمبيلن", "sembilan")),
-    ("سڤولوه", ("سڤولوه", "sepuluh")),
-    ("ڤولوه", ("ڤولوه", "puluh")),
-    ("بلس", ("بلس", "belas")),
-    ("راتوس", ("راتوس", "ratus")),
-    ("سراتوس", ("سراتوس", "seratus")),
-    ("ريبو", ("ريبو", "ribu")),
-    ("سريبو", ("سريبو", "seribu")),
-    ("جوتا", ("جوتا", "juta")),
-    ("ڤرتام", ("ڤرتام", "pertama")),
-    ("كدوا", ("كدوا", "kedua")),
-    ("كتيݢ", ("كتيݢ", "ketiga")),
-    ("تاريخ", ("تاريخ", "tarikh")),
-    ("بولن", ("بولن", "bulan")),
-    ("تاهون", ("تاهون", "tahun")),
-    ("ماس", ("ماس", "masa")),
-    ("وقتو", ("وقتو", "waktu")),
-    ("ابد", ("ابد", "abad")),
-    ("زمان", ("زمان", "zaman")),
-    ("جانواري", ("جانواري", "Januari")),
-    ("فيبرواري", ("فيبرواري", "Februari")),
-    ("مچ", ("مچ", "Mac")),
-    ("اڤريل", ("اڤريل", "April")),
-    ("مي", ("مي", "Mei")),
-    ("جون", ("جون", "Jun")),
-    ("جولاي", ("جولاي", "Julai")),
-    ("اوݢوس", ("اوݢوس", "Ogos")),
-    ("سڤتمبر", ("سڤتمبر", "September")),
-    ("اوكتوبر", ("اوكتوبر", "Oktober")),
-    ("نوۏمبر", ("نوۏمبر", "November")),
-    ("ديسمبر", ("ديسمبر", "Disember")),
-    ("محرم", ("محرم", "Muharam")),
-    ("صفر", ("صفر", "Safar")),
-    ("ربيع", ("ربيع", "Rabiul")),
-    ("رجب", ("رجب", "Rejab")),
-    ("شعبان", ("شعبان", "Syaaban")),
-    ("رمضان", ("رمضان", "Ramadan")),
-    ("شوال", ("شوال", "Syawal")),
-    ("ذوالحجه", ("ذوالحجه", "Zulhijah")),
-    ("هجره", ("هجره", "Hijrah")),
-    ("هجرة", ("هجرة", "Hijrah")),
-    ("مسيحي", ("مسيحي", "Masihi")),
-    // --- Archival Preservation, Conservation & Arkib Negara Malaysia ---
-    ("اركيب", ("اركيب", "Arkib")),
-    ("ريكود", ("ريكود", "rekod")),
-    ("دوكومن", ("دوكومن", "dokumen")),
-    ("مانوسكريڤ", ("مانوسكريڤ", "manuskrip")),
-    ("نسخه", ("نسخه", "naskhah")),
-    ("نوسخه", ("نسخه", "naskhah")),
-    ("كتاب", ("كتاب", "kitab")),
-    ("حكايت", ("حكايت", "hikayat")),
-    ("حكاية", ("حكاية", "hikayat")),
-    ("راسمي", ("راسمي", "rasmi")),
-    ("ڤموليهارأن", ("ڤموليهارأن", "pemuliharaan")),
-    ("ڤموليهاران", ("ڤموليهارأن", "pemuliharaan")),
-    ("بهاݢين", ("بهاݢين", "bahagian")),
-    ("جابتن", ("جابتن", "jabatan")),
-    ("ڤجابت", ("ڤجابت", "pejabat")),
-    ("كمنترين", ("كمنترين", "kementerian")),
-    ("مڽيمڤن", ("مڽيمڤن", "menyimpan")),
-    ("دسيمڤن", ("دسيمڤن", "disimpan")),
-    ("سيمڤن", ("سيمڤن", "simpan")),
-    ("كرجا", ("كرجا", "kerja")),
-    ("دجالنكن", ("دجالنكن", "dijalankan")),
-    ("منجالنكن", ("منجالنكن", "menjalankan")),
-    ("كرتس", ("كرتس", "kertas")),
-    ("كيرتس", ("كرتس", "kertas")),
-    ("ڤودر", ("ڤودر", "pudar")),
-    ("كويق", ("كويق", "koyak")),
-    ("بركولت", ("بركولت", "berkulat")),
-    ("كولت", ("كولت", "kulat")),
-    ("دبايكي", ("دبايكي", "dibaiki")),
-    ("دباءيقي", ("دباءيقي", "dibaiki")),
-    ("باءيق", ("باءيق", "baik")),
-    ("بايك", ("بايك", "baik")),
-    ("ڤݢاواي", ("ڤݢاواي", "pegawai")),
-    ("بركلياقن", ("بركلياقن", "berkelayakan")),
-    ("بركلايقن", ("بركلايقن", "berkelayakan")),
-    ("مڽدياكن", ("مڽدياكن", "menyediakan")),
-    ("سديا", ("سديا", "sedia")),
-    ("كاولن", ("كاولن", "kawalan")),
-    ("كاوالن", ("كاولن", "kawalan")),
-    ("سوهو", ("سوهو", "suhu")),
-    ("كلمبڤن", ("كلمبڤن", "kelembapan")),
-    ("كتت", ("كتت", "ketat")),
-    ("كيتت", ("كتت", "ketat")),
-    ("مڠيلقكن", ("مڠيلقكن", "mengelakkan")),
-    ("كروسقن", ("كروسقن", "kerosakan")),
-    ("كروساقن", ("كروسقن", "kerosakan")),
-    ("روسق", ("روسق", "rosak")),
-    ("لنجوت", ("لنجوت", "lanjut")),
-    ("برستوجو", ("برستوجو", "bersetuju")),
-    ("ستوجو", ("ستوجو", "setuju")),
-    ("منوبوهكن", ("منوبوهكن", "menubuhkan")),
-    ("توبوه", ("توبوه", "tubuh")),
-    ("ستاديوم", ("ستاديوم", "Stadium")),
-    ("كوالا", ("كوالا", "Kuala")),
-    ("لومڤور", ("لومڤور", "Lumpur")),
-    ("عبدالرحمن", ("عبدالرحمن", "Abdul Rahman")),
-    ("عبد", ("عبد", "Abdul")),
-    ("الرحمن", ("الرحمن", "Rahman")),
-    ("ڤوترا", ("ڤوترا", "Putra")),
-    ("الحاج", ("الحاج", "Al-Haj")),
-    ("برسوك", ("برسوك", "bersuka")),
-    ("ريا", ("ريا", "ria")),
-    ("مڽمبوت", ("مڽمبوت", "menyambut")),
-    ("سمبوت", ("سمبوت", "sambut")),
-    ("كسمڤتن", ("كسمڤتن", "kesempatan")),
-    ("كجادين", ("كجادين", "kejadian")),
-    ("كعاديلن", ("كعاديلن", "keadilan")),
-    ("كسلامتن", ("كسلامتن", "keselamatan")),
-    ("كصيحتن", ("كصيحتن", "kesihatan")),
-    ("ڤنديديقن", ("ڤنديديقن", "pendidikan")),
-    ("كباجيقن", ("كباجيقن", "kebajikan")),
-    ("معلومات", ("معلومات", "maklumat")),
-    ("كترڠن", ("كترڠن", "keterangan")),
-    ("چاتتن", ("چاتتن", "catatan")),
-    ("ڤڠصحن", ("ڤڠصحن", "pengesahan")),
-    ("بڠونن", ("بڠونن", "bangunan")),
-    ("ديوان", ("ديوان", "dewan")),
-    ("ݢالري", ("ݢالري", "galeri")),
-    ("ڤاميرن", ("ڤاميرن", "pameran")),
-    ("ڤڽليديقن", ("ڤڽليديقن", "penyelidikan")),
-    ("تيمڤوه", ("تيمڤوه", "tempoh")),
-    ("تمڤت", ("تمڤت", "tempat")),
-    ("دائره", ("دائره", "daerah")),
-    ("داءيره", ("داءيره", "daerah")),
-    ("كمڤوڠ", ("كمڤوڠ", "kampung")),
-    ("بندر", ("بندر", "bandar")),
-    ("سكوله", ("سكوله", "sekolah")),
-    ("مسجد", ("مسجد", "masjid")),
-    ("محكمه", ("محكمه", "mahkamah")),
-];
+static FST_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/jawi_lexicon.fst"));
+static FST_VALUES_RAW: &str = include_str!(concat!(env!("OUT_DIR"), "/jawi_values.txt"));
+
+struct JawiFstLexicon {
+    map: FstMap<&'static [u8]>,
+    values: Vec<(&'static str, &'static str)>,
+}
+
+impl JawiFstLexicon {
+    fn get(&self, key: &str) -> Option<(&'static str, &'static str)> {
+        let idx = self.map.get(key.as_bytes())? as usize;
+        self.values.get(idx).copied()
+    }
+
+    /// DBP-only FST Levenshtein distance-1 fuzzy lookup for tokens >= 4 Jawi chars.
+    /// Uses `fst::automaton::Levenshtein` when the DFA fits within `fst`'s state limit, and
+    /// falls back cleanly to a char-level bounded edit-distance-1 scan over the zero-copy FST
+    /// stream for multi-byte Arabic/Jawi keys.
+    fn fuzzy_lookup_dist1(&self, key: &str) -> Option<(&'static str, &'static str)> {
+        let key_chars: Vec<char> = key.chars().collect();
+        let key_len = key_chars.len();
+        if key_len < 4 {
+            return None;
+        }
+        if let Ok(aut) = Levenshtein::new(key, 1) {
+            let mut stream = self.map.search(aut).into_stream();
+            let mut best: Option<(usize, (&'static str, &'static str))> = None;
+            while let Some((cand_bytes, val_idx)) = stream.next() {
+                if let Ok(cand_str) = std::str::from_utf8(cand_bytes)
+                    && let Some(&pair) = self.values.get(val_idx as usize)
+                {
+                    let len_diff = cand_str.chars().count().abs_diff(key_len);
+                    if best.is_none_or(|(b_diff, _)| len_diff < b_diff) {
+                        best = Some((len_diff, pair));
+                    }
+                }
+            }
+            if let Some((_, pair)) = best {
+                return Some(pair);
+            }
+        }
+
+        // Bounded char-level edit-distance-1 scan over the zero-copy FST (handles multi-byte Arabic UTF-8).
+        let mut stream = self.map.stream();
+        let mut best: Option<(usize, (&'static str, &'static str))> = None;
+        while let Some((cand_bytes, val_idx)) = stream.next() {
+            if let Ok(cand_str) = std::str::from_utf8(cand_bytes) {
+                let cand_chars: Vec<char> = cand_str.chars().collect();
+                let len_diff = cand_chars.len().abs_diff(key_len);
+                if len_diff > 1 {
+                    continue;
+                }
+                if edit_distance(&key_chars, &cand_chars) == 1
+                    && let Some(&pair) = self.values.get(val_idx as usize)
+                    && best.is_none_or(|(b_diff, _)| len_diff < b_diff)
+                {
+                    best = Some((len_diff, pair));
+                    if len_diff == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        best.map(|(_, pair)| pair)
+    }
+}
+
+fn jawi_fst() -> &'static JawiFstLexicon {
+    static LEX: OnceLock<JawiFstLexicon> = OnceLock::new();
+    LEX.get_or_init(|| {
+        let map = FstMap::new(FST_BYTES).expect("embedded jawi_lexicon.fst");
+        let values: Vec<(&'static str, &'static str)> = FST_VALUES_RAW
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .collect();
+        JawiFstLexicon { map, values }
+    })
+}
 
 /// Old Classical Jawi (*Jawi Lama*) discourse & orthographic markers.
 const OLD_JAWI_MARKERS: &[&str] = &[
@@ -542,6 +116,11 @@ const OLD_JAWI_MARKERS: &[&str] = &[
     "دباليروڠ",
     "ورقه",
     "ورقة",
+    "سنه",
+    "سنة",
+    "فصل",
+    "حاشيه",
+    "حاشية",
 ];
 
 const MALAY_RUMI_LEXICON: &[&str] = &[
@@ -772,21 +351,20 @@ const ROUGH_RUMI_ALIASES: &[(&str, &str)] = &[
     ("sisat", "sesat"),
 ];
 
-/// Normalizes multi-font Jawi/Arabic/Persian/Urdu Unicode variants into a single canonical
-/// lookup key: strips tatweel/kashida (`ـ`), harakat/diacritics, and zero-width joiners, and
-/// unifies equivalent Kaf (`ک`/`ڪ`→`ك`), Ya (`ی`/`ے`→`ي`), Ga (`گ`/`ڬ`/`ݣ`→`ݢ`),
-/// Ha (`ھ`/`ۀ`→`ه`), and Alif hamza forms (`أ`/`إ`/`آ`/`ٱ`→`ا`).
-fn normalize_jawi_key(s: &str) -> String {
+/// Applies Unicode NFKC normalization (folding Arabic Presentation Forms-A/B `U+FB50..=U+FDFF`,
+/// `U+FE70..=U+FEFF` into canonical `U+0600..=U+06FF`), strips BiDi/zero-width control marks,
+/// tatweel (`ـ`), and Arabic harakat, and unifies Persian/Urdu/Jawi letter variants.
+pub fn normalize_jawi_key(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
+    for ch in s.nfkc() {
         match ch {
-            // Strip tatweel (calligraphic stretching), Arabic harakat/vowels, and joiners.
             '\u{0640}'
             | '\u{064B}'..='\u{065F}'
             | '\u{0670}'
             | '\u{06D6}'..='\u{06ED}'
-            | '\u{200C}'
-            | '\u{200D}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
             | '\u{FEFF}' => {}
             'ک' | 'ڪ' => out.push('ك'),
             'ی' | 'ے' => out.push('ي'),
@@ -797,17 +375,6 @@ fn normalize_jawi_key(s: &str) -> String {
         }
     }
     out
-}
-
-fn jawi_token_map() -> &'static HashMap<String, (&'static str, &'static str)> {
-    static MAP: OnceLock<HashMap<String, (&'static str, &'static str)>> = OnceLock::new();
-    MAP.get_or_init(|| {
-        let mut map = HashMap::with_capacity(JAWI_TOKEN_ENTRIES.len() + 32);
-        for &(raw_key, val) in JAWI_TOKEN_ENTRIES {
-            map.entry(normalize_jawi_key(raw_key)).or_insert(val);
-        }
-        map
-    })
 }
 
 fn rough_aliases() -> &'static HashMap<&'static str, &'static str> {
@@ -1033,16 +600,16 @@ fn edit_distance(a: &[char], b: &[char]) -> usize {
 fn translate_arabic_digits(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            '٠' => '0',
-            '١' => '1',
-            '٢' => '2',
-            '٣' => '3',
-            '٤' => '4',
-            '٥' => '5',
-            '٦' => '6',
-            '٧' => '7',
-            '٨' => '8',
-            '٩' => '9',
+            '٠' | '۰' => '0',
+            '١' | '۱' => '1',
+            '٢' | '۲' => '2',
+            '٣' | '۳' => '3',
+            '٤' | '۴' => '4',
+            '٥' | '۵' => '5',
+            '٦' | '۶' => '6',
+            '٧' | '۷' => '7',
+            '٨' | '۸' => '8',
+            '٩' | '۹' => '9',
             other => other,
         })
         .collect()
@@ -1052,7 +619,10 @@ fn transliterate_jawi_chars(word: &str) -> String {
     let mut out = String::with_capacity(word.len());
     for ch in word.chars() {
         match ch {
-            '\u{0640}' | '\u{200C}' | '\u{200D}' => {}
+            '\u{0640}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}' => {}
             'ا' | 'آ' | 'أ' | 'ع' | 'ى' => out.push('a'),
             'إ' | 'ئ' | 'ي' | 'ی' => out.push('i'),
             'ء' => {}
@@ -1143,43 +713,35 @@ fn normalize_word_str(token: &str) -> String {
     token.to_string()
 }
 
-fn lookup_jawi_exact(
-    key: &str,
-    jmap: &HashMap<String, (&'static str, &'static str)>,
-) -> Option<(&'static str, &'static str)> {
-    if let Some(&hit) = jmap.get(key) {
+fn lookup_jawi_exact(key: &str, lex: &JawiFstLexicon) -> Option<(&'static str, &'static str)> {
+    if let Some(hit) = lex.get(key) {
         return Some(hit);
     }
-    // Malaysian Jawi Biasa legacy fonts encode `ڽ` (ny) as `پ`, whereas Persian/Urdu use `پ` for `ڤ` (p).
+    // Legacy Malaysian Jawi Biasa fonts encode `ڽ` (ny) as `پ`, while Persian/Urdu use `پ` for `ڤ` (p).
     if key.contains('پ') {
-        if let Some(&hit) = jmap.get(&key.replace('پ', "ڽ")) {
+        if let Some(hit) = lex.get(&key.replace('پ', "ڽ")) {
             return Some(hit);
         }
-        if let Some(&hit) = jmap.get(&key.replace('پ', "ڤ")) {
+        if let Some(hit) = lex.get(&key.replace('پ', "ڤ")) {
             return Some(hit);
         }
     }
     // Classical / modern ta marbutah (`ة`) vs ta maftuhah (`ت`) interchange (e.g. طاعة/طاعت, رعية/رعيت).
     if let Some(stem) = key.strip_suffix('ة')
-        && let Some(&hit) = jmap.get(&format!("{stem}ت"))
+        && let Some(hit) = lex.get(&format!("{stem}ت"))
     {
         return Some(hit);
     }
     if let Some(stem) = key.strip_suffix('ت')
-        && let Some(&hit) = jmap.get(&format!("{stem}ة"))
+        && let Some(hit) = lex.get(&format!("{stem}ة"))
     {
         return Some(hit);
     }
     None
 }
 
-/// Deterministic morphological prefix/suffix decomposition for Jawi tokens not directly
-/// listed in `JAWI_TOKEN_ENTRIES`. Only fires when the stripped root is a verified dictionary
-/// word (at least 2 chars) so it never hallucinates.
-fn lookup_jawi_morphological(
-    key: &str,
-    jmap: &HashMap<String, (&'static str, &'static str)>,
-) -> Option<String> {
+/// Deterministic morphological prefix/suffix decomposition validated against the embedded FST lexicon.
+fn lookup_jawi_morphological(key: &str, lex: &JawiFstLexicon) -> Option<String> {
     const PREFIXES: &[(&str, &str)] = &[
         ("بر", "ber"),
         ("تر", "ter"),
@@ -1202,33 +764,30 @@ fn lookup_jawi_morphological(
         ("ان", "an"),
     ];
 
-    // 1. Prefix + known root (e.g., بركولت, دسيمڤن, كراجأن)
     for &(j_pre, r_pre) in PREFIXES {
         if let Some(rest) = key.strip_prefix(j_pre)
             && rest.chars().count() >= 2
-            && let Some((_, root_rumi)) = lookup_jawi_exact(rest, jmap)
+            && let Some((_, root_rumi)) = lookup_jawi_exact(rest, lex)
         {
             return Some(format!("{r_pre}{}", root_rumi.to_lowercase()));
         }
     }
 
-    // 2. Known root + suffix (e.g., هندقله, سورتڽ, كراجأنڽ)
     for &(j_suf, r_suf) in SUFFIXES {
         if let Some(rest) = key.strip_suffix(j_suf)
             && rest.chars().count() >= 2
-            && let Some((_, root_rumi)) = lookup_jawi_exact(rest, jmap)
+            && let Some((_, root_rumi)) = lookup_jawi_exact(rest, lex)
         {
             return Some(format!("{root_rumi}{r_suf}"));
         }
     }
 
-    // 3. Circumfix: prefix + known root + suffix (e.g., دتنداتڠني, منوبوهكن)
     for &(j_pre, r_pre) in PREFIXES {
         if let Some(after_pre) = key.strip_prefix(j_pre) {
             for &(j_suf, r_suf) in SUFFIXES {
                 if let Some(root) = after_pre.strip_suffix(j_suf)
                     && root.chars().count() >= 2
-                    && let Some((_, root_rumi)) = lookup_jawi_exact(root, jmap)
+                    && let Some((_, root_rumi)) = lookup_jawi_exact(root, lex)
                 {
                     return Some(format!("{r_pre}{}{r_suf}", root_rumi.to_lowercase()));
                 }
@@ -1239,6 +798,153 @@ fn lookup_jawi_morphological(
     None
 }
 
+// ─── Deterministic Hijri-to-Masihi (Kuwaiti / Tabular Islamic Calendar) ──────
+
+/// Converts a Hijri calendar date `(year, month 1..=12, day 1..=30)` to a Gregorian (Masihi)
+/// `(year, month, day)` triple using the standard tabular Islamic / Kuwaiti Julian Day algorithm.
+pub fn hijri_to_gregorian(hy: i32, hm: u32, hd: u32) -> (i32, u32, u32) {
+    let y = i64::from(hy);
+    let m = i64::from(hm.clamp(1, 12));
+    let d = i64::from(hd.clamp(1, 30));
+
+    let jd = (11 * y + 3) / 30 + 354 * y + 30 * m - (m - 1) / 2 + d + 1_948_440 - 385;
+
+    // Fliegel–Van Flandern JDN -> Proleptic Gregorian conversion.
+    let mut l = jd + 68_569;
+    let n = (4 * l) / 146_097;
+    l -= (146_097 * n + 3) / 4;
+    let i = (4000 * (l + 1)) / 1_461_001;
+    l = l - (1461 * i) / 4 + 31;
+    let j = (80 * l) / 2447;
+    let day = l - (2447 * j) / 80;
+    l = j / 11;
+    let month = j + 2 - 12 * l;
+    let year = 100 * (n - 49) + i + l;
+
+    (year as i32, month as u32, day as u32)
+}
+
+fn parse_hijri_month(raw: &str) -> Option<(u32, &'static str)> {
+    let low = normalize_jawi_key(raw)
+        .to_ascii_lowercase()
+        .replace(['-', ' '], "");
+    match low.as_str() {
+        "محرم" | "muharam" | "muharram" => Some((1, "Muharam")),
+        "صفر" | "safar" => Some((2, "Safar")),
+        "ربيعالاول" | "rabiulawal" | "rabialawal" | "rabiulawwal" => {
+            Some((3, "Rabiulawal"))
+        }
+        "ربيعالاخير" | "ربيعالاخر" | "ربيعالثاني" | "rabiulakhir" | "rabiulthani" => {
+            Some((4, "Rabiulakhir"))
+        }
+        "جماديلالاول" | "جماديالاول" | "jamadilawal" | "jumadalawal" => {
+            Some((5, "Jamadilawal"))
+        }
+        "جماديلالاخير" | "جماديالاخير" | "جماديالاخر" | "jamadilakhir" | "jumadalakhir" => {
+            Some((6, "Jamadilakhir"))
+        }
+        "رجب" | "rejab" | "rajab" => Some((7, "Rejab")),
+        "شعبان" | "syaaban" | "shaban" | "syaban" => Some((8, "Syaaban")),
+        "رمضان" | "ramadan" | "ramadhan" => Some((9, "Ramadan")),
+        "شوال" | "syawal" | "shawwal" => Some((10, "Syawal")),
+        "ذوالقعده" | "ذوالقعدة" | "zulkaedah" | "zulqadah" | "dhulqadah" => {
+            Some((11, "Zulkaedah"))
+        }
+        "ذوالحجه" | "ذوالحجة" | "zulhijah" | "zulhijjah" | "dhulhijjah" => {
+            Some((12, "Zulhijah"))
+        }
+        _ => None,
+    }
+}
+
+/// Extracts Hijri manuscript colophon dates in both Jawi and Rumi (e.g., `سنه ١٣٢٤`,
+/// `١٣ محرم ١٣٢٤`, `تاهون ١٣٤٠ هجره`, `1324H`, `Hijrah 1324`) and deterministically converts
+/// them to Gregorian (Masihi) dates.
+pub fn extract_hijri_colophon_dates(text: &str) -> Vec<Value> {
+    static FULL_DATE_RE: OnceLock<Regex> = OnceLock::new();
+    static YEAR_COLOPHON_RE: OnceLock<Regex> = OnceLock::new();
+
+    let norm_nfkc: String = text.nfkc().collect();
+    let digits_norm = translate_arabic_digits(&norm_nfkc);
+
+    let full_re = FULL_DATE_RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)\b(\d{1,2})\s+(محرم|صفر|ربيع\s*(?:الاول|الأول|الاخير|الأخير|الاخر|الآخر|الثاني)|جماد(?:ي|يل)\s*(?:الاول|الأول|الاخير|الأخير|الاخر|الآخر)|رجب|شعبان|رمضان|شوال|ذوالقعد[هة]|ذوالحج[هة]|Muhar+am|Safar|Rabiul\s*awal|Rabiul\s*akhir|Jamadil\s*awal|Jamadil\s*akhir|Rejab|Rajab|Sya+ban|Ramad[ha]+n|Syawal|Zulkaedah|Zulhij+ah)\s+(\d{3,4})(?:\s*(?:H|Hijrah|AH|هـ?|هجره|هجرة))?\b",
+        )
+        .expect("hijri full date regex")
+    });
+
+    let year_re = YEAR_COLOPHON_RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:(?:سنه|سنة|تاهون|sanah|hijrah|tahun|AH)\s+(\d{3,4})(?:\s*(?:H|Hijrah|هجره|هجرة|هـ))?|\b(\d{3,4})\s*(?:H|AH|Hijrah|هجره|هجرة)\b)",
+        )
+        .expect("hijri year regex")
+    });
+
+    let mut results: Vec<Value> = Vec::new();
+    let mut seen_years: Vec<i32> = Vec::new();
+
+    for caps in full_re.captures_iter(&digits_norm) {
+        let day: u32 = caps[1].parse().unwrap_or(1);
+        let month_raw = &caps[2];
+        let year: i32 = caps[3].parse().unwrap_or(0);
+        if !(1..=30).contains(&day) || !(1..=1600).contains(&year) {
+            continue;
+        }
+        if let Some((month_num, month_name)) = parse_hijri_month(month_raw) {
+            let (gy, gm, gd) = hijri_to_gregorian(year, month_num, day);
+            seen_years.push(year);
+            results.push(json!({
+                "matched_text": caps[0].trim(),
+                "hijri_date": format!("{day} {month_name} {year}H"),
+                "hijri_year": year,
+                "hijri_month": month_num,
+                "hijri_day": day,
+                "gregorian_date_masihi": format!("{gy:04}-{gm:02}-{gd:02}"),
+                "precision": "exact_day_tabular_plus_minus_1d",
+            }));
+        }
+    }
+
+    for caps in year_re.captures_iter(&digits_norm) {
+        let raw_match = caps[0].trim();
+        let year_str = caps
+            .get(1)
+            .or_else(|| caps.get(2))
+            .map(|m| m.as_str())
+            .unwrap_or("");
+        let year: i32 = year_str.parse().unwrap_or(0);
+        if !(1..=1600).contains(&year) || seen_years.contains(&year) {
+            continue;
+        }
+        // Guard against matching modern Gregorian years written after Malay `tahun` (e.g. `tahun 1957`).
+        let low = raw_match.to_ascii_lowercase();
+        if (low.starts_with("tahun") || raw_match.starts_with("تاهون"))
+            && year >= 1500
+            && !low.contains('h')
+            && !raw_match.contains("هجر")
+        {
+            continue;
+        }
+        let (gy_start, gm_s, gd_s) = hijri_to_gregorian(year, 1, 1);
+        let (gy_end, gm_e, gd_e) = hijri_to_gregorian(year, 12, 29);
+        seen_years.push(year);
+        results.push(json!({
+            "matched_text": raw_match,
+            "hijri_date": format!("{year}H"),
+            "hijri_year": year,
+            "gregorian_date_masihi": if gy_start == gy_end {
+                format!("{gy_start:04}")
+            } else {
+                format!("{gy_start:04}/{gy_end:04} ({gy_start:04}-{gm_s:02}-{gd_s:02} to {gy_end:04}-{gm_e:02}-{gd_e:02})")
+            },
+            "precision": "year_range_tabular",
+        }));
+    }
+
+    results
+}
+
 struct LineDecodeStats {
     jawi: String,
     rumi: String,
@@ -1247,10 +953,17 @@ struct LineDecodeStats {
     old_jawi_hits: usize,
 }
 
+fn is_arabic_or_presentation_char(c: char) -> bool {
+    ('\u{0600}'..='\u{06FF}').contains(&c)
+        || ('\u{0750}'..='\u{077F}').contains(&c)
+        || ('\u{FB50}'..='\u{FDFF}').contains(&c)
+        || ('\u{FE70}'..='\u{FEFF}').contains(&c)
+}
+
 fn decode_line_with_stats(line: &str) -> LineDecodeStats {
     let stripped = py_trim(line);
-    let cleaned = bullet_prefix_re().replace(stripped, "");
-    if cleaned.is_empty() {
+    let cleaned_raw = bullet_prefix_re().replace(stripped, "");
+    if cleaned_raw.is_empty() {
         return LineDecodeStats {
             jawi: String::new(),
             rumi: String::new(),
@@ -1260,12 +973,24 @@ fn decode_line_with_stats(line: &str) -> LineDecodeStats {
         };
     }
 
-    let has_arabic = cleaned
-        .chars()
-        .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c) || ('\u{0750}'..='\u{077F}').contains(&c));
+    // Step 1: NFKC normalize the entire line upfront so Arabic Presentation Forms-A/B become canonical U+0600..06FF.
+    let cleaned: String = cleaned_raw
+        .nfkc()
+        .filter(|&c| {
+            !matches!(
+                c,
+                '\u{200B}'..='\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2066}'..='\u{2069}'
+                    | '\u{FEFF}'
+            )
+        })
+        .collect();
+
+    let has_arabic = cleaned.chars().any(is_arabic_or_presentation_char);
 
     if has_arabic {
-        let jmap = jawi_token_map();
+        let lex = jawi_fst();
         let mut jawi_out: Vec<String> = Vec::new();
         let mut rumi_out: Vec<String> = Vec::new();
         let mut total_jawi_tokens = 0usize;
@@ -1285,8 +1010,14 @@ fn decode_line_with_stats(line: &str) -> LineDecodeStats {
             let stripped_digits = digit_trans.trim_matches(|c| c == '(' || c == ')');
             if digits_fullmatch_re().is_match(&digit_trans) && stripped_digits != "2" {
                 let tok_inner = tok.trim_matches(|c| c == '(' || c == ')');
-                jawi_out.push(format!("({tok_inner})"));
-                rumi_out.push(format!("({stripped_digits})"));
+                if tok.starts_with('(') || tok.ends_with(')') || stripped_digits.len() <= 2 {
+                    jawi_out.push(format!("({tok_inner})"));
+                    rumi_out.push(format!("({stripped_digits})"));
+                } else {
+                    // Preserve standalone multi-digit years like ١٣٢٤ -> 1324 cleanly
+                    jawi_out.push(tok.to_string());
+                    rumi_out.push(stripped_digits.to_string());
+                }
                 continue;
             }
 
@@ -1319,8 +1050,8 @@ fn decode_line_with_stats(line: &str) -> LineDecodeStats {
                 old_jawi_hits += 1;
             }
 
-            // 1. Exact dictionary match (including normalized Unicode, `پ`→`ڽ`/`ڤ`, `ة`↔`ت`)
-            if let Some((j_word, r_word)) = lookup_jawi_exact(&norm_key, jmap) {
+            // 1. Zero-copy FST exact dictionary match (NFKC + Presentation Forms + `پ`→`ڽ`/`ڤ` + `ة`↔`ت`)
+            if let Some((j_word, r_word)) = lookup_jawi_exact(&norm_key, lex) {
                 matched_jawi_tokens += 1;
                 jawi_out.push(format!("{prefix}{j_word}{suffix}"));
                 rumi_out.push(format!("{rumi_prefix}{r_word}{rumi_suffix}"));
@@ -1334,14 +1065,14 @@ fn decode_line_with_stats(line: &str) -> LineDecodeStats {
                 && !stem_key.is_empty()
             {
                 old_jawi_hits += 1;
-                if let Some((j_word, r_word)) = lookup_jawi_exact(stem_key, jmap) {
+                if let Some((j_word, r_word)) = lookup_jawi_exact(stem_key, lex) {
                     matched_jawi_tokens += 1;
                     let lower = r_word.to_lowercase();
                     jawi_out.push(format!("{prefix}{j_word}٢{suffix}"));
                     rumi_out.push(format!("{rumi_prefix}{r_word}-{lower}{rumi_suffix}"));
                     continue;
                 }
-                if let Some(morph_rumi) = lookup_jawi_morphological(stem_key, jmap) {
+                if let Some(morph_rumi) = lookup_jawi_morphological(stem_key, lex) {
                     matched_jawi_tokens += 1;
                     let lower = morph_rumi.to_lowercase();
                     jawi_out.push(tok.to_string());
@@ -1356,15 +1087,23 @@ fn decode_line_with_stats(line: &str) -> LineDecodeStats {
                 continue;
             }
 
-            // 3. Deterministic morphological prefix/suffix match
-            if let Some(morph_rumi) = lookup_jawi_morphological(&norm_key, jmap) {
+            // 3. Deterministic morphological prefix/suffix match validated against FST roots
+            if let Some(morph_rumi) = lookup_jawi_morphological(&norm_key, lex) {
                 matched_jawi_tokens += 1;
                 jawi_out.push(tok.to_string());
                 rumi_out.push(format!("{rumi_prefix}{morph_rumi}{rumi_suffix}"));
                 continue;
             }
 
-            // 4. Phonetic skeleton & transliteration fallback
+            // 4. Zero-copy FST Levenshtein distance-1 fuzzy DBP lookup (handles 1-char OCR/dot errors)
+            if let Some((j_word, r_word)) = lex.fuzzy_lookup_dist1(&norm_key) {
+                matched_jawi_tokens += 1;
+                jawi_out.push(format!("{prefix}{j_word}{suffix}"));
+                rumi_out.push(format!("{rumi_prefix}{r_word}{rumi_suffix}"));
+                continue;
+            }
+
+            // 5. Phonetic skeleton & transliteration fallback
             jawi_out.push(tok.to_string());
             let rough = transliterate_jawi_chars(&translate_arabic_digits(&norm_key));
             let norm = normalize_word_str(&rough);
@@ -1454,6 +1193,7 @@ pub fn decode_jawi_text(text: String) -> Result<Value, String> {
     } else {
         "modern_jawi"
     };
+    let hijri_colophon_dates = extract_hijri_colophon_dates(&text);
 
     Ok(json!({
         "corrected_jawi_lines": jawi_lines,
@@ -1463,6 +1203,8 @@ pub fn decode_jawi_text(text: String) -> Result<Value, String> {
         "total_jawi_tokens": total_jawi,
         "coverage_pct": coverage_pct,
         "script_style": script_style,
+        "fst_lexicon_entries": jawi_fst().values.len(),
+        "hijri_colophon_dates": hijri_colophon_dates,
     }))
 }
 
@@ -1563,12 +1305,39 @@ mod tests {
 
     #[test]
     fn test_calligraphic_tatweel_and_persian_variants() {
-        // Calligraphic kashida stretching + Persian ک/ی/گ + diacritics
         let sample = "ارکـيـب نـگـارا مـلـيـسـیـا مـمـلـيـهـارا سـجـاره";
         let out = decode_jawi_text(sample.to_string()).unwrap();
         assert_eq!(
             out["standard_malay_rumi_text"],
             "Arkib Negara Malaysia memelihara sejarah"
         );
+    }
+
+    #[test]
+    fn test_presentation_forms_b_bidi_and_fst_fuzzy() {
+        // Arabic Presentation Forms-B glyphs for "سجاره" (\u{FEB3}\u{FE9F}\u{FE8E}\u{FEAD}\u{FEE9})
+        // and "سلطان" (\u{FEB3}\u{FEDF}\u{FEC3}\u{FE8E}\u{FEE5}) wrapped in BiDi marks
+        let sample = "\u{200F}\u{FEB3}\u{FE9F}\u{FE8E}\u{FEAD}\u{FEE9} \u{FEB3}\u{FEDF}\u{FEC3}\u{FE8E}\u{FEE5}\u{200E}";
+        let out = decode_jawi_text(sample.to_string()).unwrap();
+        assert_eq!(out["standard_malay_rumi_text"], "sejarah sultan");
+        assert!(out["fst_lexicon_entries"].as_u64().unwrap() >= 300);
+
+        // 1-char OCR typo on "مليسيا" -> "مليسبا" should recover via FST Levenshtein dist-1
+        let fuzzy = decode_jawi_or_rough_rumi_line("مليسبا".to_string()).unwrap();
+        assert_eq!(fuzzy["rumi"], "Malaysia");
+    }
+
+    #[test]
+    fn test_hijri_to_masihi_colophon_conversion() {
+        // 13 Muharam 1324H -> 1906-03-09 (civil/Kuwaiti tabular calendar)
+        assert_eq!(hijri_to_gregorian(1324, 1, 13), (1906, 3, 9));
+        // 1 Muharam 1446H -> 2024-07-08 (civil tabular epoch; ±1 day from lunar sighting)
+        assert_eq!(hijri_to_gregorian(1446, 1, 1), (2024, 7, 8));
+
+        let dates = extract_hijri_colophon_dates("تمت کيتاب اين ڤد ١٣ محرم ١٣٢٤ دان سنه ١٣٤٠");
+        assert_eq!(dates.len(), 2);
+        assert_eq!(dates[0]["hijri_date"], "13 Muharam 1324H");
+        assert_eq!(dates[0]["gregorian_date_masihi"], "1906-03-09");
+        assert_eq!(dates[1]["hijri_date"], "1340H");
     }
 }

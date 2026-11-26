@@ -1,10 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::archives;
-use crate::config::{
-    ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_SECS, MIN_CLIP_IDENTIFY_THRESHOLD, is_document_ext,
-    is_image_ext,
-};
+use crate::config::{ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_SECS, is_document_ext, is_image_ext};
 use crate::metadata::value_to_trimmed_string;
 use crate::service::ArkibService;
 use axum::body::Body;
@@ -314,6 +311,9 @@ async fn admin_api_session(State(state): State<AdminState>, headers: HeaderMap) 
     Json(json!({
         "authenticated": authed,
         "user": if authed { Value::String(state.service.cfg.admin_user.clone()) } else { Value::Null },
+        "face_embedding_model": state.service.engine.face_model_name(),
+        "face_embedding_dim": state.service.engine.face_embedding_dim(),
+        "default_face_threshold": state.service.engine.default_identify_threshold(),
     }))
 }
 
@@ -519,7 +519,7 @@ async fn admin_test_recognition(
 ) -> Response {
     let mut upload_bytes: Option<Vec<u8>> = None;
     let mut upload_name = String::new();
-    let mut threshold = MIN_CLIP_IDENTIFY_THRESHOLD;
+    let mut threshold = state.service.engine.default_identify_threshold();
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();

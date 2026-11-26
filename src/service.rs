@@ -9,8 +9,8 @@ use crate::archives::{
 };
 use crate::biometrics::FaceEngine;
 use crate::config::{
-    AUTO_GALLERY_MAX_IMAGES, AUTO_GALLERY_MIN_SCORE, AppConfig, MAX_AUTO_IMAGE_AGE_SECS,
-    MIN_CLIP_IDENTIFY_THRESHOLD, PERCEPTUAL_HASH_DISTANCE, is_image_ext,
+    AUTO_GALLERY_MAX_IMAGES, AppConfig, MAX_AUTO_IMAGE_AGE_SECS, OLLAMA_UNIFORM_NUM_CTX,
+    PERCEPTUAL_HASH_DISTANCE, is_image_ext,
 };
 use crate::conservation::{analyze_image_quality_and_conservation, enhance_archival_image};
 use crate::forensics::{
@@ -127,14 +127,22 @@ impl ArkibService {
         ensure_default_people_groups(&cfg);
         ensure_default_document_groups(&cfg);
         let engine = Arc::new(FaceEngine::load(&cfg)?);
-        let store = Arc::new(VectorStore::load_or_create(&cfg.vectors_file)?);
-        let location_store = Arc::new(VectorStore::load_or_create(&cfg.location_vectors_file)?);
+        let store = Arc::new(VectorStore::load_or_create_with_model(
+            &cfg.vectors_file,
+            engine.face_model_name(),
+            engine.face_embedding_dim(),
+        )?);
+        let location_store = Arc::new(VectorStore::load_or_create_with_model(
+            &cfg.location_vectors_file,
+            "clip_vit_b32_768",
+            768,
+        )?);
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(90))
             .build()
             .map_err(|e| format!("HTTP client build error: {e}"))?;
         let monitor = Arc::new(SystemMonitor::new());
-        Ok(Self {
+        let svc = Self {
             cfg,
             engine,
             store,
@@ -143,7 +151,20 @@ impl ArkibService {
             http,
             id_cache: Mutex::new(Vec::new()),
             pending_lock: Mutex::new(()),
-        })
+        };
+        if let Some(warn) = svc.store.mismatch_warning() {
+            eprintln!("[ArkibVision] {warn}");
+            eprintln!(
+                "[ArkibVision] Auto-reindexing enrolled faces for {} ({}-D)...",
+                svc.engine.face_model_name(),
+                svc.engine.face_embedding_dim()
+            );
+            match svc.reindex_faces_from_originals() {
+                Ok(summary) => eprintln!("[ArkibVision] Face re-index complete: {summary}"),
+                Err(err) => eprintln!("[ArkibVision] Auto-reindex skipped: {err}"),
+            }
+        }
+        Ok(svc)
     }
 
     pub fn verify_admin(&self, provided_key: &str) -> bool {
@@ -530,7 +551,10 @@ impl ArkibService {
     }
 
     fn maybe_save_recognized_image(&self, identity: &str, image_path: &Path, score: f32) -> bool {
-        if identity.is_empty() || identity == "Unknown" || score < AUTO_GALLERY_MIN_SCORE {
+        if identity.is_empty()
+            || identity == "Unknown"
+            || score < self.engine.auto_gallery_threshold()
+        {
             return false;
         }
         let images_dir = self
@@ -891,7 +915,9 @@ impl ArkibService {
     ) -> Value {
         let clean = self.canonical_identity(identity);
         // Check if face already matches an enrolled person -> auto-route to metadata update!
-        if let Ok(existing) = self.recognize_path(image_path, MIN_CLIP_IDENTIFY_THRESHOLD) {
+        if let Ok(existing) =
+            self.recognize_path(image_path, self.engine.default_identify_threshold())
+        {
             let matched: Vec<&str> = existing
                 .iter()
                 .filter_map(|m| m.get("identity").and_then(Value::as_str))
@@ -983,7 +1009,7 @@ impl ArkibService {
             "stream": false,
             "think": false,
             "keep_alive": "30m",
-            "options": { "temperature": 0, "num_predict": 32 },
+            "options": { "temperature": 0, "num_predict": 32, "num_ctx": OLLAMA_UNIFORM_NUM_CTX },
             "messages": [{
                 "role": "user",
                 "content": format!(
@@ -1199,7 +1225,7 @@ impl ArkibService {
             "stream": false,
             "think": false,
             "keep_alive": "30m",
-            "options": { "temperature": 0, "num_predict": 160 },
+            "options": { "temperature": 0, "num_predict": 160, "num_ctx": OLLAMA_UNIFORM_NUM_CTX },
             "messages": [{
                 "role": "user",
                 "content": prompt,
@@ -1331,6 +1357,21 @@ impl ArkibService {
         })
     }
 
+    fn persist_diagnostic_report(&self, kind: &str, report: &Value) -> Option<String> {
+        let dir = self
+            .cfg
+            .project_root
+            .join("data")
+            .join("processed")
+            .join("reports");
+        fs::create_dir_all(&dir).ok()?;
+        let fname = format!("{kind}_{}.json", &Uuid::new_v4().simple().to_string()[..10]);
+        let path = dir.join(&fname);
+        let bytes = serde_json::to_vec_pretty(report).ok()?;
+        fs::write(&path, bytes).ok()?;
+        Some(format!("data/processed/reports/{fname}"))
+    }
+
     pub async fn tool_assess_conservation(&self, image_path: &str) -> Value {
         let resolved = match self.resolve_image_path(image_path) {
             Ok(p) => p,
@@ -1368,6 +1409,11 @@ impl ArkibService {
                     "sha256": auth["metadata"]["sha256"],
                 }),
             );
+        }
+        if let Some(ref_path) = self.persist_diagnostic_report("conservation", &report)
+            && let Some(obj) = report.as_object_mut()
+        {
+            obj.insert("saved_report_ref".to_string(), Value::String(ref_path));
         }
         report
     }
@@ -1458,7 +1504,19 @@ impl ArkibService {
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
         match self.analyze_authenticity_deep(&resolved).await {
-            Ok(report) => report,
+            Ok(mut report) => {
+                if let Some(ref_path) = self.persist_diagnostic_report("authenticity", &report)
+                    && let Some(obj) = report.as_object_mut()
+                {
+                    obj.insert("saved_report_ref".to_string(), Value::String(ref_path));
+                    // Trim heavy nested raw metadata maps from the MCP reply; full dump is saved on disk.
+                    if let Some(meta) = obj.get_mut("metadata").and_then(Value::as_object_mut) {
+                        meta.remove("png_text_chunks");
+                        meta.remove("exif_all");
+                    }
+                }
+                report
+            }
             Err(reason) => json!({ "status": "error", "reason": reason }),
         }
     }
@@ -1572,7 +1630,7 @@ impl ArkibService {
             Ok(p) => p,
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
-        let safe_threshold = threshold.max(MIN_CLIP_IDENTIFY_THRESHOLD);
+        let safe_threshold = threshold.max(self.engine.default_identify_threshold());
 
         let build_display_instruction = |status: &str| -> Value {
             if status == "MATCHED" {
@@ -1769,7 +1827,9 @@ impl ArkibService {
             return self.create_enrollment_request(&clean, &resolved, meta, "");
         }
 
-        if let Ok(existing) = self.recognize_path(&resolved, MIN_CLIP_IDENTIFY_THRESHOLD) {
+        if let Ok(existing) =
+            self.recognize_path(&resolved, self.engine.default_identify_threshold())
+        {
             let known: Vec<Value> = existing
                 .into_iter()
                 .filter(|m| m.get("identity").and_then(Value::as_str) != Some("Unknown"))
@@ -1789,7 +1849,7 @@ impl ArkibService {
         };
         let stats = match self.learn_bytes(
             &primary_bytes,
-            MIN_CLIP_IDENTIFY_THRESHOLD,
+            self.engine.default_identify_threshold(),
             Some(&primary_fname),
         ) {
             Ok(s) => s,
@@ -1831,7 +1891,7 @@ impl ArkibService {
             Ok(p) => p,
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
-        let safe_threshold = threshold.max(MIN_CLIP_IDENTIFY_THRESHOLD);
+        let safe_threshold = threshold.max(self.engine.default_identify_threshold());
         let (primary_bytes, primary_fname) = match self.engine.primary_face_bytes(&resolved) {
             Ok(x) => x,
             Err(reason) => return json!({ "status": "error", "reason": reason }),
@@ -2489,7 +2549,9 @@ impl ArkibService {
         if clean.is_empty() || !image_path.is_file() {
             return json!({ "status": "rejected", "reason": "Identity and image are required." });
         }
-        if let Ok(existing) = self.recognize_path(image_path, MIN_CLIP_IDENTIFY_THRESHOLD) {
+        if let Ok(existing) =
+            self.recognize_path(image_path, self.engine.default_identify_threshold())
+        {
             let known: HashSet<String> = existing
                 .iter()
                 .filter_map(|m| m.get("identity").and_then(Value::as_str))
@@ -2537,6 +2599,126 @@ impl ArkibService {
             "vector_count": total_vectors,
             "details": stats["details"],
         })
+    }
+
+    /// Rebuilds the entire face vector store using the active encoder (e.g., when upgrading from
+    /// 768-D CLIP to 512-D MobileFaceNet) from `data/interim/store-faces/originals/<Identity>/*`
+    /// and fallback `data/processed/profiles/<slug>/images/*`.
+    pub fn reindex_faces_from_originals(&self) -> Result<Value, String> {
+        let model = self.engine.face_model_name();
+        let dim = self.engine.face_embedding_dim();
+        let originals_root = self.cfg.store_faces_dir.join("originals");
+
+        let mut sources: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+        if let Ok(entries) = fs::read_dir(&originals_root) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if !p.is_dir() {
+                    continue;
+                }
+                let Some(name) = p.file_name().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                let mut imgs: Vec<PathBuf> = fs::read_dir(&p)
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|f| f.is_file() && is_image_ext(f))
+                    .collect();
+                imgs.sort();
+                if !imgs.is_empty() {
+                    sources.insert(name.to_string(), imgs);
+                }
+            }
+        }
+        // Fallback: also include any enrolled profile folder images not in originals/
+        if let Ok(entries) = fs::read_dir(&self.cfg.profile_dir) {
+            for entry in entries.flatten() {
+                let pdir = entry.path();
+                let meta_path = pdir.join("metadata.json");
+                let Ok(raw) = fs::read_to_string(&meta_path) else {
+                    continue;
+                };
+                let Ok(meta) = serde_json::from_str::<Value>(&raw) else {
+                    continue;
+                };
+                let identity = meta
+                    .get("identity")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if identity.is_empty() || sources.contains_key(identity) {
+                    continue;
+                }
+                let img_dir = pdir.join("images");
+                let mut imgs: Vec<PathBuf> = fs::read_dir(&img_dir)
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|f| f.is_file() && is_image_ext(f))
+                    .collect();
+                imgs.sort();
+                if !imgs.is_empty() {
+                    sources.insert(identity.to_string(), imgs);
+                }
+            }
+        }
+        if sources.is_empty() {
+            return Err("No source face images found under data/interim/store-faces/originals/ or data/processed/profiles/.".to_string());
+        }
+
+        self.store.reset_for_model(model, dim)?;
+        let mut reindexed_vectors = 0usize;
+        let mut reindexed_people = 0usize;
+
+        for (identity, imgs) in &sources {
+            let mut person_vecs = 0usize;
+            for img_path in imgs {
+                let Ok(faces) = self.engine.extract_features_from_path(img_path) else {
+                    continue;
+                };
+                let Some(best) = faces
+                    .into_iter()
+                    .filter(|f| f.embedding.len() == dim)
+                    .max_by_key(|f| {
+                        i64::from(f.box_xywh[2].max(0)) * i64::from(f.box_xywh[3].max(0))
+                    })
+                else {
+                    continue;
+                };
+                let fname = img_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("face.jpg")
+                    .to_string();
+                let pt = FacePoint::new(
+                    Uuid::new_v4().to_string(),
+                    identity.clone(),
+                    fname,
+                    img_path.to_string_lossy().to_string(),
+                    best.embedding,
+                );
+                if self.store.upsert(pt).is_ok() {
+                    person_vecs += 1;
+                    reindexed_vectors += 1;
+                }
+            }
+            if person_vecs > 0 {
+                reindexed_people += 1;
+            }
+        }
+        self.clear_identification_cache();
+        Ok(json!({
+            "status": "reindexed",
+            "embedding_model": model,
+            "embedding_dim": dim,
+            "reindexed_identities": reindexed_people,
+            "reindexed_vectors": reindexed_vectors,
+        }))
     }
 
     /// Pure-Rust batch enrollment from `<root>/<Identity Name>/*.jpg` directories.

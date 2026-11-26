@@ -5,12 +5,13 @@
 
 use crate::ancient_scripts::detect_script;
 use crate::biometrics::FaceEngine;
-use crate::config::{AppConfig, is_document_ext, is_image_ext};
+use crate::config::{AppConfig, OLLAMA_UNIFORM_NUM_CTX, is_document_ext, is_image_ext};
 use crate::conservation::analyze_image_quality_and_conservation;
 use crate::forensics::{
     analyze_authenticity, extract_file_metadata, find_duplicate_in_archives,
     register_checksum_entry, sha256_bytes,
 };
+use crate::jawi::extract_hijri_colophon_dates;
 use crate::metadata::{profile_slug, value_to_trimmed_string};
 use crate::vector_store::{FacePoint, VectorStore};
 use chrono::Utc;
@@ -531,6 +532,10 @@ pub fn save_document(
         "date_created",
         "origin_location",
         "author_or_source",
+        "volume_id",
+        "folio_number",
+        "hijri_date",
+        "gregorian_date_masihi",
         "summary",
         "extracted_text",
         "notes",
@@ -630,6 +635,31 @@ pub fn save_document(
             .is_none_or(Vec::is_empty)
         {
             meta.insert("key_names".to_string(), structured["key_names"].clone());
+        }
+        if meta
+            .get("hijri_date")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .is_empty()
+            && let Some(h) = structured.get("hijri_date").and_then(Value::as_str)
+            && !h.is_empty()
+        {
+            meta.insert("hijri_date".to_string(), Value::String(h.to_string()));
+        }
+        if meta
+            .get("gregorian_date_masihi")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .is_empty()
+            && let Some(g) = structured
+                .get("gregorian_date_masihi")
+                .and_then(Value::as_str)
+            && !g.is_empty()
+        {
+            meta.insert(
+                "gregorian_date_masihi".to_string(),
+                Value::String(g.to_string()),
+            );
         }
     }
 
@@ -861,8 +891,27 @@ fn extract_docx_text(path: &Path) -> Result<String, String> {
     Ok(strip_xml_tags(&xml))
 }
 
-/// Pure-Rust PDF text extractor supporting uncompressed and FlateDecode text streams.
+/// Pure-Rust PDF text extractor powered by `lopdf` (`/ToUnicode` CMap & UTF-16BE decoding)
+/// with graceful fallback to FlateDecode stream scraping and empty-text pass-through for scanned PDFs.
 fn extract_pdf_text(path: &Path) -> Result<String, String> {
+    if let Ok(doc) = lopdf::Document::load(path) {
+        let mut page_nums: Vec<u32> = doc.get_pages().keys().copied().collect();
+        page_nums.sort_unstable();
+        let mut pages_text = Vec::new();
+        for pno in page_nums {
+            if let Ok(txt) = doc.extract_text(&[pno]) {
+                let trimmed = txt.trim();
+                if !trimmed.is_empty() {
+                    pages_text.push(trimmed.to_string());
+                }
+            }
+        }
+        if !pages_text.is_empty() {
+            return Ok(pages_text.join("\n\n"));
+        }
+    }
+
+    // Fallback for malformed legacy PDFs where lopdf cannot build the page tree.
     let bytes = fs::read(path).map_err(|e| format!("Read PDF failed: {e}"))?;
     let mut extracted = Vec::new();
     let mut pos = 0usize;
@@ -1085,6 +1134,17 @@ pub fn extract_document_structure(text: &str) -> Value {
         .join(" ");
 
     let detected = detect_script(text);
+    let hijri_colophon_dates = extract_hijri_colophon_dates(text);
+    let primary_hijri = hijri_colophon_dates
+        .first()
+        .and_then(|v| v.get("hijri_date"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let primary_masihi = hijri_colophon_dates
+        .first()
+        .and_then(|v| v.get("gregorian_date_masihi"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
     json!({
         "detected_script": detected.as_str(),
         "script_name": detected.display_name(),
@@ -1094,6 +1154,9 @@ pub fn extract_document_structure(text: &str) -> Value {
         "key_topics": key_topics,
         "key_names": key_names,
         "key_dates": dates,
+        "hijri_date": primary_hijri,
+        "gregorian_date_masihi": primary_masihi,
+        "hijri_colophon_dates": hijri_colophon_dates,
         "extractive_summary": extractive_summary,
     })
 }
@@ -1121,7 +1184,7 @@ pub async fn summarize_with_ollama(
         "stream": false,
         "think": false,
         "keep_alive": "30m",
-        "options": { "temperature": 0.1, "num_predict": 420 },
+        "options": { "temperature": 0.1, "num_predict": 420, "num_ctx": OLLAMA_UNIFORM_NUM_CTX },
         "messages": [{
             "role": "user",
             "content": format!(
@@ -2001,5 +2064,75 @@ mod tests {
         assert_eq!(l_del["unassigned_locations"], 1);
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_lopdf_extraction_and_hijri_volume_metadata() {
+        use lopdf::content::{Content, Operation};
+        use lopdf::{Document, Object, Stream, dictionary};
+
+        let tmp = std::env::temp_dir().join(format!("arkib_pdf_test_{}", Uuid::new_v4().simple()));
+        fs::create_dir_all(&tmp).unwrap();
+        let pdf_path = tmp.join("sample.pdf");
+
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font_id = doc.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources_id = doc.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Td", vec![50.into(), 700.into()]),
+                Operation::new(
+                    "Tj",
+                    vec![Object::string_literal(
+                        "Arkib Negara Malaysia 13 Muharam 1324H",
+                    )],
+                ),
+                Operation::new("ET", vec![]),
+            ],
+        };
+        let content_id = doc.add_object(Stream::new(dictionary! {}, content.encode().unwrap()));
+        let page_id = doc.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        });
+        doc.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![page_id.into()],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = doc.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        doc.trailer.set("Root", catalog_id);
+        doc.save(&pdf_path).unwrap();
+
+        let text = extract_pdf_text(&pdf_path).unwrap();
+        assert!(text.contains("Arkib Negara Malaysia"));
+        let structured = extract_document_structure(&text);
+        assert_eq!(structured["hijri_date"], "13 Muharam 1324H");
+        assert_eq!(structured["gregorian_date_masihi"], "1906-03-09");
+
+        // Graceful fallback on empty / scanned PDF returns empty string (no crash)
+        let scanned_path = tmp.join("scanned.pdf");
+        fs::write(&scanned_path, b"%PDF-1.4\n%%EOF\n").unwrap();
+        assert_eq!(extract_pdf_text(&scanned_path).unwrap(), "");
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

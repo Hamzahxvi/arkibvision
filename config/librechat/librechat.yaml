@@ -6,6 +6,22 @@ interface:
   modelSelect: false
   endpointsMenu: false
 
+summarization:
+  enabled: true
+  maxSummaryTokens: 512
+  trigger:
+    type: "token_ratio"
+    value: 0.75
+  retainRecent:
+    turns: 2
+    tokens: 1200
+  contextPruning:
+    enabled: true
+    keepLastAssistants: 2
+    softTrimRatio: 0.3
+    hardClearRatio: 0.5
+    minPrunableToolChars: 1500
+
 endpoints:
   custom:
     - name: "Ollama"
@@ -15,6 +31,11 @@ endpoints:
         default:
           - "qwen3-vl:4b-instruct-16k"
         fetch: false
+      tokenConfig:
+        "qwen3-vl:4b-instruct-16k":
+          prompt: 0
+          completion: 0
+          context: 8192
       titleConvo: true
       titleModel: "qwen3-vl:4b-instruct-16k"
       titleMethod: "structured"
@@ -42,7 +63,7 @@ modelSpecs:
       preset:
         endpoint: "Ollama"
         model: "qwen3-vl:4b-instruct-16k"
-        maxContextTokens: 16384
+        maxContextTokens: 7600
         resendFiles: false
         promptPrefix: |
           You are a friendly, helpful Enterprise Archival & Vision Assistant for non-technical clients and archivists. Use ONLY attached images/files and local MCP tools (names ending in _mcp_arkib-tools).

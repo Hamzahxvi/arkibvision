@@ -307,7 +307,7 @@ async fn dispatch_tool(
                 }
                 "arkib_identify_faces" => Ok(svc.tool_identify_faces(
                     &arg_str(&args, "image_path"),
-                    arg_f32(&args, "threshold", 0.88),
+                    arg_f32(&args, "threshold", 0.0),
                     arg_bool(&args, "save_new_image", true),
                 )),
                 "arkib_request_enrollment" => Ok(svc.tool_request_enrollment(
@@ -330,7 +330,7 @@ async fn dispatch_tool(
                 )),
                 "arkib_enroll_or_learn" => Ok(svc.tool_enroll_or_learn(
                     &arg_str(&args, "image_path"),
-                    arg_f32(&args, "threshold", 0.88),
+                    arg_f32(&args, "threshold", 0.0),
                     &arg_str(&args, "admin_key"),
                 )),
                 "arkib_list_pending_requests" => {

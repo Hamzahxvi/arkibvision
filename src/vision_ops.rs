@@ -345,6 +345,145 @@ fn sharpen_rgb(img: &RgbImage, amount: f32) -> RgbImage {
     })
 }
 
+const OCR_STRIP_MAX_WIDTH: u32 = 1024;
+
+/// Detects classical Malay red-ink rubrication (*dakwat merah*, e.g. Fasal, Bab, Bermula, Alkisah)
+/// before grayscaling. Returns `(has_rubrication, red_ink_pct_of_foreground)`.
+pub fn detect_red_ink_rubrication(img: &RgbImage) -> (bool, f64) {
+    let mut fg_pixels = 0usize;
+    let mut red_pixels = 0usize;
+    for p in img.pixels() {
+        let [r, g, b] = p.0;
+        let is_red =
+            r > 140 && f32::from(r) > f32::from(g) * 1.45 && f32::from(r) > f32::from(b) * 1.45;
+        let luma = 0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b);
+        if is_red || luma < 195.0 {
+            fg_pixels += 1;
+        }
+        if is_red {
+            red_pixels += 1;
+        }
+    }
+    if fg_pixels == 0 {
+        return (false, 0.0);
+    }
+    let ratio = (red_pixels as f64) / (fg_pixels as f64);
+    let pct = (ratio * 10_000.0).round() / 100.0;
+    (red_pixels >= 12 && ratio >= 0.003, pct)
+}
+
+/// Decides adaptively whether an OCR strip is an aged/yellowed/stained manuscript that benefits
+/// from Sauvola adaptive thresholding instead of standard global autocontrast.
+fn needs_manuscript_sauvola(img: &RgbImage) -> bool {
+    let (w, h) = img.dimensions();
+    if w < 16 || h < 16 {
+        return false;
+    }
+    let step_x = (w / 48).max(1);
+    let step_y = (h / 32).max(1);
+    let mut sum_r = 0.0_f64;
+    let mut sum_b = 0.0_f64;
+    let mut sum_luma = 0.0_f64;
+    let mut count = 0.0_f64;
+    let mut tile_sums = [0.0_f64; 16];
+    let mut tile_cnts = [0.0_f64; 16];
+
+    for y in (0..h).step_by(step_y as usize) {
+        let ty = ((y * 4) / h).min(3) as usize;
+        for x in (0..w).step_by(step_x as usize) {
+            let tx = ((x * 4) / w).min(3) as usize;
+            let [r, g, b] = img.get_pixel(x, y).0;
+            let luma = 0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b);
+            sum_r += f64::from(r);
+            sum_b += f64::from(b);
+            sum_luma += luma;
+            count += 1.0;
+            let tidx = ty * 4 + tx;
+            tile_sums[tidx] += luma;
+            tile_cnts[tidx] += 1.0;
+        }
+    }
+    if count <= 0.0 {
+        return false;
+    }
+    let mean_luma = sum_luma / count;
+    let yellowing = (sum_r - sum_b) / count;
+    let mut min_tile = 255.0_f64;
+    let mut max_tile = 0.0_f64;
+    for i in 0..16 {
+        if tile_cnts[i] > 0.0 {
+            let tm = tile_sums[i] / tile_cnts[i];
+            min_tile = min_tile.min(tm);
+            max_tile = max_tile.max(tm);
+        }
+    }
+    let uneven_bg = (max_tile - min_tile) > 36.0;
+    yellowing > 14.0 || mean_luma < 175.0 || uneven_bg
+}
+
+/// Pure-Rust O(1) per-pixel integral-image Sauvola adaptive thresholding blended 70% Sauvola +
+/// 30% locally normalized grayscale so paper stains & bleed-through are suppressed while tiny
+/// Jawi diacritical dots (*titik* on ب، ت، ث، ن، ي، ڤ، ڠ، ݢ، چ، ڽ) remain intact.
+pub fn sauvola_blend_70_30(img: &RgbImage, window: usize, k: f64, r_dyn: f64) -> RgbImage {
+    let (w_u32, h_u32) = img.dimensions();
+    let w = w_u32 as usize;
+    let h = h_u32 as usize;
+    if w == 0 || h == 0 {
+        return img.clone();
+    }
+
+    let stride = w + 1;
+    let mut gray = vec![0.0_f64; w * h];
+    let mut sat = vec![0.0_f64; stride * (h + 1)];
+    let mut sat_sq = vec![0.0_f64; stride * (h + 1)];
+
+    for y in 0..h {
+        let mut row_sum = 0.0_f64;
+        let mut row_sq = 0.0_f64;
+        for x in 0..w {
+            let [r, g, b] = img.get_pixel(x as u32, y as u32).0;
+            let lum = 0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b);
+            gray[y * w + x] = lum;
+            row_sum += lum;
+            row_sq += lum * lum;
+            let idx = (y + 1) * stride + (x + 1);
+            let above = y * stride + (x + 1);
+            sat[idx] = sat[above] + row_sum;
+            sat_sq[idx] = sat_sq[above] + row_sq;
+        }
+    }
+
+    let half = (window.max(3)) / 2;
+    let r_safe = r_dyn.max(1.0);
+    ImageBuffer::from_fn(w_u32, h_u32, |x_u32, y_u32| {
+        let x = x_u32 as usize;
+        let y = y_u32 as usize;
+        let x0 = x.saturating_sub(half);
+        let y0 = y.saturating_sub(half);
+        let x1 = (x + half + 1).min(w);
+        let y1 = (y + half + 1).min(h);
+        let area = ((x1 - x0) * (y1 - y0)).max(1) as f64;
+
+        let s = sat[y1 * stride + x1] - sat[y0 * stride + x1] - sat[y1 * stride + x0]
+            + sat[y0 * stride + x0];
+        let sq = sat_sq[y1 * stride + x1] - sat_sq[y0 * stride + x1] - sat_sq[y1 * stride + x0]
+            + sat_sq[y0 * stride + x0];
+        let mean = s / area;
+        let var = (sq / area - mean * mean).max(0.0);
+        let std_dev = var.sqrt();
+
+        let lum = gray[y * w + x];
+        let thresh = mean * (1.0 + k * ((std_dev / r_safe) - 1.0));
+        let sauvola = if lum < thresh { 0.0 } else { 255.0 };
+        let local_bg = (mean + std_dev * 0.5).max(32.0);
+        let local_norm = ((lum / local_bg) * 245.0).clamp(0.0, 255.0);
+        let blended = (0.70 * sauvola + 0.30 * local_norm)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        Rgb([blended, blended, blended])
+    })
+}
+
 pub fn build_ocr_document_chunks(
     cfg: &AppConfig,
     image_path: &Path,
@@ -386,6 +525,7 @@ pub fn build_ocr_document_chunks(
     };
 
     let mut chunks = Vec::new();
+    let mut any_rubrication = false;
     for item in planned_chunks {
         let idx = item["chunk_index"].as_u64().unwrap_or(1);
         let y0 = item["y0"].as_i64().unwrap_or(0).clamp(0, i64::from(height)) as u32;
@@ -395,8 +535,39 @@ pub fn build_ocr_document_chunks(
             .clamp(i64::from(y0 + 1).min(i64::from(height)), i64::from(height))
             as u32;
         let crop_h = y1.saturating_sub(y0).max(1);
-        let crop = base_img.crop_imm(0, y0, width, crop_h).to_rgb8();
-        let enhanced = sharpen_rgb(&autocontrast_rgb(&crop, 1.0), 1.4);
+        let raw_crop = base_img.crop_imm(0, y0, width, crop_h).to_rgb8();
+
+        // Cap strip width to 1024px (aspect ratio preserved) to keep VLM vision tokens lean.
+        let crop = if raw_crop.width() > OCR_STRIP_MAX_WIDTH {
+            let new_h = ((u64::from(raw_crop.height()) * u64::from(OCR_STRIP_MAX_WIDTH))
+                / u64::from(raw_crop.width().max(1)))
+            .max(1) as u32;
+            DynamicImage::ImageRgb8(raw_crop)
+                .resize_exact(OCR_STRIP_MAX_WIDTH, new_h, FilterType::Triangle)
+                .to_rgb8()
+        } else {
+            raw_crop
+        };
+
+        // Detect red-ink rubrication (dakwat merah) before any grayscaling/binarization.
+        let (has_rubrication, red_ink_pct) = detect_red_ink_rubrication(&crop);
+        if has_rubrication {
+            any_rubrication = true;
+        }
+
+        // Adaptively apply 70/30 integral-image Sauvola for aged/stained manuscripts; preserve clean autocontrast+sharpen for crisp modern scans.
+        let (enhanced, preproc_mode) = if needs_manuscript_sauvola(&crop) {
+            (
+                sauvola_blend_70_30(&crop, 25, 0.25, 128.0),
+                "sauvola_70_30_adaptive",
+            )
+        } else {
+            (
+                sharpen_rgb(&autocontrast_rgb(&crop, 1.0), 1.4),
+                "autocontrast_sharpen",
+            )
+        };
+
         let chunk_name = format!("{stem}_chunk_{idx}.jpg");
         let jpeg = encode_jpeg(&DynamicImage::ImageRgb8(enhanced), 92)?;
         fs::write(out_dir.join(&chunk_name), jpeg)
@@ -407,6 +578,9 @@ pub fn build_ocr_document_chunks(
             "vertical_range_pct": item["vertical_range_pct"],
             "box_xywh": [0, y0, width, crop_h],
             "detected_text_lines": item["detected_text_lines"],
+            "has_rubrication": has_rubrication,
+            "red_ink_pct": red_ink_pct,
+            "preprocessing": preproc_mode,
             "enhanced_chunk_url": format!("{}/images/ocr-chunks/{chunk_name}", cfg.librechat_url),
         }));
     }
@@ -416,8 +590,9 @@ pub fn build_ocr_document_chunks(
         "image_dimensions": { "width": width, "height": height },
         "total_chunks": chunks.len(),
         "total_detected_text_lines": total_detected_lines,
+        "has_rubrication": any_rubrication,
         "chunks": chunks,
-        "anti_hallucination_guide": "Read the document/handwriting strictly chunk-by-chunk from Top to Bottom (3-4 lines per strip), matching the detected_text_lines count in each chunk. Transcribe ONLY characters visibly present in the image. Never invent extra lines, never guess missing words from memory, and mark any illegible calligraphic/handwritten glyphs with [?]. If the text contains Jawi (Modern or Old Classical Jawi), ALWAYS pass the exact extracted Jawi lines into arkib_decode_jawi instead of translating by memory.",
+        "anti_hallucination_guide": "Read the document/handwriting strictly chunk-by-chunk from Top to Bottom (3-4 lines per strip), matching the detected_text_lines count in each chunk. Chunks flagged with has_rubrication=true contain red-ink rubrication (dakwat merah) typically marking chapter headings (Fasal, Bab, Bermula, Alkisah). Transcribe ONLY characters visibly present in the image. Never invent extra lines, never guess missing words from memory, and mark any illegible calligraphic/handwritten glyphs with [?]. If the text contains Jawi (Modern or Old Classical Jawi), ALWAYS pass the exact extracted Jawi lines into arkib_decode_jawi instead of translating by memory.",
     }))
 }
 
@@ -451,5 +626,35 @@ mod tests {
         let dense_plan = compute_text_line_chunks(&dense, 1400, 5);
         assert_eq!(dense_plan["detected_text_lines"], 20);
         assert_eq!(dense_plan["chunk_count"], 5);
+    }
+
+    #[test]
+    fn test_sauvola_blend_and_red_ink_rubrication() {
+        // Synthetic aged/yellowed manuscript strip with dark ink strokes + red-ink heading
+        let mut img = RgbImage::from_pixel(120, 60, Rgb([215, 195, 150]));
+        // Black ink strokes
+        for x in 10..110 {
+            for y in 28..33 {
+                img.put_pixel(x, y, Rgb([35, 30, 25]));
+            }
+        }
+        // Red ink rubrication block (dakwat merah)
+        for x in 10..35 {
+            for y in 10..16 {
+                img.put_pixel(x, y, Rgb([190, 45, 40]));
+            }
+        }
+        let (has_red, red_pct) = detect_red_ink_rubrication(&img);
+        assert!(has_red, "Expected red-ink rubrication to be detected");
+        assert!(red_pct > 1.0);
+        assert!(needs_manuscript_sauvola(&img));
+
+        let out = sauvola_blend_70_30(&img, 25, 0.25, 128.0);
+        assert_eq!(out.dimensions(), img.dimensions());
+        // Background paper pixel should be lifted near white; ink stroke pixel should remain dark
+        let bg_val = out.get_pixel(60, 50)[0];
+        let ink_val = out.get_pixel(60, 30)[0];
+        assert!(bg_val > 210, "Background should be bright, got {bg_val}");
+        assert!(ink_val < 90, "Ink stroke should be dark, got {ink_val}");
     }
 }

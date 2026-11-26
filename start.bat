@@ -24,12 +24,15 @@ for %%I in ("%~dp0..\LibreChat") do set "LIBRECHAT_DIR=%%~fI"
 
 echo Starting ArkibVision Pure-Rust MCP Server ^& LibreChat workspace...
 
-REM 1. Ensure Ollama is running
+REM 1. Ensure Ollama is running with memory-efficient Flash Attention + q8_0 KV cache
+set "OLLAMA_FLASH_ATTENTION=1"
+set "OLLAMA_KV_CACHE_TYPE=q8_0"
+set "OLLAMA_NUM_PARALLEL=1"
 powershell -NoProfile -Command "try { $c = New-Object System.Net.Sockets.TcpClient('127.0.0.1', 11434); $c.Close(); exit 0 } catch { exit 1 }"
 if errorlevel 1 (
     where ollama >nul 2>nul
     if not errorlevel 1 (
-        echo Starting Ollama server...
+        echo Starting Ollama server ^(FlashAttention=1, KV=q8_0, Parallel=1^)...
         powershell -NoProfile -Command "Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Minimized"
         timeout /t 3 /nobreak >nul
     ) else (

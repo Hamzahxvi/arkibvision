@@ -86,6 +86,9 @@ async fn health_handler(State(service): State<Arc<ArkibService>>) -> Json<Value>
         "service": "arkib-server",
         "version": env!("CARGO_PKG_VERSION"),
         "runtime": "rust",
+        "face_embedding_model": service.engine.face_model_name(),
+        "face_embedding_dim": service.engine.face_embedding_dim(),
+        "default_face_threshold": service.engine.default_identify_threshold(),
         "identities": identities,
         "vectors": vectors,
         "locations": locations,
@@ -113,11 +116,30 @@ async fn main() {
 
     // CLI mode: `--verify-face <image_path>` for instant biometric smoke-testing.
     if args.len() >= 3 && args[1] == "--verify-face" {
-        let out = service.tool_identify_faces(&args[2], 0.88, false);
+        let out = service.tool_identify_faces(
+            &args[2],
+            service.engine.default_identify_threshold(),
+            false,
+        );
         println!(
             "{}",
             serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{}".into())
         );
+        return;
+    }
+
+    // CLI mode: `--reindex-faces` rebuilds all enrolled face vectors with the active encoder.
+    if args.len() >= 2 && args[1] == "--reindex-faces" {
+        match service.reindex_faces_from_originals() {
+            Ok(out) => println!(
+                "{}",
+                serde_json::to_string_pretty(&out).unwrap_or_else(|_| "{}".into())
+            ),
+            Err(err) => {
+                eprintln!("Re-index error: {err}");
+                std::process::exit(1);
+            }
+        }
         return;
     }
 

@@ -10,9 +10,11 @@ axum = { version = "0.8", features = ["multipart"] }
 base64 = "0.22"
 chrono = { version = "0.4", features = ["clock"] }
 flate2 = "1"
+fst = { version = "0.4", features = ["levenshtein"] }
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
 kamadak-exif = "0.6"
+lopdf = "0.35"
 mime_guess = "2"
 ort = { version = "2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-31"] }
 rand = "0.9"
@@ -24,9 +26,14 @@ sha2 = "0.10"
 sysinfo = "0.40"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
 tokio-stream = "0.1"
+unicode-normalization = "0.1"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[build-dependencies]
+fst = "0.4"
+unicode-normalization = "0.1"
 
 [profile.release]
 opt-level = 3

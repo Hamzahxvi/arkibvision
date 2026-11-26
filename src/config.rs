@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 
 pub const MIN_CLIP_IDENTIFY_THRESHOLD: f32 = 0.88;
 pub const AUTO_GALLERY_MIN_SCORE: f32 = 0.90;
+pub const MIN_MOBILEFACENET_IDENTIFY_THRESHOLD: f32 = 0.45;
+pub const AUTO_GALLERY_MIN_SCORE_MOBILEFACENET: f32 = 0.58;
 pub const AUTO_GALLERY_MAX_IMAGES: usize = 15;
+pub const OLLAMA_UNIFORM_NUM_CTX: i64 = 8192;
 pub const PERCEPTUAL_HASH_DISTANCE: i64 = 16;
 pub const MAX_AUTO_IMAGE_AGE_SECS: u64 = 60;
 pub const ADMIN_SESSION_COOKIE: &str = "arkib_admin_session";
@@ -50,6 +53,7 @@ pub struct AppConfig {
     pub vision_model: String,
     pub ort_dylib_path: PathBuf,
     pub yunet_model_path: PathBuf,
+    pub mobilefacenet_model_path: PathBuf,
     pub clip_model_path: PathBuf,
 }
 
@@ -166,6 +170,25 @@ fn find_yunet_model(project_root: &Path) -> PathBuf {
                 .join("arkib")
                 .join("yunet_face_detector.onnx")
         })
+}
+
+fn find_mobilefacenet_model(project_root: &Path) -> PathBuf {
+    if let Some(p) = env_with_fallback("ARKIB_MOBILEFACENET_MODEL", "ROJAKFACE_MOBILEFACENET_MODEL")
+    {
+        let pb = PathBuf::from(p);
+        if pb.is_file() {
+            return pb;
+        }
+    }
+    let home = user_home_dir();
+    let candidates = [
+        project_root.join("models").join("w600k_mbf.onnx"),
+        home.join(".cache").join("arkib").join("w600k_mbf.onnx"),
+    ];
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| project_root.join("models").join("w600k_mbf.onnx"))
 }
 
 fn find_clip_model(project_root: &Path) -> PathBuf {
@@ -291,6 +314,7 @@ impl AppConfig {
 
         let ort_dylib_path = find_ort_dylib(&project_root);
         let yunet_model_path = find_yunet_model(&project_root);
+        let mobilefacenet_model_path = find_mobilefacenet_model(&project_root);
         let clip_model_path = find_clip_model(&project_root);
 
         let _ = fs::create_dir_all(&pending_images_dir);
@@ -332,6 +356,7 @@ impl AppConfig {
             vision_model,
             ort_dylib_path,
             yunet_model_path,
+            mobilefacenet_model_path,
             clip_model_path,
         }
     }
