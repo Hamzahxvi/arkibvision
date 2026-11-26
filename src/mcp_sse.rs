@@ -288,7 +288,7 @@ async fn dispatch_tool(
                 }
                 "rojakface_ocr_document" => Ok(svc.tool_ocr_document(
                     &arg_str(&args, "image_path"),
-                    arg_i64(&args, "max_chunks", 3),
+                    arg_i64(&args, "max_chunks", 5),
                 )),
                 "rojakface_decode_jawi" => Ok(svc.tool_decode_jawi(&arg_str(&args, "text"))),
                 "rojakface_decode_ancient_script" => Ok(svc.tool_decode_ancient_script(
@@ -379,18 +379,18 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_ocr_document",
-            "description": "Read or transcribe text, handwriting, letters, certificates, or old manuscripts (Jawi, Pallava, Kawi, Rencong, Malay, English, Tamil, Mandarin, Sanskrit) from an uploaded image. Use for everyday requests like 'read this', 'what does this say', 'baca tulisan ini'. Always leave image_path empty (\"\") for chat uploads.",
+            "description": "Read or transcribe text, handwriting, letters, certificates, or old manuscripts (Modern/Old Jawi, Pallava, Kawi, Rencong, Malay, English, Tamil, Mandarin, Sanskrit) from an uploaded image by slicing dense pages into 3-4 line strips to prevent long-context hallucination. Always leave image_path empty (\"\") for chat uploads, and ALWAYS pass extracted Jawi text into rojakface_decode_jawi.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." },
-                    "max_chunks": { "type": "integer", "default": 3 }
+                    "max_chunks": { "type": "integer", "default": 5, "description": "Maximum horizontal line-valley strips (1-8; default 5 keeps dense Jawi pages to ~3-4 lines per strip)." }
                 }
             }
         }),
         json!({
             "name": "rojakface_decode_jawi",
-            "description": "Convert Jawi writing (Malay-Arabic script) into natural Standard Bahasa Melayu (Rumi) and explain its meaning.",
+            "description": "MANDATORY deterministic decoder for ALL Modern Jawi and Old Classical Jawi (Jawi Lama / Hikayat / Surat Diraja / multi-font Unicode & calligraphic kashida variants). Always call this tool on Jawi text or Jawi OCR output instead of translating from memory, and strictly follow its standard_malay_rumi_text without inventing lines.",
             "inputSchema": {
                 "type": "object",
                 "required": ["text"],

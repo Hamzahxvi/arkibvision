@@ -119,7 +119,7 @@ pub fn compute_text_line_chunks(row_energies: &[f64], height: i64, max_chunks: i
         return json!({ "detected_text_lines": 0, "chunk_count": 0, "chunks": [] });
     }
 
-    let clamped_max = max_chunks.clamp(1, 5) as usize;
+    let clamped_max = max_chunks.clamp(1, 8) as usize;
     let n = row_energies.len();
     let win = (height / 150).max(3);
     let half_left = win / 2;
@@ -173,12 +173,15 @@ pub fn compute_text_line_chunks(row_energies: &[f64], height: i64, max_chunks: i
         lines.push((start_y, n_i64));
     }
 
+    // Keep each visual strip to ~3-4 lines so 4B VLMs do not drift or hallucinate on dense Jawi/manuscript pages.
     let num_chunks = if lines.len() <= 4 || height < 420 || clamped_max == 1 {
         1
-    } else if lines.len() <= 9 || height < 750 {
+    } else if lines.len() <= 8 || height < 750 {
         2.min(clamped_max)
-    } else {
+    } else if lines.len() <= 12 {
         3.min(clamped_max)
+    } else {
+        lines.len().div_ceil(4).min(clamped_max)
     };
 
     let mut chunk_groups: Vec<&[(i64, i64)]> = Vec::new();
@@ -414,7 +417,7 @@ pub fn build_ocr_document_chunks(
         "total_chunks": chunks.len(),
         "total_detected_text_lines": total_detected_lines,
         "chunks": chunks,
-        "anti_hallucination_guide": "Read the document/handwriting strictly chunk-by-chunk from Top to Bottom, matching the detected_text_lines count in each chunk. Transcribe ONLY characters visibly present in the image. Never invent extra lines, never guess missing words from memory, and mark any illegible characters with [?].",
+        "anti_hallucination_guide": "Read the document/handwriting strictly chunk-by-chunk from Top to Bottom (3-4 lines per strip), matching the detected_text_lines count in each chunk. Transcribe ONLY characters visibly present in the image. Never invent extra lines, never guess missing words from memory, and mark any illegible calligraphic/handwritten glyphs with [?]. If the text contains Jawi (Modern or Old Classical Jawi), ALWAYS pass the exact extracted Jawi lines into rojakface_decode_jawi instead of translating by memory.",
     }))
 }
 
@@ -436,5 +439,17 @@ mod tests {
         let plan = compute_text_line_chunks(&energies, 900, 3);
         assert_eq!(plan["detected_text_lines"], 12);
         assert_eq!(plan["chunk_count"], 3);
+
+        // Dense 20-line Jawi page should auto-slice into 5 short strips (4 lines each) to prevent 4B hallucination
+        let mut dense = vec![1.0; 1400];
+        for l in 0..20 {
+            let s = 30 + l * 66;
+            for v in &mut dense[s..s + 20] {
+                *v = 28.0;
+            }
+        }
+        let dense_plan = compute_text_line_chunks(&dense, 1400, 5);
+        assert_eq!(dense_plan["detected_text_lines"], 20);
+        assert_eq!(dense_plan["chunk_count"], 5);
     }
 }

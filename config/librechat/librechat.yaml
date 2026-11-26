@@ -67,7 +67,7 @@ modelSpecs:
              - "Are our files safe / intact / corrupted / duplicated?" / "Semak fail rosak / berubah / pendua" -> rojakface_verify_integrity_mcp_rojakface-tools (update_manifest=true).
              - "How is the system doing?" / "Is the server okay or slow?" / "Any problems / overload?" / "Sistem ok ke? / Kenapa lambat? / Prestasi sistem" -> rojakface_system_health_mcp_rojakface-tools. Summarize overall health, resource usage, any issues, and practical next steps clearly.
              - "Summarize this text / what is this about?" / "Ringkaskan teks ini" -> rojakface_summarize_document_mcp_rojakface-tools.
-             - "Translate / read this Jawi, Pallava, Kawi, or Rencong text" -> rojakface_decode_ancient_script_mcp_rojakface-tools (or rojakface_decode_jawi_mcp_rojakface-tools for Jawi).
+             - "Translate / read this Jawi, Pallava, Kawi, or Rencong text" -> For ANY Jawi text (Modern Jawi, Old Classical Jawi / Jawi Lama, or multi-line passages), ALWAYS call rojakface_decode_jawi_mcp_rojakface-tools first and trust its `standard_malay_rumi_text` strictly without altering numbers, dates, or inventing missing words. For Pallava/Kawi/Rencong -> call rojakface_decode_ancient_script_mcp_rojakface-tools.
              - Asking about ANY person by name, nickname, or photo description ("show Ali", "gambar yang pakai songkok / cermin mata") -> IMMEDIATELY call rojakface_search_identity_mcp_rojakface-tools.
 
           2. ATTACHED IMAGE / FILE (ALWAYS PASS image_path="" OR file_path=""):
@@ -81,9 +81,9 @@ modelSpecs:
                * Call rojakface_assess_conservation_mcp_rojakface-tools (image_path=""). Report clarity/lighting/readability, damage levels (none/light/medium/heavy for tear, faded, mold, aging), the fused deep authenticity/watermark/copy check (`authenticity_summary` — NEVER downgrade HIGH/MEDIUM risk!), and clear physical care/healing steps (e.g., fungal removal, controlled drying, protective coating, mending).
              - MAKE CLEARER / IMPROVE / RESTORE ("make it clearer", "fix dark/blurry/yellow/old photo", "brighten", "sharpen", "clean up scan", "jelaskan / terangkan / baiki / pulihkan gambar ini"):
                * Call rojakface_enhance_image_mcp_rojakface-tools (image_path="", mode="auto") and show ![Enhanced archival image](enhanced_image_url) with simple Before vs After improvements.
-             - READ WRITING / HANDWRITING / OLD SCRIPTS ("read this", "what does this say?", "translate this", "baca tulisan ini", "tukar ke rumi", Jawi / Pallava / Kawi / Rencong):
-               * Call rojakface_ocr_document_mcp_rojakface-tools (image_path=""). Read chunks Top to Bottom without skipping or inventing words.
-               * For Jawi -> pass text to rojakface_decode_jawi_mcp_rojakface-tools. For Pallava/Kawi/Rencong -> pass text to rojakface_decode_ancient_script_mcp_rojakface-tools.
+             - READ WRITING / HANDWRITING / OLD SCRIPTS ("read this", "what does this say?", "translate this", "baca tulisan ini", "tukar ke rumi", Jawi / Jawi Lama / Pallava / Kawi / Rencong):
+               * Call rojakface_ocr_document_mcp_rojakface-tools (image_path="", max_chunks=5). Read chunks strictly Top to Bottom (3-4 lines at a time) without skipping or inventing words; mark any illegible ornate calligraphy or antique handwriting glyphs with [?].
+               * For Jawi (Modern or Old Classical Jawi) -> ALWAYS pass every extracted Jawi line directly into rojakface_decode_jawi_mcp_rojakface-tools and base your Rumi answer strictly on its returned `standard_malay_rumi_text` (NEVER guess Old Jawi or long passages from memory). For Pallava/Kawi/Rencong -> pass text to rojakface_decode_ancient_script_mcp_rojakface-tools.
              - PLACE / BUILDING / PHOTO DETAILS ("what building/place is this?", "where/when was this taken?", "bangunan apa ini?"):
                * Call rojakface_analyze_image_mcp_rojakface-tools (image_path="") and explain the building, landmarks, location match, date/time, and visible text in plain language.
              - LONG DOCUMENT SUMMARY ("summarize this file", "what is this document about?", "ringkaskan dokumen ini"):
