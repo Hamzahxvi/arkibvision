@@ -2123,7 +2123,9 @@
   var ac = {
     open: false,
     mode: 'ocr',
-    sessionId: 'latest',
+    lockedMode: false,
+    sessionId: 'new',
+    lastPathname: window.location.pathname,
     widthVw: 46,
     isAdmin: false,
     data: null,
@@ -2207,31 +2209,31 @@
       '<div class="ac-resize-handle" id="ac-resize-handle" title="Drag to resize Canvas"></div>' +
       '<div class="ac-header">' +
       '  <div class="ac-title-wrap">' +
-      '    <span>🗂️ Arkib Canvas</span>' +
+      '    <span id="ac-header-title">🗂️ Arkib Canvas</span>' +
       '    <span class="ac-role-pill" id="ac-role-pill">Guest · Staged Approval</span>' +
       '  </div>' +
       '  <div style="display:flex;align-items:center;gap:6px">' +
-      '    <button type="button" class="rf-btn" id="ac-reload-btn" style="padding:4px 9px;font-size:.74rem" title="Reload session">↻</button>' +
+      '    <button type="button" class="rf-btn" id="ac-clear-btn" style="padding:4px 9px;font-size:.72rem" title="Clear workspace">Clear</button>' +
       '    <button type="button" class="rf-btn" id="ac-close-btn" style="padding:4px 9px;font-size:.78rem" aria-label="Close Arkib Canvas">✕</button>' +
       '  </div>' +
       '</div>' +
-      '<div class="ac-mode-tabs">' +
-      '  <button type="button" class="ac-mode-tab" data-ac-mode="ocr">📜 Jawi &amp; OCR Workbench</button>' +
+      '<div class="ac-mode-tabs" id="ac-mode-tabs">' +
+      '  <button type="button" class="ac-mode-tab" data-ac-mode="ocr">📜 Jawi OCR Workbench</button>' +
       '  <button type="button" class="ac-mode-tab" data-ac-mode="enroll">🪪 Identity Enrollment</button>' +
       '</div>' +
-      '<div class="ac-body" id="ac-body"><div class="rf-empty">Loading Arkib Canvas…</div></div>' +
+      '<div class="ac-body" id="ac-body"><div class="rf-empty">Loading…</div></div>' +
       '<div class="ac-footer" id="ac-footer"></div>';
     document.body.appendChild(el);
 
     document.getElementById('ac-close-btn').onclick = closeCanvas;
-    document.getElementById('ac-reload-btn').onclick = function () {
-      loadSession(ac.mode, ac.sessionId);
+    document.getElementById('ac-clear-btn').onclick = function () {
+      loadSession(ac.mode, 'new');
     };
     el.querySelectorAll('[data-ac-mode]').forEach(function (btn) {
       btn.onclick = function () {
         var nextMode = btn.getAttribute('data-ac-mode');
         if (nextMode !== ac.mode) {
-          openCanvas(nextMode, 'latest');
+          openCanvas(nextMode, 'new', false);
         }
       };
     });
@@ -2266,8 +2268,26 @@
     b.setAttribute('aria-pressed', ac.open ? 'true' : 'false');
   }
 
+  function resetCanvasState() {
+    ac.sessionId = 'new';
+    ac.data = null;
+    ac.jawiText = '';
+    ac.rumiText = '';
+    ac.rumiManualOverride = false;
+    ac.lexiconPairs = [];
+    ac.enrollImg = null;
+    ac.enrollImgSrc = '';
+    ac.cropRect = null;
+    ac.croppedDataUrl = '';
+    ac.rotateDeg = 0;
+    ac.brightness = 100;
+    ac.contrast = 100;
+  }
+
   function closeCanvas() {
     ac.open = false;
+    ac.lockedMode = false;
+    resetCanvasState();
     document.body.classList.remove('ac-canvas-open');
     var el = document.getElementById(DRAWER_ID);
     if (el) el.remove();
@@ -2277,13 +2297,23 @@
     }
   }
 
-  async function openCanvas(mode, id) {
+  async function openCanvas(mode, id, lockedMode) {
     ac.mode = (mode === 'enroll') ? 'enroll' : 'ocr';
-    ac.sessionId = id || 'latest';
+    ac.sessionId = id || 'new';
+    ac.lockedMode = !!lockedMode;
+    ac.lastPathname = window.location.pathname;
     ac.open = true;
     applyDrawerWidth(ac.widthVw + 'vw');
     document.body.classList.add('ac-canvas-open');
-    ensureDrawer();
+    var el = ensureDrawer();
+    var tabsEl = document.getElementById('ac-mode-tabs');
+    if (tabsEl) tabsEl.style.display = ac.lockedMode ? 'none' : 'flex';
+    var titleEl = document.getElementById('ac-header-title');
+    if (titleEl) {
+      titleEl.textContent = ac.lockedMode
+        ? (ac.mode === 'ocr' ? '📜 Jawi OCR Workbench' : '🪪 Identity Enrollment')
+        : '🗂️ Arkib Canvas';
+    }
     updateRailButtonState();
     await loadSession(ac.mode, ac.sessionId);
   }
@@ -2299,7 +2329,7 @@
     footer.innerHTML = '';
 
     try {
-      var r = await acApi('/canvas/api/session/' + encodeURIComponent(mode) + '/' + encodeURIComponent(id || 'latest'));
+      var r = await acApi('/canvas/api/session/' + encodeURIComponent(mode) + '/' + encodeURIComponent(id || 'new'));
       if (!r.ok || !r.data) {
         body.innerHTML = '<div class="rf-err-banner">Could not load Arkib Canvas session (' + esc(r.data && r.data.reason || r.status) + ').</div>';
         return;
@@ -2404,31 +2434,36 @@
       '  <textarea id="ac-rumi-ta" class="ac-rumi-textarea" placeholder="Deterministic Rumi transliteration appears here automatically (<5ms)…">' + esc(ac.rumiText) + '</textarea>' +
       '</div>' +
       '<div class="ac-card">' +
-      '  <div class="ac-card-head"><span>📚 Document Link &amp; DBP Lexicon Suggestions</span></div>' +
+      '  <div class="ac-card-head"><span>💾 Save to Archive (Optional)</span></div>' +
+      '  <div style="font-size:.73rem;color:rgb(var(--text-secondary));line-height:1.45">Save your corrected Jawi &amp; Rumi text as an archival record under <b>Admin Portal → Documents</b>, or attach it to an existing document.</div>' +
       '  <div class="ac-form-grid">' +
-      '    <div class="ac-field"><label>Link to Existing Document (optional)</label>' +
+      '    <div class="ac-field"><label>Save Under Document</label>' +
       '      <select id="ac-doc-slug" class="rf-input" style="width:100%">' +
-      '        <option value="">— Create / Unlinked Transcription —</option>' +
+      '        <option value="">Save as New Archival Document</option>' +
       docs.map(function (doc) {
         var sel = (d.document_slug && d.document_slug === doc.slug) ? ' selected' : '';
         return '<option value="' + esc(doc.slug) + '"' + sel + '>' + esc(doc.title || doc.slug) + '</option>';
       }).join('') +
       '      </select>' +
       '    </div>' +
-      '    <div class="ac-field"><label>Title / Notes</label><input id="ac-ocr-title" class="rf-input" style="width:100%" placeholder="e.g. Surat Sultan 1324H" value="' + esc(d.file || '') + '"/></div>' +
+      '    <div class="ac-field"><label>Document Title</label><input id="ac-ocr-title" class="rf-input" style="width:100%" placeholder="e.g. Surat Sultan 1324H" value="' + esc(d.file || '') + '"/></div>' +
       '  </div>' +
-      '  <div style="display:flex;gap:6px;align-items:center;margin-top:4px">' +
-      '    <input id="ac-lex-jawi" class="rf-input" dir="rtl" style="flex:1" placeholder="Jawi word (e.g. ڤرلمباݢأن)"/>' +
-      '    <input id="ac-lex-rumi" class="rf-input" style="flex:1" placeholder="DBP Rumi (e.g. Perlembagaan)"/>' +
-      '    <button type="button" class="rf-btn" id="ac-lex-add">+ Pair</button>' +
-      '  </div>' +
-      '  <div id="ac-lex-list" style="display:flex;flex-wrap:wrap;gap:6px;font-size:.74rem"></div>' +
-      '  <input id="ac-ocr-notes" class="rf-input" style="width:100%" placeholder="Archivist notes (optional)…"/>' +
+      '  <input id="ac-ocr-notes" class="rf-input" style="width:100%" placeholder="Notes (optional, e.g. page number or condition)…"/>' +
+      '  <details style="margin-top:4px;border-top:1px solid rgb(var(--border-light));padding-top:8px">' +
+      '    <summary style="cursor:pointer;font-size:.75rem;font-weight:600;color:rgb(var(--text-secondary))">📖 Teach a New Jawi Word to Dictionary (Optional)</summary>' +
+      '    <div style="font-size:.72rem;color:rgb(var(--text-secondary));margin:6px 0">If any Jawi word was misread, add its correct Malay (Rumi) spelling here so ArkibVision translates it accurately next time.</div>' +
+      '    <div style="display:flex;gap:6px;align-items:center">' +
+      '      <input id="ac-lex-jawi" class="rf-input" dir="rtl" style="flex:1" placeholder="Jawi spelling (e.g. ڤرلمباݢأن)"/>' +
+      '      <input id="ac-lex-rumi" class="rf-input" style="flex:1" placeholder="Correct Malay word (e.g. Perlembagaan)"/>' +
+      '      <button type="button" class="rf-btn" id="ac-lex-add">+ Add Word</button>' +
+      '    </div>' +
+      '    <div id="ac-lex-list" style="display:flex;flex-wrap:wrap;gap:6px;font-size:.74rem;margin-top:6px"></div>' +
+      '  </details>' +
       '</div>';
 
     footer.innerHTML =
       '<span style="font-size:.74rem;color:rgb(var(--text-secondary))">' +
-      (ac.isAdmin ? 'Admin session active — saves directly to archive &amp; DBP TSV.' : 'Guest mode — creates staged REQ-* for Admin approval.') +
+      (ac.isAdmin ? 'Admin mode — saves directly to Archive Documents.' : 'Guest mode — submits for Admin approval.') +
       '</span>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="ac-ocr-submit">' +
       (ac.isAdmin ? '✅ Save Verified Transcription' : '📤 Submit Correction for Approval') +
@@ -2975,7 +3010,7 @@
       ev.preventDefault();
       ev.stopPropagation();
       if (ac.open) closeCanvas();
-      else openCanvas(ac.mode || 'ocr', 'latest');
+      else openCanvas(ac.mode || 'ocr', 'new', false);
     });
     return btn;
   }
@@ -2991,21 +3026,37 @@
     adminBtn.insertAdjacentElement('afterend', createCanvasRailButton());
   }
 
-  // Intercept any chat link matching `#arkib-canvas:<mode>:<id>`
+  // Intercept any chat link matching `#arkib-canvas:<mode>:<id>` -> opens ONLY that specific workbench!
   document.addEventListener('click', function (ev) {
+    var target = ev.target && ev.target.closest ? ev.target.closest('button, a') : null;
+    if (target) {
+      var tid = target.getAttribute('data-testid') || '';
+      if (tid === 'new-chat-button' || tid === 'nav-new-chat-button') {
+        if (ac.open) closeCanvas();
+        return;
+      }
+    }
     var a = ev.target && ev.target.closest ? ev.target.closest('a[href*="#arkib-canvas:"]') : null;
     if (!a) return;
     var parsed = parseCanvasHash(a.getAttribute('href') || '');
     if (!parsed) return;
     ev.preventDefault();
     ev.stopPropagation();
-    openCanvas(parsed.mode, parsed.id);
+    openCanvas(parsed.mode, parsed.id, true);
   }, true);
 
   window.addEventListener('hashchange', function () {
     var parsed = parseCanvasHash(window.location.hash || '');
-    if (parsed) openCanvas(parsed.mode, parsed.id);
+    if (parsed) openCanvas(parsed.mode, parsed.id, true);
   });
+
+  // Automatically close & wipe Canvas whenever user switches conversations or starts a New Chat (/c/new)
+  setInterval(function () {
+    if (window.location.pathname !== ac.lastPathname) {
+      ac.lastPathname = window.location.pathname;
+      if (ac.open) closeCanvas();
+    }
+  }, 450);
 
   document.addEventListener('paste', function (ev) {
     if (!ac.open || ac.mode !== 'enroll' || !ac._loadEditorImage) return;
@@ -3031,6 +3082,13 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountCanvasButton);
   else mountCanvasButton();
 
+  // Do NOT auto-reopen stale session text on a fresh /c/new page reload; clear stale hash if on /c/new
   var initParsed = parseCanvasHash(window.location.hash || '');
-  if (initParsed) setTimeout(function () { openCanvas(initParsed.mode, initParsed.id); }, 450);
+  if (initParsed) {
+    if (window.location.pathname === '/c/new' || window.location.pathname === '/') {
+      try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch (_) {}
+    } else {
+      setTimeout(function () { openCanvas(initParsed.mode, initParsed.id, true); }, 450);
+    }
+  }
 })();
