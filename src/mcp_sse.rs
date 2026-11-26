@@ -365,51 +365,47 @@ pub fn tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "arkib_detect_faces",
-            "description": "Detect faces in an image using YuNet. Leave image_path empty for chat-attached images.",
+            "description": "Detect faces with YuNet. Leave image_path=\"\" for chat uploads.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "image_path": { "type": "string", "default": "" }
-                }
+                "properties": { "image_path": { "type": "string", "default": "" } }
             }
         }),
         json!({
             "name": "arkib_ocr_document",
-            "description": "Read or transcribe text, handwriting, letters, certificates, or old manuscripts (Modern/Old Jawi, Pallava, Kawi, Rencong, Malay, English, Tamil, Mandarin, Sanskrit) from an uploaded image by slicing dense pages into 3-4 line strips to prevent long-context hallucination. Always leave image_path empty (\"\") for chat uploads, and ALWAYS pass extracted Jawi text into arkib_decode_jawi.",
+            "description": "Slice document/manuscript image into 3-4 line OCR strips with rubrication & Sauvola prep. Leave image_path=\"\" for uploads; pass Jawi to arkib_decode_jawi.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." },
-                    "max_chunks": { "type": "integer", "default": 5, "description": "Maximum horizontal line-valley strips (1-8; default 5 keeps dense Jawi pages to ~3-4 lines per strip)." }
+                    "image_path": { "type": "string", "default": "" },
+                    "max_chunks": { "type": "integer", "default": 5 }
                 }
             }
         }),
         json!({
             "name": "arkib_decode_jawi",
-            "description": "MANDATORY deterministic decoder for ALL Modern Jawi and Old Classical Jawi (Jawi Lama / Hikayat / Surat Diraja / multi-font Unicode & calligraphic kashida variants). Always call this tool on Jawi text or Jawi OCR output instead of translating from memory, and strictly follow its standard_malay_rumi_text without inventing lines.",
+            "description": "Mandatory deterministic Modern & Old Classical Jawi-to-Rumi + Hijri colophon decoder. Always call instead of translating Jawi from memory.",
             "inputSchema": {
                 "type": "object",
                 "required": ["text"],
-                "properties": {
-                    "text": { "type": "string" }
-                }
+                "properties": { "text": { "type": "string" } }
             }
         }),
         json!({
             "name": "arkib_identify_faces",
-            "description": "Recognize or check who is in an uploaded photo against saved people in the database ('who is this?', 'do we know him/her?', 'siapa dalam gambar ini?'). Always leave image_path empty (\"\") for chat uploads.",
+            "description": "Identify faces in an uploaded photo against enrolled people. Leave image_path=\"\" for uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." },
-                    "threshold": { "type": "number", "default": 0.88 },
+                    "image_path": { "type": "string", "default": "" },
+                    "threshold": { "type": "number", "default": 0.0 },
                     "save_new_image": { "type": "boolean", "default": true }
                 }
             }
         }),
         json!({
             "name": "arkib_request_enrollment",
-            "description": "Guest / User tool: Submit an enrollment request for an unknown face. Staged for Admin verification.",
+            "description": "Stage a Guest face enrollment request (REQ-*) for Admin approval.",
             "inputSchema": {
                 "type": "object",
                 "required": ["identity"],
@@ -423,7 +419,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_request_update_metadata",
-            "description": "Request a metadata update. Guest requests are queued for Admin Portal approval; do not ask the user for an admin key.",
+            "description": "Stage a profile/ID-card metadata update for Admin approval.",
             "inputSchema": {
                 "type": "object",
                 "required": ["identity", "proposed_metadata"],
@@ -437,7 +433,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_enroll_named_identity",
-            "description": "Enroll a face for an administrator. Guest requests are queued for Admin Portal approval; never ask the user for an admin key.",
+            "description": "Admin direct face enrollment (auto-stages for Guests).",
             "inputSchema": {
                 "type": "object",
                 "required": ["identity"],
@@ -451,29 +447,27 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_enroll_or_learn",
-            "description": "Direct unsupervised learning. Restricted to admins to avoid false enrollments.",
+            "description": "Admin-only batch face learning.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "image_path": { "type": "string", "default": "" },
-                    "threshold": { "type": "number", "default": 0.88 },
+                    "threshold": { "type": "number", "default": 0.0 },
                     "admin_key": { "type": "string", "default": "" }
                 }
             }
         }),
         json!({
             "name": "arkib_list_pending_requests",
-            "description": "List enrollment and metadata requests with simple #1, #2 numbering for one-word approval (All Roles).",
+            "description": "List pending enrollment, metadata, and OCR approval requests.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "status": { "type": "string", "default": "pending" }
-                }
+                "properties": { "status": { "type": "string", "default": "pending" } }
             }
         }),
         json!({
             "name": "arkib_review_pending_request",
-            "description": "Approve or reject a pending request by number ('1'), person name ('Farid Azizan'), 'latest', or full ID (Admin only).",
+            "description": "Admin-only approve/reject pending request by ID, number, name, or 'latest'.",
             "inputSchema": {
                 "type": "object",
                 "required": ["request_id", "action"],
@@ -487,7 +481,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_rename_identity",
-            "description": "Rename an enrolled identity in vector store and filesystem (Admin only).",
+            "description": "Admin-only rename an enrolled person.",
             "inputSchema": {
                 "type": "object",
                 "required": ["old_identity", "new_identity"],
@@ -500,21 +494,18 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_list_identities",
-            "description": "List all enrolled identities currently stored in the vector database and their reference vector counts (All Roles).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
+            "description": "List all enrolled people and their vector counts.",
+            "inputSchema": { "type": "object", "properties": {} }
         }),
         json!({
             "name": "arkib_search_identity",
-            "description": "Search the local profile database for an enrolled person (case-insensitive), with optional visual attribute query, photo count limit, and photos_only mode. Put the person's name in `identity` and ONLY clothing/visual filters (e.g. 'pakai songkok', 'cermin mata') in `query`.",
+            "description": "Search enrolled person profile & photos. Put person name in `identity` and ONLY clothing/visual filter in `query`.",
             "inputSchema": {
                 "type": "object",
                 "required": ["identity"],
                 "properties": {
-                    "identity": { "type": "string", "description": "Person's name ONLY (e.g. 'Lando Zawawi'). Never omit this." },
-                    "query": { "type": "string", "default": "", "description": "Optional visual/clothing filter ONLY (e.g. 'pakai songkok', 'cermin mata', 'wearing glasses'). Do NOT put the person's name here." },
+                    "identity": { "type": "string" },
+                    "query": { "type": "string", "default": "" },
                     "limit": { "type": "integer", "default": 0 },
                     "photos_only": { "type": "boolean", "default": false }
                 }
@@ -522,7 +513,7 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_delete_identity",
-            "description": "Remove an enrolled identity and all of its vectors from the database (Admin only).",
+            "description": "Admin-only delete an enrolled person and vectors.",
             "inputSchema": {
                 "type": "object",
                 "required": ["identity"],
@@ -535,43 +526,39 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_decode_ancient_script",
-            "description": "Recognize, decode, and transliterate historical Malay & Southeast Asian scripts (Jawi, Pallava, Kawi, Rencong / Surat Ulu) into searchable digital text with archival historical notes.",
+            "description": "Transliterate Jawi, Pallava, Kawi, or Rencong script into Rumi with archival notes.",
             "inputSchema": {
                 "type": "object",
                 "required": ["text"],
                 "properties": {
                     "text": { "type": "string" },
-                    "script": { "type": "string", "default": "auto", "description": "Optional script hint: auto, jawi, pallava, kawi, or rencong" }
+                    "script": { "type": "string", "default": "auto" }
                 }
             }
         }),
         json!({
             "name": "arkib_analyze_image",
-            "description": "All-in-one smart photo & archival check: use for general requests like 'check this', 'what is this?', 'what building/place is this?', 'where was this taken?', 'tell me about this photo', 'semak gambar ini'. Checks file details, date/time/location, authenticity/duplicates, quality/damage, and matches saved buildings or archive halls. Always leave image_path empty (\"\") for chat uploads.",
+            "description": "All-in-one photo check: EXIF/GPS, location match, authenticity, quality, and damage. Leave image_path=\"\" for uploads.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." }
-                }
+                "properties": { "image_path": { "type": "string", "default": "" } }
             }
         }),
         json!({
             "name": "arkib_detect_authenticity",
-            "description": "Deep multi-layer authenticity, AI watermark, and fraud check: inspects C2PA/JUMBF Content Credentials, IPTC DigitalSourceType, XMP/EXIF/PNG metadata, bare stripped JPEG headers, pixel-level ELA splicing/noise/blockiness/LSB watermark probes, archive duplicates, AND runs a dedicated local visual AI audit for visible AI/stock watermarks, impossible composites, and garbled text ('is this real or fake?', 'is this AI?', 'check watermark/metadata', 'do we already have this?', 'gambar ini tulen atau palsu?'). Always leave file_path empty (\"\") for chat uploads.",
+            "description": "4-layer deep authenticity, AI watermark (C2PA/IPTC/EXIF/JPEG/ELA/LSB/Visual AI), and copy detector. Leave file_path=\"\" for uploads.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "file_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded files/images. Never invent 'image.jpg'." }
-                }
+                "properties": { "file_path": { "type": "string", "default": "" } }
             }
         }),
         json!({
             "name": "arkib_summarize_document",
-            "description": "Summarize or explain a long document or pasted text in simple points ('summarize this', 'what is this document about?', 'give me the main points', 'ringkaskan dokumen ini'). Extracts key topics, names, dates, events, and authenticity status.",
+            "description": "Extract & summarize TXT/DOCX/PDF/image documents (topics, names, dates, Hijri colophons, authenticity).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "file_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded files or when using raw text." },
+                    "file_path": { "type": "string", "default": "" },
                     "text": { "type": "string", "default": "" },
                     "language": { "type": "string", "default": "auto" }
                 }
@@ -579,17 +566,15 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_search_locations",
-            "description": "Find or list saved places, buildings, landmarks, rooms, galleries, or wings (e.g. Arkib Negara Malaysia / National Archives of Malaysia). Use for 'show locations', 'list places', 'senarai lokasi', 'cari dewan'.",
+            "description": "List or search saved archival buildings, halls, wings, and landmarks.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "query": { "type": "string", "default": "" }
-                }
+                "properties": { "query": { "type": "string", "default": "" } }
             }
         }),
         json!({
             "name": "arkib_search_documents",
-            "description": "Find or list saved archival documents, manuscripts, letters, or records ('show documents', 'find files about...', 'senarai dokumen', 'cari manuskrip').",
+            "description": "List or search saved archival documents and manuscripts.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -600,42 +585,35 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "arkib_assess_conservation",
-            "description": "Check photo/scan quality (clarity, brightness, readability), spot damage (tears, fading, mould/fungus, yellowing/old paper) rated light/medium/heavy, check if real/AI/duplicate, and suggest how to repair, clean, dry, coat, or preserve the item ('is this damaged/spoilt?', 'how to fix/preserve this old document?', 'gambar ini rosak tak?', 'semak kualiti & kerosakan'). Always leave image_path empty (\"\") for chat uploads.",
+            "description": "Check scan quality, damage (tear/faded/mold/aging), authenticity, and physical healing steps. Leave image_path=\"\" for uploads.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." }
-                }
+                "properties": { "image_path": { "type": "string", "default": "" } }
             }
         }),
         json!({
             "name": "arkib_enhance_image",
-            "description": "Improve, clean up, brighten, sharpen, or restore a blurry, dark, faded, or yellowed photo/scan ('make this clearer', 'fix this dark/old photo', 'brighten/sharpen this', 'jelaskan/baiki gambar ini'). Always leave image_path empty (\"\") for chat uploads.",
+            "description": "Enhance dark, blurry, faded, or yellowed photo/scan (auto/manuscript_ocr/deyellow_restore/contrast_lighting/denoise_sharpen). Leave image_path=\"\" for uploads.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "image_path": { "type": "string", "default": "", "description": "Leave empty (\"\") for chat-uploaded images. Never invent 'image.jpg'." },
-                    "mode": { "type": "string", "default": "auto", "description": "auto, manuscript_ocr, deyellow_restore, contrast_lighting, or denoise_sharpen" }
+                    "image_path": { "type": "string", "default": "" },
+                    "mode": { "type": "string", "default": "auto" }
                 }
             }
         }),
         json!({
             "name": "arkib_verify_integrity",
-            "description": "Check if all saved archive files are safe, intact, not corrupted or changed, and find any duplicate files ('are our files safe?', 'check for broken/corrupted/duplicate files', 'semak fail rosak atau pendua', 'audit integriti fail').",
+            "description": "Audit SHA-256 file integrity and duplicates across all archive folders.",
             "inputSchema": {
                 "type": "object",
-                "properties": {
-                    "update_manifest": { "type": "boolean", "default": true }
-                }
+                "properties": { "update_manifest": { "type": "boolean", "default": true } }
             }
         }),
         json!({
             "name": "arkib_system_health",
-            "description": "Check how the system/server is running: speed, memory, CPU, storage space, problems/overload, and what actions to take ('how is the system doing?', 'is the server okay or slow?', 'any system issues?', 'sistem ok ke?', 'kenapa lambat?').",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
+            "description": "Check live server CPU, RAM, Disk, Ollama latency, workload, and overload advice.",
+            "inputSchema": { "type": "object", "properties": {} }
         }),
     ]
 }

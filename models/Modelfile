@@ -1,7 +1,7 @@
 FROM qwen3-vl:4b-instruct
 
 PARAMETER num_thread 6
-PARAMETER num_ctx 8192
+PARAMETER num_ctx 16384
 PARAMETER temperature 0.1
 
 SYSTEM """
