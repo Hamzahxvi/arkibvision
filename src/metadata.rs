@@ -4,7 +4,7 @@ use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::sync::OnceLock;
 
-pub const PRIVATE_KEYS: [&str; 23] = [
+pub const PRIVATE_KEYS: [&str; 37] = [
     "license_no",
     "dob",
     "date_of_birth",
@@ -16,17 +16,31 @@ pub const PRIVATE_KEYS: [&str; 23] = [
     "email",
     "exp",
     "no_kp",
+    "nombor_kp",
     "no_ic",
+    "nombor_ic",
     "no_mykad",
+    "nombor_mykad",
     "mykad",
     "kad_pengenalan",
+    "no_kad_pengenalan",
+    "nombor_kad_pengenalan",
     "tarikh_lahir",
     "no_lesen",
+    "nombor_lesen",
+    "lesen_memandu",
     "no_pasport",
+    "nombor_pasport",
     "no_telefon",
+    "nombor_telefon",
+    "no_tel",
+    "no_hp",
     "telefon",
+    "telefon_bimbit",
     "emel",
+    "alamat_emel",
     "tarikh_luput",
+    "tarikh_tamat",
     "tamat_tempoh",
 ];
 

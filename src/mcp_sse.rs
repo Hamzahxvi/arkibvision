@@ -512,13 +512,13 @@ pub fn tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "rojakface_search_identity",
-            "description": "Search the local profile database for an enrolled person (case-insensitive), with optional visual attribute query, photo count limit, and photos_only mode.",
+            "description": "Search the local profile database for an enrolled person (case-insensitive), with optional visual attribute query, photo count limit, and photos_only mode. Put the person's name in `identity` and ONLY clothing/visual filters (e.g. 'pakai songkok', 'cermin mata') in `query`.",
             "inputSchema": {
                 "type": "object",
                 "required": ["identity"],
                 "properties": {
-                    "identity": { "type": "string" },
-                    "query": { "type": "string", "default": "" },
+                    "identity": { "type": "string", "description": "Person's name ONLY (e.g. 'Lando Zawawi'). Never omit this." },
+                    "query": { "type": "string", "default": "", "description": "Optional visual/clothing filter ONLY (e.g. 'pakai songkok', 'cermin mata', 'wearing glasses'). Do NOT put the person's name here." },
                     "limit": { "type": "integer", "default": 0 },
                     "photos_only": { "type": "boolean", "default": false }
                 }

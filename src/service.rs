@@ -307,6 +307,16 @@ impl RojakFaceService {
                     | "attached_image.png"
                     | "input.jpg"
                     | "input.png"
+                    | "gambar"
+                    | "gambar.jpg"
+                    | "gambar.jpeg"
+                    | "gambar.png"
+                    | "foto"
+                    | "foto.jpg"
+                    | "foto.png"
+                    | "fail"
+                    | "dokumen"
+                    | "lampiran"
             );
 
         if !is_placeholder {
@@ -2157,17 +2167,53 @@ impl RojakFaceService {
         limit: i64,
         photos_only: bool,
     ) -> Value {
-        let requested = identity.trim();
+        let known_counts = self.store.list_counts();
+        let known_names: Vec<String> = known_counts.keys().cloned().collect();
+
+        let mut requested = identity.trim().to_string();
+        let mut effective_query = query.trim().to_string();
+
+        // Recover gracefully if the LLM placed the person's name inside `query` and left `identity` empty
+        // (common with colloquial Bahasa Malaysia prompts like "tunjuk 2 gambar Lando Zawawi pakai songkok").
+        if requested.is_empty() && !effective_query.is_empty() {
+            let q_low = effective_query.to_ascii_lowercase();
+            let q_norm = normalize_alnum_lower(&effective_query);
+            let mut matched_name: Option<String> = known_names
+                .iter()
+                .filter(|n| {
+                    let nl = n.to_ascii_lowercase();
+                    let nn = normalize_alnum_lower(n);
+                    q_low.contains(&nl) || (!nn.is_empty() && q_norm.contains(&nn))
+                })
+                .max_by_key(|n| n.len())
+                .cloned();
+            if matched_name.is_none() {
+                matched_name = Some(effective_query.clone());
+            }
+            if let Some(name) = matched_name {
+                // Strip the matched name from effective_query so leftover words remain as the visual filter.
+                let nl = name.to_ascii_lowercase();
+                if let Some(pos) = q_low.find(&nl) {
+                    let mut rest = String::new();
+                    rest.push_str(&effective_query[..pos]);
+                    rest.push(' ');
+                    rest.push_str(&effective_query[pos + nl.len()..]);
+                    effective_query = rest.trim().to_string();
+                } else if q_low == nl {
+                    effective_query.clear();
+                }
+                requested = name;
+            }
+        }
+
         if requested.is_empty() {
             return json!({ "status": "rejected", "reason": "Provide an identity name." });
         }
-        let known_counts = self.store.list_counts();
-        let known_names: Vec<String> = known_counts.keys().cloned().collect();
-        let norm_req = normalize_alnum_lower(requested);
+        let norm_req = normalize_alnum_lower(&requested);
 
         let mut canonical = known_names
             .iter()
-            .find(|n| n.eq_ignore_ascii_case(requested))
+            .find(|n| n.eq_ignore_ascii_case(&requested))
             .cloned();
         if canonical.is_none() && !norm_req.is_empty() {
             canonical = known_names
@@ -2193,6 +2239,30 @@ impl RojakFaceService {
                     "identity": requested,
                     "matching_identities": partial,
                 });
+            } else {
+                // Handle the reverse case: LLM put "Lando Zawawi pakai songkok" inside `identity`.
+                if let Some(found) = known_names
+                    .iter()
+                    .filter(|n| {
+                        let nl = n.to_ascii_lowercase();
+                        let nn = normalize_alnum_lower(n);
+                        req_low.contains(&nl) || (!nn.is_empty() && norm_req.contains(&nn))
+                    })
+                    .max_by_key(|n| n.len())
+                    .cloned()
+                {
+                    let nl = found.to_ascii_lowercase();
+                    if effective_query.is_empty()
+                        && let Some(pos) = req_low.find(&nl)
+                    {
+                        let mut rest = String::new();
+                        rest.push_str(&requested[..pos]);
+                        rest.push(' ');
+                        rest.push_str(&requested[pos + nl.len()..]);
+                        effective_query = rest.trim().to_string();
+                    }
+                    canonical = Some(found);
+                }
             }
         }
         let Some(canonical) = canonical else {
@@ -2204,7 +2274,7 @@ impl RojakFaceService {
         };
 
         if let Some(mut display_profile) = self.public_profile_display(&canonical) {
-            let clean_query = query.trim();
+            let clean_query = effective_query.trim();
             let mut imgs = display_profile["images"]
                 .as_array()
                 .cloned()
@@ -2559,7 +2629,7 @@ fn expand_bilingual_query_groups(query: &str) -> Vec<Vec<String>> {
         "person",
         "holding",
         "hold",
-        // Bahasa Melayu
+        // Bahasa Melayu (Formal + Colloquial / Bahasa Pasar)
         "yang",
         "pakai",
         "memakai",
@@ -2570,9 +2640,27 @@ fn expand_bilingual_query_groups(query: &str) -> Vec<Vec<String>> {
         "tunjukkan",
         "papar",
         "paparkan",
+        "cari",
+        "carikan",
+        "tolong",
+        "bagi",
+        "cek",
+        "cekkan",
+        "semak",
         "sahaja",
         "saja",
         "je",
+        "jer",
+        "ja",
+        "ni",
+        "tu",
+        "la",
+        "lah",
+        "jap",
+        "kejap",
+        "nak",
+        "mahu",
+        "hendak",
         "dengan",
         "di",
         "dalam",
@@ -2603,7 +2691,15 @@ fn expand_bilingual_query_groups(query: &str) -> Vec<Vec<String>> {
             &["cermin mata", "glasses", "spectacles", "eyewear"],
         ),
         (
+            "bercermin mata",
+            &["cermin mata", "glasses", "spectacles", "eyewear"],
+        ),
+        (
             "kaca mata",
+            &["kaca mata", "glasses", "spectacles", "eyewear"],
+        ),
+        (
+            "berkaca mata",
             &["kaca mata", "glasses", "spectacles", "eyewear"],
         ),
         ("baju petak", &["baju petak", "plaid", "checkered"]),
@@ -2611,14 +2707,30 @@ fn expand_bilingual_query_groups(query: &str) -> Vec<Vec<String>> {
         ("topi lanun", &["topi lanun", "pirate"]),
         ("tali leher", &["tali leher", "tie", "necktie"]),
         ("baju melayu", &["baju melayu", "traditional", "malay"]),
+        ("baju kurung", &["baju kurung", "traditional", "kurung"]),
+        ("baju batik", &["batik", "shirt"]),
         ("rambut biru", &["rambut biru", "blue hair"]),
+        ("luar bangunan", &["outdoor", "outside"]),
+        ("dalam bangunan", &["indoor", "inside"]),
     ];
     const SYNONYMS: &[(&str, &[&str])] = &[
         ("spek", &["spek", "glasses", "spectacles", "eyewear"]),
         ("bercermin", &["bercermin", "glasses", "spectacles"]),
         ("songkok", &["songkok", "peci", "cap"]),
+        ("bersongkok", &["songkok", "peci", "cap"]),
         ("kopiah", &["kopiah", "skullcap", "taqiyah", "cap"]),
+        ("berkopiah", &["kopiah", "skullcap", "taqiyah", "cap"]),
+        (
+            "tanjak",
+            &["tanjak", "tengkolok", "headgear", "traditional"],
+        ),
+        ("tengkolok", &["tengkolok", "tanjak", "headgear"]),
+        ("serban", &["serban", "turban"]),
         ("tudung", &["tudung", "hijab", "headscarf"]),
+        ("bertudung", &["tudung", "hijab", "headscarf"]),
+        ("selendang", &["selendang", "shawl", "scarf"]),
+        ("sampin", &["sampin", "samping", "traditional"]),
+        ("kebaya", &["kebaya", "traditional"]),
         ("topi", &["topi", "hat", "cap"]),
         ("lanun", &["lanun", "pirate"]),
         ("petak", &["petak", "plaid", "checkered"]),
@@ -2627,15 +2739,29 @@ fn expand_bilingual_query_groups(query: &str) -> Vec<Vec<String>> {
         ("baju", &["baju", "shirt", "attire", "top"]),
         ("kemeja", &["kemeja", "shirt", "collared"]),
         ("kot", &["kot", "suit", "blazer", "jacket", "coat"]),
+        ("berkot", &["kot", "suit", "blazer", "jacket"]),
         ("sut", &["sut", "suit", "blazer"]),
+        ("bersut", &["sut", "suit", "blazer"]),
         ("jaket", &["jaket", "jacket"]),
         ("batik", &["batik"]),
         ("seragam", &["seragam", "uniform"]),
+        ("berseragam", &["seragam", "uniform"]),
         ("tentera", &["tentera", "military", "uniform"]),
         ("mikrofon", &["mikrofon", "microphone", "mic"]),
+        ("pentas", &["pentas", "stage", "podium"]),
+        ("podium", &["podium", "stage", "lectern"]),
+        ("bendera", &["bendera", "flag"]),
+        ("berucap", &["speaking", "speech", "microphone", "stage"]),
+        ("bercakap", &["speaking", "talking", "microphone"]),
+        ("berdiri", &["standing"]),
+        ("duduk", &["sitting", "seated"]),
         ("janggut", &["janggut", "beard"]),
+        ("berjanggut", &["janggut", "beard"]),
         ("misai", &["misai", "mustache", "moustache"]),
+        ("bermisai", &["misai", "mustache", "moustache"]),
         ("senyum", &["senyum", "smiling", "smile"]),
+        ("tersenyum", &["senyum", "smiling", "smile"]),
+        ("ketawa", &["laughing", "smiling", "smile"]),
         ("hitam", &["hitam", "black"]),
         ("putih", &["putih", "white"]),
         ("biru", &["biru", "blue"]),
@@ -2708,6 +2834,18 @@ mod tests {
         assert!(matches_caption(
             "memegang mikrofon",
             "Speaker holding a microphone on stage"
+        ));
+        assert!(matches_caption(
+            "tolong tunjuk gambar dia bersongkok hitam je",
+            "Formal portrait wearing a black songkok"
+        ));
+        assert!(matches_caption(
+            "carikan gambar yang bertudung biru",
+            "Portrait of a woman wearing a blue hijab"
+        ));
+        assert!(matches_caption(
+            "gambar berucap di pentas",
+            "Speaker giving a speech on stage with a microphone"
         ));
         assert!(!matches_caption(
             "pakai cermin mata",

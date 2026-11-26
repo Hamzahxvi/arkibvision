@@ -939,19 +939,89 @@ pub fn extract_document_structure(text: &str) -> Value {
     });
     let name_re = NAME_RE.get_or_init(|| {
         Regex::new(
-            r"\b(?:[A-Z][a-z]{2,}(?:\s+(?:bin|binti|al-|ibn|of|the|&|[A-Z][a-z]{2,})){1,4})\b",
+            r"\b(?:(?:Tun|Tan\s+Sri|Datuk|Dato'?|Datin|Tunku|Tuanku|Sultan|Raja|Tuan|Puan|Encik|Cik|Haji|Hajah|Dr\.|Prof\.|Sir)\s+)?(?:[A-Z][a-zA-Z'-]{2,}(?:\s+(?:bin|binti|al-|Al-|ibn|of|the|&|[A-Z][a-zA-Z'-]{2,})){1,5})\b",
         )
         .expect("name regex")
     });
     let word_re = WORD_RE.get_or_init(|| Regex::new(r"[A-Za-z]{4,}").expect("word regex"));
 
     const STOP: &[&str] = &[
-        "that", "this", "with", "from", "have", "were", "been", "their", "which", "about", "there",
-        "would", "could", "should", "into", "more", "other", "also", "such", "than", "when",
-        "what", "where", "they", "them", "these", "those", "will", "your", "only", "very", "after",
-        "before", "yang", "untuk", "dengan", "dalam", "pada", "adalah", "ialah", "atau", "juga",
-        "oleh", "dari", "daripada", "kepada", "telah", "akan", "tidak", "bukan", "bagi", "sebagai",
-        "tersebut", "bahawa", "dapat", "boleh", "antara", "serta", "secara", "lebih", "semua",
+        "that",
+        "this",
+        "with",
+        "from",
+        "have",
+        "were",
+        "been",
+        "their",
+        "which",
+        "about",
+        "there",
+        "would",
+        "could",
+        "should",
+        "into",
+        "more",
+        "other",
+        "also",
+        "such",
+        "than",
+        "when",
+        "what",
+        "where",
+        "they",
+        "them",
+        "these",
+        "those",
+        "will",
+        "your",
+        "only",
+        "very",
+        "after",
+        "before",
+        "yang",
+        "untuk",
+        "dengan",
+        "dalam",
+        "pada",
+        "adalah",
+        "ialah",
+        "atau",
+        "juga",
+        "oleh",
+        "dari",
+        "daripada",
+        "kepada",
+        "telah",
+        "akan",
+        "tidak",
+        "bukan",
+        "bagi",
+        "sebagai",
+        "tersebut",
+        "bahawa",
+        "dapat",
+        "boleh",
+        "antara",
+        "serta",
+        "secara",
+        "lebih",
+        "semua",
+        "merupakan",
+        "seperti",
+        "kerana",
+        "tetapi",
+        "namun",
+        "supaya",
+        "hingga",
+        "sehingga",
+        "melalui",
+        "terhadap",
+        "mengikut",
+        "berdasarkan",
+        "selain",
+        "kini",
+        "pihak",
     ];
 
     let mut dates = Vec::new();
@@ -1040,10 +1110,11 @@ pub async fn summarize_with_ollama(
     }
     let lang_rule = if language_hint.eq_ignore_ascii_case("ms")
         || language_hint.eq_ignore_ascii_case("malay")
+        || language_hint.eq_ignore_ascii_case("bm")
     {
-        "Write in natural Standard Bahasa Melayu (Malaysia)."
+        "Write strictly in natural Standard Bahasa Malaysia (DBP). Use Malaysian terms (maklumat, boleh, pejabat, kulat, merosakkan, asas perundangan, cabaran, adakah, gambar, pemasyhuran, pemuliharaan) — NEVER Indonesian terms (informasi, bisa, kantor, jamur, merusak, dasar hukum, tantangan, apakah, foto, kesulitan)."
     } else {
-        "Reply in the same language as the document (English or Standard Bahasa Melayu Malaysia)."
+        "Reply in the same language as the document (English or Standard Bahasa Malaysia DBP). If replying in Bahasa Malaysia, use Malaysian DBP terms (maklumat, boleh, pejabat, kulat, merosakkan, asas perundangan, adakah, pemasyhuran) and avoid Indonesian vocabulary (informasi, bisa, kantor, jamur, merusak, dasar hukum, apakah, tantangan)."
     };
     let body = json!({
         "model": cfg.vision_model,
@@ -1054,7 +1125,7 @@ pub async fn summarize_with_ollama(
         "messages": [{
             "role": "user",
             "content": format!(
-                "Generate a concise archival description and structured summary of this document preserving its exact original context and meaning. Include main purpose, key topics, people/organizations, dates, and events. Do NOT invent facts. {lang_rule}\n\nDOCUMENT:\n{clipped}"
+                "Generate a concise archival description and structured summary of this document preserving its exact original context, roles, and meaning (pay strict attention to who acted on behalf of whom, e.g. 'bagi pihak X' means representing X). Include main purpose, key topics, people/organizations, dates, and events. Do NOT invent facts. {lang_rule}\n\nDOCUMENT:\n{clipped}"
             )
         }]
     });
