@@ -2812,3 +2812,128 @@ html:not(.dark) .rf-ai-desc-box {
   gap: 8px;
   flex-wrap: wrap;
 }
+
+/* ─── Structured Audit Anomaly Findings (High-Readability Executive Layout) ─── */
+.rf-aud-review-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 10px;
+}
+.rf-aud-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  font-size: 0.82rem;
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
+}
+html:not(.dark) .rf-aud-meta-strip {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+.rf-aud-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rf-aud-sec-head {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--arkib-text-muted, rgb(var(--text-secondary, 148 163 184)));
+}
+.rf-aud-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.rf-aud-finding-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-left: 4px solid #f59e0b;
+  background: var(--arkib-surface, rgb(var(--surface-primary, 15 23 42)));
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.rf-aud-finding-card.rf-aud-sev-critical,
+.rf-aud-finding-card.rf-aud-sev-high {
+  border-left-color: #ef4444;
+}
+.rf-aud-finding-card.rf-aud-sev-medium {
+  border-left-color: #f59e0b;
+}
+.rf-aud-finding-card.rf-aud-sev-low {
+  border-left-color: #10b981;
+}
+.rf-aud-finding-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rf-aud-finding-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
+}
+.rf-aud-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
+  word-break: break-all;
+}
+.rf-aud-finding-meta {
+  margin-left: auto;
+  font-size: 0.76rem;
+  color: var(--arkib-text-muted, rgb(var(--text-secondary, 148 163 184)));
+}
+.rf-aud-finding-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
+  overflow-wrap: anywhere;
+}
+.rf-aud-rec {
+  padding: 8px 11px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  font-size: 0.81rem;
+  line-height: 1.45;
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
+}
+html:not(.dark) .rf-aud-rec {
+  background: rgba(37, 99, 235, 0.07);
+  border-color: rgba(37, 99, 235, 0.22);
+}
+.rf-aud-ai-prose {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: var(--arkib-surface, rgb(var(--surface-primary, 15 23 42)));
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
+}
+.rf-aud-ai-prose p {
+  margin: 0 0 8px;
+}
+.rf-aud-ai-prose p:last-child {
+  margin-bottom: 0;
+}
+.rf-aud-ai-bullet {
+  padding: 3px 0 3px 6px;
+}

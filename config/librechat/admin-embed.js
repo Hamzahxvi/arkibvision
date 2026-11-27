@@ -3051,8 +3051,123 @@
       ? '✅ All Clear — No Security or Access Anomalies Detected'
       : '⚠️ ' + (alertCount + outlierCount) + ' Anomaly Finding(s) Require Admin Review';
 
-    var summaryBodyHtml = state.auditAiExplanation
-      ? '<div class="rf-explain-rich">' + esc(state.auditAiExplanation).replace(/\n/g, '<br/>') + '</div>'
+    var sourceLabel = state.auditAiSource
+      ? (String(state.auditAiSource).toLowerCase().indexOf('fallback') !== -1
+        ? '🛡️ Rules & Statistical Engine'
+        : '✨ Local AI Analysis')
+      : '';
+
+    function fmtDurHuman(msVal) {
+      var n = Number(msVal || 0);
+      if (n >= 1000) return (n / 1000).toFixed(1) + ' s';
+      return Math.round(n) + ' ms';
+    }
+
+    function formatOutlierText(raw) {
+      return String(raw || '').replace(/(\d{4,})\s*ms\b/g, function (_, num) {
+        return fmtDurHuman(Number(num));
+      });
+    }
+
+    function renderStructuredAnomalyBody() {
+      var parts = [];
+      var rules = Array.isArray(snap.rule_alerts) ? snap.rule_alerts : [];
+      var outliers = Array.isArray(snap.statistical_outliers) ? snap.statistical_outliers : [];
+
+      parts.push(
+        '<div class="rf-aud-meta-strip">' +
+        '<span><b>Risk Level:</b> <span class="rf-badge ' + sevCls(snap.risk_level) + '">' + esc(snap.risk_level) + ' · ' + Number(snap.risk_score || 0) + '/100</span></span>' +
+        '<span><b>Scope:</b> ' + Number(snap.total_events_analyzed || 0) + ' analyzed events</span>' +
+        '<span><b>Last Checked:</b> ' + esc(fmtTime(snap.generated_at)) + '</span>' +
+        '</div>'
+      );
+
+      if (rules.length) {
+        parts.push(
+          '<div class="rf-aud-sec">' +
+          '<div class="rf-aud-sec-head">🚨 Security &amp; Access Rules Flagged (' + rules.length + ')</div>' +
+          '<div class="rf-aud-card-list">' +
+          rules.map(function (a) {
+            return '<div class="rf-aud-finding-card rf-aud-sev-' + esc(String(a.severity || 'MEDIUM').toLowerCase()) + '">' +
+              '<div class="rf-aud-finding-top">' +
+              '<span class="rf-badge ' + sevCls(a.severity) + '">' + esc(a.severity) + '</span>' +
+              '<strong class="rf-aud-finding-title">' + esc(a.title || a.rule_id) + '</strong>' +
+              '<code class="rf-aud-code">' + esc(a.rule_id || '') + '</code>' +
+              (a.actor || a.timestamp ? '<span class="rf-aud-finding-meta">' + esc(a.actor || '') + (a.timestamp ? ' · ' + esc(fmtTime(a.timestamp)) : '') + '</span>' : '') +
+              '</div>' +
+              '<p class="rf-aud-finding-desc">' + esc(a.description || '') + '</p>' +
+              (a.recommended_action
+                ? '<div class="rf-aud-rec"><span>💡 <b>Recommended Action:</b> ' + esc(a.recommended_action) + '</span></div>'
+                : '') +
+              '</div>';
+          }).join('') +
+          '</div></div>'
+        );
+      }
+
+      if (outliers.length) {
+        // Group identical outlier explanations/endpoints so repeated spikes read cleanly with a count badge
+        var grouped = [];
+        var gMap = {};
+        outliers.forEach(function (o) {
+          var key = String(o.metric || '') + '|' + String(o.severity || '') + '|' + String(o.explanation || '').replace(/\d+(\.\d+)?\s*ms/g, 'MS');
+          if (!gMap[key]) {
+            gMap[key] = { item: o, count: 1, maxVal: Number(o.observed_value || 0), maxZ: Number(o.z_score || 0) };
+            grouped.push(gMap[key]);
+          } else {
+            gMap[key].count += 1;
+            gMap[key].maxVal = Math.max(gMap[key].maxVal, Number(o.observed_value || 0));
+            gMap[key].maxZ = Math.max(gMap[key].maxZ, Number(o.z_score || 0));
+          }
+        });
+
+        parts.push(
+          '<div class="rf-aud-sec">' +
+          '<div class="rf-aud-sec-head">📈 Behavioral &amp; Latency Outliers (' + outliers.length + ')</div>' +
+          '<div class="rf-aud-card-list">' +
+          grouped.map(function (g) {
+            var o = g.item;
+            var prettyExp = formatOutlierText(o.explanation || '');
+            var epMatch = prettyExp.match(/'([^']+)'/);
+            var epBadge = epMatch ? '<code class="rf-aud-code">' + esc(epMatch[1]) + '</code>' : '';
+            var metricLabel = String(o.metric || 'latency_outlier').replace(/_/g, ' ');
+            return '<div class="rf-aud-finding-card rf-aud-sev-' + esc(String(o.severity || 'MEDIUM').toLowerCase()) + '">' +
+              '<div class="rf-aud-finding-top">' +
+              '<span class="rf-badge ' + sevCls(o.severity) + '">' + esc(o.severity) + '</span>' +
+              '<strong class="rf-aud-finding-title" style="text-transform:capitalize">' + esc(metricLabel) + '</strong>' +
+              epBadge +
+              '<span class="rf-badge rf-badge-info">Z = ' + Number(g.maxZ || o.z_score || 0).toFixed(2) + '</span>' +
+              (g.count > 1 ? '<span class="rf-badge rf-badge-warn">' + g.count + '× occurrences</span>' : '') +
+              '</div>' +
+              '<p class="rf-aud-finding-desc">' + esc(prettyExp) + '</p>' +
+              '</div>';
+          }).join('') +
+          '</div></div>'
+        );
+      }
+
+      // If real Ollama LLM prose was generated (not deterministic_fallback), show formatted AI summary too
+      if (state.auditAiExplanation && String(state.auditAiSource || '').toLowerCase().indexOf('fallback') === -1) {
+        var lines = String(state.auditAiExplanation).split(/\r?\n/).map(function (ln) { return ln.trim(); }).filter(Boolean);
+        parts.push(
+          '<div class="rf-aud-sec">' +
+          '<div class="rf-aud-sec-head">✨ AI Executive Assessment</div>' +
+          '<div class="rf-aud-ai-prose">' +
+          lines.map(function (ln) {
+            if (ln.indexOf('- ') === 0 || ln.indexOf('* ') === 0) {
+              return '<div class="rf-aud-ai-bullet">• ' + esc(ln.slice(2)) + '</div>';
+            }
+            return '<p>' + esc(ln) + '</p>';
+          }).join('') +
+          '</div></div>'
+        );
+      }
+
+      return '<div class="rf-aud-review-wrap">' + parts.join('') + '</div>';
+    }
+
+    var summaryBodyHtml = (state.auditAiExplanation || alertCount > 0 || outlierCount > 0)
+      ? renderStructuredAnomalyBody()
       : '<div class="rf-sum-grid">' +
         '<div class="rf-sum-cell"><span class="rf-sum-lbl">Last Checked</span><strong>' + esc(fmtTime(snap.generated_at)) + '</strong></div>' +
         '<div class="rf-sum-cell"><span class="rf-sum-lbl">Activity Monitored</span><strong>' + Number(snap.total_events_analyzed || 0) + ' event(s)</strong></div>' +
@@ -3130,7 +3245,11 @@
       '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Tracked Changes</div><div class="rf-kpi-val">' + allRevs.length + '</div></div>' +
       '</div>' +
       '<div class="rf-callout ' + calloutTone + '">' +
-      '<div class="rf-callout-title">' + statusHeadline + (state.auditAiSource ? ' <span class="rf-badge rf-badge-info">' + esc(state.auditAiSource) + '</span>' : '') + '</div>' +
+      '<div class="rf-callout-title" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>' + statusHeadline + '</span>' +
+      (sourceLabel ? '<span class="rf-badge rf-badge-info">' + esc(sourceLabel) + '</span>' : '') + '</div>' +
+      (state.auditAiExplanation ? '<button type="button" class="rf-btn rf-btn-sm" id="rf-aud-clear-exp">✕ Dismiss</button>' : '') +
+      '</div>' +
       summaryBodyHtml +
       '</div>' +
       diskHtml +
@@ -3181,6 +3300,14 @@
       }).join('') : '<tr><td colspan="6" style="text-align:center;color:rgb(var(--text-secondary))">No audit events recorded yet.</td></tr>') +
       '</tbody></table></div></div>';
 
+    var clrExpBtn = document.getElementById('rf-aud-clear-exp');
+    if (clrExpBtn) {
+      clrExpBtn.onclick = function () {
+        state.auditAiExplanation = '';
+        state.auditAiSource = '';
+        renderAudit(body);
+      };
+    }
     body.querySelectorAll('[data-rf-ch-flt]').forEach(function (b) {
       b.onclick = function () {
         state.auditChangeFilter = b.getAttribute('data-rf-ch-flt');
