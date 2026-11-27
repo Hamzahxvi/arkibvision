@@ -49,6 +49,12 @@
     health: null,
     integrity: null,
     labHtml: '',
+    labFile: null,
+    labFileName: '',
+    labPreviewUrl: '',
+    labMode: 'auto',
+    labEnhancedUrl: '',
+    labEnhancedMeta: null,
     testResultHtml: '',
     testPreview: '',
     testFile: null,
@@ -3668,19 +3674,108 @@
       '<button type="button" class="rf-btn rf-btn-ok" id="rf-sys-clr">🧹 Clear Temp Image Cache</button>' +
       '</div>' + intgHtml +
       '<div class="rf-box" style="margin-top:18px"><h3>🧪 Archival Image Quality, Damage &amp; Enhancement Lab</h3>' +
-      '<p style="color:rgb(var(--text-secondary));margin-bottom:10px">Upload a photo or manuscript scan to check quality, detect tears/fading/mold/aging (light/medium/heavy), check authenticity, get physical healing suggestions, or enhance image clarity.</p>' +
+      '<p style="color:rgb(var(--text-secondary));margin-bottom:10px">Upload a photo or manuscript scan to preview it immediately, inspect quality/damage/authenticity, or enhance clarity with side-by-side Before vs. After comparison.</p>' +
       '<div class="rf-toolbar" style="margin-bottom:10px">' +
       '<input class="rf-input" id="rf-lab-file" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp"/>' +
       '<select class="rf-select" id="rf-lab-mode">' +
-      '<option value="auto">Mode: Auto Archival Restore</option>' +
-      '<option value="manuscript_ocr">Mode: Manuscript OCR Boost</option>' +
-      '<option value="deyellow_restore">Mode: De-Yellow &amp; Paper Restore</option>' +
-      '<option value="contrast_lighting">Mode: Lighting &amp; Contrast Fix</option>' +
-      '<option value="denoise_sharpen">Mode: Crisp Sharpen</option>' +
+      '<option value="auto"' + (state.labMode === 'auto' ? ' selected' : '') + '>Mode: Auto Archival Restore</option>' +
+      '<option value="manuscript_ocr"' + (state.labMode === 'manuscript_ocr' ? ' selected' : '') + '>Mode: Manuscript OCR Boost</option>' +
+      '<option value="deyellow_restore"' + (state.labMode === 'deyellow_restore' ? ' selected' : '') + '>Mode: De-Yellow &amp; Paper Restore</option>' +
+      '<option value="contrast_lighting"' + (state.labMode === 'contrast_lighting' ? ' selected' : '') + '>Mode: Lighting &amp; Contrast Fix</option>' +
+      '<option value="denoise_sharpen"' + (state.labMode === 'denoise_sharpen' ? ' selected' : '') + '>Mode: Crisp Sharpen</option>' +
       '</select>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="rf-lab-ana">🔬 Analyze Quality &amp; Damage</button>' +
       '<button type="button" class="rf-btn rf-btn-ok" id="rf-lab-enh">✨ Enhance Image</button>' +
-      '</div><div id="rf-lab-out">' + state.labHtml + '</div></div>';
+      (state.labFile ? '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" id="rf-lab-clr">' + TRASH_SVG + '<span>Clear</span></button>' : '') +
+      '</div>' +
+      '<div id="rf-lab-stage"></div>' +
+      '<div id="rf-lab-out">' + state.labHtml + '</div></div>';
+
+    function renderLabStage() {
+      var stageEl = document.getElementById('rf-lab-stage');
+      if (!stageEl) return;
+      if (!state.labPreviewUrl) {
+        stageEl.innerHTML = '';
+        return;
+      }
+      var sizeKb = state.labFile && state.labFile.size ? ' (' + Math.max(1, Math.round(state.labFile.size / 1024)) + ' KB)' : '';
+      if (state.labEnhancedUrl) {
+        var meta = state.labEnhancedMeta || {};
+        var bq = meta.before_quality || {};
+        var aq = meta.after_quality || {};
+        stageEl.innerHTML =
+          '<div class="rf-lab-compare-wrap">' +
+          '<div class="rf-lab-compare-head">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+          '<span class="rf-badge rf-badge-ok">✨ Enhanced (' + esc(meta.mode || state.labMode || 'auto') + ')</span>' +
+          (bq.overall_score != null && aq.overall_score != null
+            ? '<span class="rf-badge rf-badge-info">Quality: ' + esc(bq.overall_score) + ' → ' + esc(aq.overall_score) + '/100</span>'
+            : '') +
+          (bq.readability && aq.readability
+            ? '<span class="rf-badge rf-badge-info">Readability: ' + esc(bq.readability.score) + ' → ' + esc(aq.readability.score) + '</span>'
+            : '') +
+          '</div>' +
+          '<a class="rf-btn rf-btn-sm" href="' + esc(state.labEnhancedUrl) + '" download="enhanced_' + esc(state.labFileName || 'image.png') + '">⬇️ Download Enhanced</a>' +
+          '</div>' +
+          '<div class="rf-lab-compare-grid">' +
+          '<div class="rf-lab-img-card">' +
+          '<div class="rf-lab-img-head"><span class="rf-badge rf-badge-warn">BEFORE · ORIGINAL</span><span class="rf-lab-img-name">' + esc(state.labFileName) + esc(sizeKb) + '</span></div>' +
+          '<div class="rf-lab-img-frame"><img src="' + esc(state.labPreviewUrl) + '" id="rf-lab-before-img" alt="Original uploaded image"/></div>' +
+          '</div>' +
+          '<div class="rf-lab-img-card rf-lab-img-card-after">' +
+          '<div class="rf-lab-img-head"><span class="rf-badge rf-badge-ok">AFTER · ENHANCED</span><span class="rf-lab-img-name">' + esc(meta.mode || state.labMode || 'auto') + '</span></div>' +
+          '<div class="rf-lab-img-frame"><img src="' + esc(state.labEnhancedUrl) + '" id="rf-lab-after-img" alt="Enhanced image"/></div>' +
+          '</div>' +
+          '</div></div>';
+        var bImg = document.getElementById('rf-lab-before-img');
+        if (bImg) bImg.onclick = function () { openViewer(state.labPreviewUrl); };
+        var aImg = document.getElementById('rf-lab-after-img');
+        if (aImg) aImg.onclick = function () { openViewer(state.labEnhancedUrl); };
+      } else {
+        stageEl.innerHTML =
+          '<div class="rf-lab-single-wrap">' +
+          '<div class="rf-lab-img-card">' +
+          '<div class="rf-lab-img-head"><span class="rf-badge rf-badge-info">🖼️ UPLOADED ORIGINAL</span><span class="rf-lab-img-name">' + esc(state.labFileName) + esc(sizeKb) + '</span></div>' +
+          '<div class="rf-lab-img-frame"><img src="' + esc(state.labPreviewUrl) + '" id="rf-lab-orig-img" alt="Uploaded image preview"/></div>' +
+          '</div></div>';
+        var oImg = document.getElementById('rf-lab-orig-img');
+        if (oImg) oImg.onclick = function () { openViewer(state.labPreviewUrl); };
+      }
+    }
+    renderLabStage();
+
+    document.getElementById('rf-lab-file').onchange = function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      if (state.labPreviewUrl) {
+        try { URL.revokeObjectURL(state.labPreviewUrl); } catch (_) {}
+      }
+      state.labFile = f;
+      state.labFileName = f.name || 'uploaded-image.jpg';
+      state.labPreviewUrl = URL.createObjectURL(f);
+      state.labEnhancedUrl = '';
+      state.labEnhancedMeta = null;
+      state.labHtml = '';
+      renderSystem(body);
+    };
+    document.getElementById('rf-lab-mode').onchange = function (e) {
+      state.labMode = e.target.value;
+    };
+    var labClr = document.getElementById('rf-lab-clr');
+    if (labClr) {
+      labClr.onclick = function () {
+        if (state.labPreviewUrl) {
+          try { URL.revokeObjectURL(state.labPreviewUrl); } catch (_) {}
+        }
+        state.labFile = null;
+        state.labFileName = '';
+        state.labPreviewUrl = '';
+        state.labEnhancedUrl = '';
+        state.labEnhancedMeta = null;
+        state.labHtml = '';
+        renderSystem(body);
+      };
+    }
 
     document.getElementById('rf-sys-ref').onclick = async function () {
       var r = await api('/admin/api/system/health?ts=' + Date.now());
@@ -3695,7 +3790,7 @@
       if (r.ok) { toast('Cleared ' + (r.data.removed_files || 0) + ' temp file(s)'); refreshAll(false); }
     };
     document.getElementById('rf-lab-ana').onclick = async function () {
-      var f = document.getElementById('rf-lab-file').files[0];
+      var f = state.labFile || (document.getElementById('rf-lab-file').files && document.getElementById('rf-lab-file').files[0]);
       if (!f) { toast('Choose an image first', false); return; }
       var fd = new FormData(); fd.append('image', f);
       document.getElementById('rf-lab-out').innerHTML = '⏳ Analyzing quality, damage &amp; authenticity…';
@@ -3723,7 +3818,7 @@
           '</div>' + sigHtml + '</div>'
         : '';
       state.labHtml =
-        '<div style="display:grid;gap:8px;margin-top:8px">' +
+        '<div style="display:grid;gap:8px;margin-top:12px">' +
         '<div><b>📐 Image Quality:</b> <b>' + (q.overall_score || 0) + '/100 (' + esc(q.overall_grade) + ')</b> · Resolution: ' + (q.resolution ? q.resolution.width + '×' + q.resolution.height : '') + ' · Lighting: ' + (q.lighting ? q.lighting.score + '/100 (' + esc(q.lighting.condition) + ')' : '') + ' · Readability: ' + (q.readability ? q.readability.score + '/100' : '') + '</div>' +
         '<div><b>🩹 Damage (Overall ' + dmgBadge(dm.overall_severity) + '):</b> Tear ' + dmgBadge(dm.tear && dm.tear.level) + ' · Faded ' + dmgBadge(dm.faded && dm.faded.level) + ' · Mold ' + dmgBadge(dm.mold && dm.mold.level) + ' · Aging ' + dmgBadge(dm.aging && dm.aging.level) + '</div>' +
         authHtml +
@@ -3731,23 +3826,32 @@
       document.getElementById('rf-lab-out').innerHTML = state.labHtml;
     };
     document.getElementById('rf-lab-enh').onclick = async function () {
-      var f = document.getElementById('rf-lab-file').files[0];
+      var f = state.labFile || (document.getElementById('rf-lab-file').files && document.getElementById('rf-lab-file').files[0]);
       if (!f) { toast('Choose an image first', false); return; }
       var fd = new FormData();
       fd.append('image', f);
-      fd.append('mode', document.getElementById('rf-lab-mode').value);
-      document.getElementById('rf-lab-out').innerHTML = '✨ Enhancing image clarity…';
-      var r = await api('/admin/api/conservation/enhance', { method: 'POST', body: fd });
-      if (!r.ok) { toast(r.data.reason || 'Enhancement failed', false); return; }
-      var j = r.data, bq = j.before_quality || {}, aq = j.after_quality || {};
-      var imgSrc = j.admin_preview_url ? apiUrl(j.admin_preview_url) : '';
-      state.labHtml =
-        '<div style="margin-top:8px"><b>✨ Enhanced (' + esc(j.mode) + '):</b> Quality <b>' + bq.overall_score + ' → ' + aq.overall_score + '/100</b> · Readability ' + (bq.readability && bq.readability.score) + ' → ' + (aq.readability && aq.readability.score) + '</div>' +
-        (imgSrc ? '<img src="' + esc(imgSrc) + '" id="rf-enh-prev" style="margin-top:10px;max-width:440px;border-radius:10px;border:1px solid rgb(var(--border-medium));cursor:pointer;display:block"/>' : '');
-      document.getElementById('rf-lab-out').innerHTML = state.labHtml;
-      var pv = document.getElementById('rf-enh-prev');
-      if (pv) pv.onclick = function () { openViewer(imgSrc); };
-      toast('Image enhanced');
+      state.labMode = document.getElementById('rf-lab-mode').value;
+      fd.append('mode', state.labMode);
+      var enhBtn = document.getElementById('rf-lab-enh');
+      enhBtn.disabled = true;
+      document.getElementById('rf-lab-out').innerHTML = '<div style="margin-top:10px">⏳ Enhancing image clarity…</div>';
+      try {
+        var r = await api('/admin/api/conservation/enhance', { method: 'POST', body: fd });
+        if (!r.ok) {
+          toast((r.data && r.data.reason) || 'Enhancement failed', false);
+          document.getElementById('rf-lab-out').innerHTML = '';
+          return;
+        }
+        var j = r.data;
+        state.labEnhancedUrl = j.admin_preview_url ? apiUrl(j.admin_preview_url) + '?ts=' + Date.now() : '';
+        state.labEnhancedMeta = j;
+        state.labHtml = '';
+        renderLabStage();
+        document.getElementById('rf-lab-out').innerHTML = '';
+        toast('Image enhanced — compare Before vs. After side-by-side');
+      } finally {
+        enhBtn.disabled = false;
+      }
     };
   }
 

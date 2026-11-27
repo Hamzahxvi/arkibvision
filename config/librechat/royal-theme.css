@@ -3011,3 +3011,77 @@ html:not(.dark) .rf-aud-rec {
   margin: 4px 6px;
   background: rgb(var(--border-light, 51 65 85));
 }
+
+/* ─── Conservation & Enhancement Lab Before vs. After Side-by-Side Stage ──── */
+.rf-lab-single-wrap,
+.rf-lab-compare-wrap {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rf-lab-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rf-lab-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+@media (max-width: 720px) {
+  .rf-lab-compare-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.rf-lab-img-card {
+  border-radius: 10px;
+  border: 1px solid rgb(var(--border-light, 51 65 85));
+  background: var(--arkib-surface, rgb(var(--surface-primary, 15 23 42)));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.rf-lab-img-card-after {
+  border-color: rgba(16, 185, 129, 0.48);
+}
+.rf-lab-img-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgb(var(--border-light, 51 65 85));
+  background: var(--arkib-surface-alt, rgb(var(--surface-secondary, 23 32 51)));
+}
+.rf-lab-img-name {
+  font-size: 0.76rem;
+  color: var(--arkib-text-muted, rgb(var(--text-secondary, 148 163 184)));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rf-lab-img-frame {
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  background: rgba(2, 6, 23, 0.22);
+}
+html:not(.dark) .rf-lab-img-frame {
+  background: rgba(15, 23, 42, 0.04);
+}
+.rf-lab-img-frame img {
+  max-width: 100%;
+  max-height: 380px;
+  width: auto;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgb(var(--border-light, 51 65 85));
+  cursor: pointer;
+  display: block;
+}
