@@ -921,7 +921,7 @@
         var revCnt = Number(p.revision_count || 0);
         var actionsHtml = guestMode
           ? '<div class="rf-actions">' +
-            '<span class="rf-badge rf-badge-info">📁 ' + esc(p.group || 'Unassigned') + '</span>' +
+            '<span class="rf-folder-readonly" title="Group folder (read-only)">' + (p.group ? '📁 ' + esc(p.group) : '📂 Unassigned') + '</span>' +
             '<button type="button" class="rf-btn rf-btn-sm" data-rf-view-p="' + esc(p.slug) + '">' + EYE_SVG + '<span>View Details</span></button>' +
             '</div>'
           : '<div class="rf-actions">' +
@@ -1521,7 +1521,7 @@
         var revCnt = Number(l.revision_count || 0);
         var actionsHtml = guestMode
           ? '<div class="rf-actions">' +
-            '<span class="rf-badge rf-badge-info">📁 ' + esc(l.group || 'Unassigned') + '</span>' +
+            '<span class="rf-folder-readonly" title="Group folder (read-only)">' + (l.group ? '📁 ' + esc(l.group) : '📂 Unassigned') + '</span>' +
             '<button type="button" class="rf-btn rf-btn-sm" data-rf-view-l="' + esc(l.slug) + '">' + EYE_SVG + '<span>View Details</span></button>' +
             '</div>'
           : '<div class="rf-actions">' +
