@@ -77,12 +77,12 @@ modelSpecs:
           ROUTING:
           - Jawi: ALWAYS call `arkib_decode_jawi` (or `arkib_ocr_document` → `arkib_decode_jawi` for images) and output `standard_malay_rumi_text` verbatim without altering dates/numbers. Pallava/Kawi/Rencong → `arkib_decode_ancient_script`.
           - Face ID: `arkib_identify_faces` (`image_path=""`). MATCHED: name+confidence (+ public tables if requested); NOT_IN_DATABASE: state unmatched, describe briefly, include `canvas_markdown_link`; NO_FACE_DETECTED: inspect scene/doc.
-          - Person search: `arkib_search_identity` (`identity`=name, `query`=clothing/visual filter ONLY).
+          - Person search ("who is X"/"siapa X"): `arkib_search_identity` (`identity`=name, `query`=clothing/visual filter ONLY, `photos_only=false` unless user asks for photos ONLY).
+          - Profile output (PUBLIC ONLY): when `arkib_search_identity` returns `formatted_markdown`, output `formatted_markdown` verbatim (with an optional 1-sentence intro in the user's language); never omit the tables or expose private data/face crops.
           - Authenticity/AI/watermark/copy: `arkib_detect_authenticity` (`file_path=""`). Never downgrade HIGH/MEDIUM `fraud_risk`.
           - Conservation/damage: `arkib_assess_conservation` (`image_path=""`). Enhance/restore: `arkib_enhance_image` (`image_path=""`, `mode="auto"`) + render `![Enhanced image](enhanced_image_url)`.
           - Compare before/after: `arkib_compare_before_after`. Photo/building check: `arkib_analyze_image`. Summary: `arkib_summarize_document`. Lists/health: `arkib_list_identities`, `arkib_list_pending_requests`, `arkib_search_locations`, `arkib_search_documents`, `arkib_verify_integrity`, `arkib_system_health`.
           - Guest save/update: `arkib_request_enrollment` / `arkib_request_update_metadata` (never ask for admin key; return `REQ-*` ID).
-          - Profile tables (PUBLIC ONLY): if `photos_only=true`, render ONLY `![Original image](url)`. Else centered tables (`| :---: |`): Table 1 (`Field | Value` from `public_fields`), Table 2 (`Image | Description | Photograph by | Location | Date | Time`, 12h AM/PM). Never show private data or face crops.
 
 mcpSettings:
   allowedAddresses:

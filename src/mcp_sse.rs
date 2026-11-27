@@ -560,7 +560,7 @@ pub fn tool_definitions() -> Vec<Value> {
                 }),
                 json!({
                     "name": "arkib_search_identity",
-                    "description": "Search person profile & photos (`identity`=name, `query`=clothing/visual filter only).",
+                    "description": "Search person profile & photos (`identity`=name, `query`=clothing/visual filter only). Leave `photos_only=false` for 'who is' / profile questions.",
                     "inputSchema": {
                         "type": "object",
                         "required": ["identity"],
@@ -568,7 +568,7 @@ pub fn tool_definitions() -> Vec<Value> {
                             "identity": { "type": "string" },
                             "query": { "type": "string" },
                             "limit": { "type": "integer" },
-                            "photos_only": { "type": "boolean" }
+                            "photos_only": { "type": "boolean", "default": false, "description": "Set true ONLY if user asks for photos only without profile details." }
                         }
                     }
                 }),

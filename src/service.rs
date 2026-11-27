@@ -123,6 +123,68 @@ fn find_docker_binary() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+fn md_cell(s: &str) -> String {
+    s.trim().replace('|', "\\|").replace(['\r', '\n'], " ")
+}
+
+fn format_profile_markdown(display_profile: &Value, photos_only: bool) -> String {
+    let imgs = display_profile["images"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+
+    if photos_only {
+        return imgs
+            .iter()
+            .filter_map(|im| im["url"].as_str())
+            .filter(|u| !u.is_empty())
+            .map(|u| format!("![Original image]({u})"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+    }
+
+    let mut out = String::new();
+    let fields = display_profile["public_fields"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !fields.is_empty() {
+        out.push_str("| Field | Value |\n| :---: | :---: |\n");
+        for f in &fields {
+            let k = f["field"].as_str().unwrap_or("").trim();
+            let v = f["value"].as_str().unwrap_or("").trim();
+            if !k.is_empty() {
+                out.push_str(&format!("| {} | {} |\n", md_cell(k), md_cell(v)));
+            }
+        }
+    }
+
+    if !imgs.is_empty() {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(
+            "| Image | Description | Photograph by | Location | Date | Time |\n| :---: | :---: | :---: | :---: | :---: | :---: |\n",
+        );
+        for im in &imgs {
+            let url = im["url"].as_str().unwrap_or("");
+            if url.is_empty() {
+                continue;
+            }
+            let desc = md_cell(im["description"].as_str().unwrap_or("Unknown"));
+            let by = md_cell(im["photograph_by"].as_str().unwrap_or("Unknown"));
+            let loc = md_cell(im["location"].as_str().unwrap_or("Unknown"));
+            let date = md_cell(im["date"].as_str().unwrap_or("Unknown"));
+            let time = md_cell(im["time"].as_str().unwrap_or("Unknown"));
+            out.push_str(&format!(
+                "| ![Original image]({url}) | {desc} | {by} | {loc} | {date} | {time} |\n"
+            ));
+        }
+    }
+
+    out.trim_end().to_string()
+}
+
 impl ArkibService {
     pub fn new(cfg: AppConfig) -> Result<Self, String> {
         ensure_default_location_groups(&cfg);
@@ -2823,15 +2885,21 @@ impl ArkibService {
             }
             let matched_count = imgs.len();
             display_profile["images"] = Value::Array(imgs);
+            if let Some(obj) = display_profile.as_object_mut() {
+                obj.remove("public_other_details");
+            }
+            let formatted_md = format_profile_markdown(&display_profile, photos_only);
 
             let instruction = if !clean_query.is_empty() && matched_count == 0 {
                 format!(
                     "No stored photo for {canonical} matched '{clean_query}'. Tell the user clearly that no matching photo was found in the database."
                 )
             } else if photos_only {
-                "Render ONLY each image in profile_metadata.images using ![Original image](url), one per line. Do NOT include metadata tables, extra fields, or private data.".to_string()
+                "Output formatted_markdown verbatim without adding tables or private data."
+                    .to_string()
             } else {
-                "If the user specifically asked for photos/images only, render ONLY each image in profile_metadata.images as ![Original image](url) without extra metadata tables. Otherwise, format the response using clean Markdown tables with centered columns: 1) First show a table with columns | Field | Value | (separator | :---: | :---: |) with ONE row for EACH entry in profile_metadata.public_fields (putting entry.field in the Field column and entry.value in the Value column — e.g. | Name | Eula Lawrence |, | test | hamzah |. NEVER print the literal key 'public_other_details' or 'public_fields' as a row!). 2) Then show a table with columns | Image | Description | Photograph by | Location | Date | Time | (separator | :---: | :---: | :---: | :---: | :---: | :---: |) with one row per image in profile_metadata.images, putting ![Original image](url) in the Image column and that image's own Description, Photograph by, Location, Date, and 12-hour AM/PM Time in the other columns. Never show private data, profile folder, or face crops.".to_string()
+                "Output formatted_markdown verbatim as your reply (you may add 1 short intro sentence in the user's language). Never omit the Profile or Photos tables and never show private data."
+                    .to_string()
             };
 
             return json!({
@@ -2842,6 +2910,7 @@ impl ArkibService {
                 "limit_applied": if max_photos > 0 { json!(max_photos) } else { Value::Null },
                 "photos_only": photos_only,
                 "matched_image_count": matched_count,
+                "formatted_markdown": formatted_md,
                 "profile_metadata": display_profile,
                 "display_instruction": instruction,
             });
