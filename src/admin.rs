@@ -171,6 +171,9 @@ async fn audit_middleware(State(state): State<AdminState>, req: Request, next: N
         && (path.starts_with("/admin/profile-images/")
             || path.starts_with("/admin/location-images/")
             || path.starts_with("/admin/document-files/")
+            || path.starts_with("/guest/profile-images/")
+            || path.starts_with("/guest/location-images/")
+            || path.starts_with("/guest/document-files/")
             || path.starts_with("/admin/images/")
             || path.starts_with("/admin/enhanced-images/")
             || path.starts_with("/admin/revision-snapshots/")
@@ -231,17 +234,93 @@ async fn audit_middleware(State(state): State<AdminState>, req: Request, next: N
 
 fn classify_resource(path: &str) -> (String, String) {
     let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.len() >= 3 && parts[0] == "admin" && parts[1] == "api" {
+    if parts.len() >= 3 && (parts[0] == "admin" || parts[0] == "guest") && parts[1] == "api" {
         let rtype = parts[2].to_string();
         let rid = parts.get(3).copied().unwrap_or("").to_string();
         (rtype, rid)
+    } else if parts.first().copied() == Some("guest") {
+        ("guest".to_string(), path.to_string())
     } else {
         ("admin".to_string(), path.to_string())
     }
 }
 
+/// Strict read-only allowlist for the Guest Portal (`/guest/*`).
+/// Only GET reads and read-only face recognition / search analytics are permitted;
+/// every write, edit, delete, enrollment, or admin endpoint is denied.
+pub fn is_guest_allowed_request(method: &Method, path: &str) -> bool {
+    if !path.starts_with("/guest") {
+        return false;
+    }
+    if *method == Method::GET {
+        return matches!(
+            path,
+            "/guest"
+                | "/guest/"
+                | "/guest/api/profiles"
+                | "/guest/api/people-groups"
+                | "/guest/api/locations"
+                | "/guest/api/location-groups"
+                | "/guest/api/documents"
+                | "/guest/api/document-groups"
+                | "/guest/api/categories"
+        ) || path.starts_with("/guest/profile-images/")
+            || path.starts_with("/guest/location-images/")
+            || path.starts_with("/guest/document-files/")
+            || (path.starts_with("/guest/api/documents/") && path.contains("/export/"));
+    }
+    if *method == Method::POST {
+        return matches!(
+            path,
+            "/guest/api/test-recognition" | "/guest/api/analytics/track"
+        );
+    }
+    false
+}
+
+/// Rewrite `/admin/...` static media URLs inside JSON payloads into `/guest/...`
+/// so unauthenticated Guest Portal browsers can view photos & files read-only.
+fn rewrite_admin_urls_for_guest(val: &mut Value) {
+    match val {
+        Value::String(s) => {
+            if let Some(rest) = s.strip_prefix("/admin/profile-images/") {
+                *s = format!("/guest/profile-images/{rest}");
+            } else if let Some(rest) = s.strip_prefix("/admin/location-images/") {
+                *s = format!("/guest/location-images/{rest}");
+            } else if let Some(rest) = s.strip_prefix("/admin/document-files/") {
+                *s = format!("/guest/document-files/{rest}");
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                rewrite_admin_urls_for_guest(item);
+            }
+        }
+        Value::Object(map) => {
+            for (_, v) in map.iter_mut() {
+                rewrite_admin_urls_for_guest(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 async fn auth_middleware(State(state): State<AdminState>, req: Request, next: Next) -> Response {
     let path = req.uri().path();
+    let method = req.method();
+    if path == "/guest" || path.starts_with("/guest/") {
+        if is_guest_allowed_request(method, path) {
+            return next.run(req).await;
+        }
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "status": "forbidden",
+                "reason": "Guest role is strictly read-only.",
+            })),
+        )
+            .into_response();
+    }
     if matches!(
         path,
         "/admin" | "/admin/" | "/admin/api/session" | "/admin/api/login" | "/admin/api/logout"
@@ -447,6 +526,37 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
             "/admin/api/analytics/track",
             post(admin_track_behavior_analytics),
         )
+        // Read-Only Guest Portal (People, Locations, Documents, Test Face Recognition ONLY)
+        .route("/guest", get(guest_redirect_to_librechat))
+        .route("/guest/", get(guest_redirect_to_librechat))
+        .route("/guest/api/profiles", get(guest_api_profiles))
+        .route("/guest/api/people-groups", get(admin_api_people_groups))
+        .route(
+            "/guest/profile-images/{profile_slug}/{*filename}",
+            get(admin_profile_image),
+        )
+        .route("/guest/api/locations", get(guest_api_locations))
+        .route("/guest/api/location-groups", get(admin_api_location_groups))
+        .route(
+            "/guest/location-images/{slug}/{*filename}",
+            get(admin_location_image),
+        )
+        .route("/guest/api/documents", get(guest_api_documents))
+        .route("/guest/api/document-groups", get(admin_api_document_groups))
+        .route("/guest/api/categories", get(admin_api_categories))
+        .route(
+            "/guest/document-files/{slug}/{*filename}",
+            get(admin_document_file),
+        )
+        .route(
+            "/guest/api/documents/{slug}/export/{format}",
+            get(admin_export_document),
+        )
+        .route("/guest/api/test-recognition", post(admin_test_recognition))
+        .route(
+            "/guest/api/analytics/track",
+            post(guest_track_behavior_analytics),
+        )
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -467,6 +577,54 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
 
 async fn admin_redirect_to_librechat(State(state): State<AdminState>) -> Redirect {
     Redirect::temporary(&format!("{}/#arkib-admin", state.service.cfg.librechat_url))
+}
+
+async fn guest_redirect_to_librechat(State(state): State<AdminState>) -> Redirect {
+    Redirect::temporary(&format!("{}/#arkib-guest", state.service.cfg.librechat_url))
+}
+
+async fn guest_api_profiles(State(state): State<AdminState>) -> Json<Value> {
+    let Json(mut val) = admin_api_profiles(State(state)).await;
+    rewrite_admin_urls_for_guest(&mut val);
+    Json(val)
+}
+
+async fn guest_api_locations(State(state): State<AdminState>) -> Json<Value> {
+    let Json(mut val) = admin_api_locations(State(state)).await;
+    rewrite_admin_urls_for_guest(&mut val);
+    Json(val)
+}
+
+async fn guest_api_documents(State(state): State<AdminState>) -> Json<Value> {
+    let Json(mut val) = admin_api_documents(State(state)).await;
+    rewrite_admin_urls_for_guest(&mut val);
+    Json(val)
+}
+
+async fn guest_track_behavior_analytics(
+    State(state): State<AdminState>,
+    Json(payload): Json<TrackBehaviorPayload>,
+) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let source = match payload.source.trim() {
+        "guest_view" => "guest_view".to_string(),
+        _ => "guest_search".to_string(),
+    };
+    let _ = tokio::task::spawn_blocking(move || {
+        analytics::record_admin_activity(
+            &cfg,
+            &source,
+            "guest",
+            &payload.query_text,
+            &payload.entity_type,
+            &payload.item_slug,
+            &payload.item_title,
+            &payload.category,
+            payload.tags,
+        );
+    })
+    .await;
+    Json(json!({ "status": "ok" }))
 }
 
 #[derive(Deserialize)]
@@ -3287,4 +3445,87 @@ async fn admin_track_behavior_analytics(
     })
     .await;
     Json(json!({ "status": "ok" }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guest_allowlist_enforces_strict_read_only_access() {
+        assert!(is_guest_allowed_request(
+            &Method::GET,
+            "/guest/api/profiles"
+        ));
+        assert!(is_guest_allowed_request(
+            &Method::GET,
+            "/guest/api/locations"
+        ));
+        assert!(is_guest_allowed_request(
+            &Method::GET,
+            "/guest/api/documents"
+        ));
+        assert!(is_guest_allowed_request(
+            &Method::GET,
+            "/guest/api/documents/surat_01/export/pdf"
+        ));
+        assert!(is_guest_allowed_request(
+            &Method::GET,
+            "/guest/profile-images/anwar/01.jpg"
+        ));
+        assert!(is_guest_allowed_request(
+            &Method::POST,
+            "/guest/api/test-recognition"
+        ));
+
+        // Every write/delete/admin action must be denied for guests
+        assert!(!is_guest_allowed_request(
+            &Method::POST,
+            "/guest/api/profiles"
+        ));
+        assert!(!is_guest_allowed_request(
+            &Method::DELETE,
+            "/guest/api/profiles"
+        ));
+        assert!(!is_guest_allowed_request(
+            &Method::PATCH,
+            "/guest/api/documents"
+        ));
+        assert!(!is_guest_allowed_request(
+            &Method::GET,
+            "/guest/api/requests"
+        ));
+        assert!(!is_guest_allowed_request(
+            &Method::GET,
+            "/guest/api/audit/dashboard"
+        ));
+        assert!(!is_guest_allowed_request(
+            &Method::GET,
+            "/admin/api/profiles"
+        ));
+    }
+
+    #[test]
+    fn guest_url_rewrite_converts_admin_media_paths() {
+        let mut payload = json!([
+            {
+                "images": [{ "url": "/admin/profile-images/ali/01.jpg" }],
+                "files": [{ "admin_url": "/admin/document-files/doc1/a.pdf" }],
+                "loc": { "admin_url": "/admin/location-images/hall/01.png" }
+            }
+        ]);
+        rewrite_admin_urls_for_guest(&mut payload);
+        assert_eq!(
+            payload[0]["images"][0]["url"],
+            "/guest/profile-images/ali/01.jpg"
+        );
+        assert_eq!(
+            payload[0]["files"][0]["admin_url"],
+            "/guest/document-files/doc1/a.pdf"
+        );
+        assert_eq!(
+            payload[0]["loc"]["admin_url"],
+            "/guest/location-images/hall/01.png"
+        );
+    }
 }
