@@ -515,11 +515,13 @@ pub fn apply_ocr_edit_to_archive(
     fs::create_dir_all(doc_dir.join("files"))
         .map_err(|e| format!("Create document dir failed: {e}"))?;
     let meta_path = doc_dir.join("metadata.json");
-    let mut meta: Map<String, Value> = fs::read_to_string(&meta_path)
+    let before_meta: Map<String, Value> = fs::read_to_string(&meta_path)
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.as_object().cloned())
         .unwrap_or_default();
+    let had_existing = !before_meta.is_empty();
+    let mut meta = before_meta.clone();
 
     meta.entry("slug".to_string())
         .or_insert_with(|| Value::String(target_slug.clone()));
@@ -581,6 +583,23 @@ pub fn apply_ocr_edit_to_archive(
     let tmp = meta_path.with_extension("json.tmp");
     fs::write(&tmp, pretty).map_err(|e| format!("Write document tmp failed: {e}"))?;
     fs::rename(&tmp, &meta_path).map_err(|e| format!("Rename document failed: {e}"))?;
+
+    if had_existing {
+        let title_str = meta
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or(&target_slug);
+        let _ = crate::revisions::record_metadata_change(
+            cfg,
+            "document",
+            &target_slug,
+            title_str,
+            &cfg.admin_user,
+            "canvas_ocr_edit",
+            &before_meta,
+            &meta,
+        );
+    }
 
     // Automatically write a downloadable .docx file into the document folder so it is immediately usable (never 0 files).
     let export_in = ExportDocumentInput::from_doc_value(&Value::Object(meta));

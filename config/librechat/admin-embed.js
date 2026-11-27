@@ -30,6 +30,16 @@
     documentGroups: [],
     selectedDocGroup: 'all',
     docGroupSearch: '',
+    categories: [],
+    docSort: 'newest',
+    docCategoryFilter: 'all',
+    docSourceFilter: 'all',
+    preferencesData: null,
+    auditData: null,
+    auditAiExplanation: '',
+    auditAiSource: '',
+    diskScanResult: null,
+    sqlInspectResult: null,
     health: null,
     integrity: null,
     labHtml: '',
@@ -202,6 +212,32 @@
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
 
+  function trackUserPref(evt) {
+    if (!state.authed || !evt) return;
+    try {
+      api('/admin/api/preferences/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({
+          timestamp: '',
+          epoch_secs: 0,
+          event_type: 'click_document',
+          category: '',
+          source: '',
+          group_folder: '',
+          year: '',
+          tags: [],
+          item_slug: '',
+          item_title: ''
+        }, evt))
+      }).then(function () {
+        api('/admin/api/preferences?ts=' + Date.now()).then(function (pr) {
+          if (pr.ok && pr.data) state.preferencesData = pr.data;
+        }).catch(function () {});
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   async function refreshAll(manual) {
     if (!state.authed) return;
     try {
@@ -213,7 +249,10 @@
         api('/admin/api/location-groups?ts=' + Date.now()),
         api('/admin/api/documents?ts=' + Date.now()),
         api('/admin/api/document-groups?ts=' + Date.now()),
-        api('/admin/api/system/health?ts=' + Date.now())
+        api('/admin/api/system/health?ts=' + Date.now()),
+        api('/admin/api/categories?ts=' + Date.now()),
+        api('/admin/api/preferences?ts=' + Date.now()),
+        api('/admin/api/audit/dashboard?ts=' + Date.now())
       ]);
       if (res[0].ok && Array.isArray(res[0].data)) state.requests = res[0].data;
       if (res[1].ok && Array.isArray(res[1].data)) state.profiles = res[1].data;
@@ -223,6 +262,9 @@
       if (res[5].ok && Array.isArray(res[5].data)) state.documents = res[5].data;
       if (res[6].ok && Array.isArray(res[6].data)) state.documentGroups = res[6].data;
       if (res[7].ok) state.health = res[7].data;
+      if (res[8].ok && Array.isArray(res[8].data)) state.categories = res[8].data;
+      if (res[9].ok && res[9].data) state.preferencesData = res[9].data;
+      if (res[10].ok && res[10].data) state.auditData = res[10].data;
       render();
       if (manual) toast('Admin data refreshed');
     } catch (e) {}
@@ -330,11 +372,16 @@
     }
 
     var pendingCnt = state.requests.filter(function (x) { return x.status === 'pending'; }).length;
+    var auditSnap = state.auditData && state.auditData.snapshot;
+    var auditAlertsCnt = auditSnap
+      ? ((auditSnap.rule_alerts ? auditSnap.rule_alerts.length : 0) + (auditSnap.statistical_outliers ? auditSnap.statistical_outliers.length : 0))
+      : 0;
     var tabs = [
       { id: 'approvals', label: '📋 Approvals', count: pendingCnt },
       { id: 'people', label: '👥 People', count: state.profiles.length },
       { id: 'locations', label: '📍 Locations', count: state.locations.length },
       { id: 'documents', label: '📁 Documents', count: state.documents.length },
+      { id: 'audit', label: '🛡️ Audit & Changes', count: auditAlertsCnt > 0 ? auditAlertsCnt : undefined },
       { id: 'system', label: '📊 System & Lab' },
       { id: 'test', label: '🔍 Test Face' }
     ];
@@ -383,6 +430,7 @@
     else if (state.tab === 'people') renderPeople(body);
     else if (state.tab === 'locations') renderLocations(body);
     else if (state.tab === 'documents') renderDocuments(body);
+    else if (state.tab === 'audit') renderAudit(body);
     else if (state.tab === 'system') renderSystem(body);
     else if (state.tab === 'test') renderTestFace(body);
   }
@@ -540,25 +588,20 @@
       return !q || (p.identity + ' ' + (p.group || '') + ' ' + (p.address || '') + ' ' + (p.notes || '') + ' ' + (p.description || '')).toLowerCase().indexOf(q) !== -1;
     });
 
-    var gq = state.peopleGroupSearch.trim().toLowerCase();
-    var visibleGroups = state.peopleGroups.filter(function (g) {
-      return !gq || (String(g.name || '') + ' ' + String(g.description || '')).toLowerCase().indexOf(gq) !== -1;
-    });
-
-    var folderChips =
-      '<div class="rf-folder-search-wrap"><input class="rf-folder-search" id="rf-ppl-grp-search" type="search" placeholder="🔍 Search group folders…" value="' + esc(state.peopleGroupSearch) + '"/></div>' +
-      '<div class="rf-folder-chip' + (state.selectedGroup === 'all' ? ' active' : '') + '" data-rf-grp="all">📂 All <span class="rf-fcnt">' + state.profiles.length + '</span></div>' +
-      visibleGroups.map(function (g) {
+    var folderDropdownHtml =
+      '<div class="rf-folder-dd-wrap">' +
+      '<label class="rf-dd-label" for="rf-ppl-grp-sel">📁 Group Folder</label>' +
+      '<select class="rf-select rf-folder-select" id="rf-ppl-grp-sel">' +
+      '<option value="all"' + (state.selectedGroup === 'all' ? ' selected' : '') + '>📂 All Folders (' + state.profiles.length + ')</option>' +
+      state.peopleGroups.map(function (g) {
         var gs = String(g.slug || '').toLowerCase();
         var cnt = state.profiles.filter(function (p) { return personGroupSlug(p) === gs; }).length;
-        return '<div class="rf-folder-chip' + (state.selectedGroup === gs ? ' active' : '') + '" data-rf-grp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
-          '<span>📁 ' + esc(g.name) + '</span>' +
-          '<span class="rf-fcnt">' + cnt + '</span>' +
-          '<button type="button" class="rf-folder-act" data-rf-grp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
-          '</div>';
+        return '<option value="' + esc(gs) + '"' + (state.selectedGroup === gs ? ' selected' : '') + '>📁 ' + esc(g.name) + ' (' + cnt + ')</option>';
       }).join('') +
-      (!visibleGroups.length && gq ? '<span style="font-size:.78rem;color:rgb(var(--text-secondary))">No matching folders</span>' : '') +
-      '<div class="rf-folder-chip' + (state.selectedGroup === 'unassigned' ? ' active' : '') + '" data-rf-grp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
+      '<option value="unassigned"' + (state.selectedGroup === 'unassigned' ? ' selected' : '') + '>📂 Unassigned (' + unassignedCnt + ')</option>' +
+      '</select>' +
+      (activeGroupObj ? '<button type="button" class="rf-btn rf-btn-sm" id="rf-ppl-grp-manage" title="Rename or delete selected folder">' + DOTS_SVG + '<span>Manage Folder</span></button>' : '') +
+      '</div>';
 
     var groupOpts = function (curSlug) {
       return '<option value=""' + (!curSlug ? ' selected' : '') + '>📂 Unassigned</option>' +
@@ -570,23 +613,28 @@
 
     body.innerHTML =
       '<div class="rf-section-head"><div><h2>👥 Enrolled People' + (activeGroupObj ? ' — 📁 ' + esc(activeGroupObj.name) : state.selectedGroup === 'unassigned' ? ' — Unassigned' : '') + '</h2>' +
-      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize enrolled people into maintainable group folders (e.g. Staff, External Entity). Use the ⋮ menu on any folder to rename or delete it.') + '</p></div>' +
+      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize enrolled people into maintainable group folders. Select a folder from the dropdown to filter or manage it.') + '</p></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="rf-btn" id="rf-add-group-btn">📁＋ New Group Folder</button>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-person-btn">＋ Add Person</button>' +
       '</div></div>' +
-      '<div class="rf-folder-bar">' + folderChips + '</div>' +
-      '<div class="rf-toolbar"><input class="rf-input" id="rf-ppl-search" style="flex:1;min-width:220px" type="search" placeholder="Search enrolled people in this folder…" value="' + esc(state.search) + '"/></div>' +
+      '<div class="rf-toolbar rf-toolbar-wrap">' +
+      folderDropdownHtml +
+      '<input class="rf-input" id="rf-ppl-search" style="flex:1;min-width:220px" type="search" placeholder="Search enrolled people in this folder…" value="' + esc(state.search) + '"/>' +
+      '</div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (p) {
         var img = p.images && p.images[0] ? '<img class="rf-thumb" src="' + esc(apiUrl(p.images[0].url)) + '" alt="' + esc(p.identity) + '"/>' : '<div class="rf-thumb">👤</div>';
         var curGs = personGroupSlug(p);
+        var revCnt = Number(p.revision_count || 0);
         return '<article class="rf-card">' + img + '<div class="rf-card-body">' +
           '<h3 title="' + esc(p.identity) + '">' + esc(p.identity) + '</h3>' +
           '<p class="rf-desc">' + esc(p.notes || p.address || p.description || 'No notes') + '</p>' +
-          '<div class="rf-meta">' + Number(p.vector_count || 0) + ' vector(s) · ' + (p.images ? p.images.length : 0) + ' photo(s)</div>' +
+          '<div class="rf-meta">' + Number(p.vector_count || 0) + ' vector(s) · ' + (p.images ? p.images.length : 0) + ' photo(s)' +
+          (revCnt > 0 ? ' · <span class="rf-badge rf-badge-info">🕒 ' + revCnt + ' change' + (revCnt === 1 ? '' : 's') + '</span>' : '') + '</div>' +
           '<div class="rf-actions">' +
           '<select class="rf-move-sel" data-rf-move-p="' + esc(p.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
+          (revCnt > 0 ? '<button type="button" class="rf-btn rf-btn-sm" data-rf-rev-p="' + esc(p.slug) + '" title="Compare before/after changes">🕒 Changes</button>' : '') +
           '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-p="' + esc(p.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
           '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-p="' + esc(p.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
@@ -595,51 +643,51 @@
 
     document.getElementById('rf-add-group-btn').onclick = function () { openGroupModal('people', null); };
     document.getElementById('rf-add-person-btn').onclick = function () { openPersonModal(null); };
-    document.getElementById('rf-ppl-grp-search').oninput = function (e) {
-      var pos = e.target.selectionStart;
-      state.peopleGroupSearch = e.target.value;
+    document.getElementById('rf-ppl-grp-sel').onchange = function (e) {
+      state.selectedGroup = e.target.value;
+      if (state.selectedGroup !== 'all' && state.selectedGroup !== 'unassigned') {
+        var grpObj = state.peopleGroups.find(function (x) { return String(x.slug || '').toLowerCase() === state.selectedGroup; });
+        trackUserPref({ event_type: 'filter_folder', group_folder: grpObj ? grpObj.name : state.selectedGroup });
+      }
       renderPeople(body);
-      restoreFocus('rf-ppl-grp-search', pos);
     };
-    document.getElementById('rf-ppl-search').oninput = function (e) {
-      var pos = e.target.selectionStart;
-      state.search = e.target.value;
-      renderPeople(body);
-      restoreFocus('rf-ppl-search', pos);
-    };
-
-    body.querySelectorAll('[data-rf-grp]').forEach(function (chip) {
-      chip.onclick = function (ev) {
-        if (ev.target.closest('.rf-folder-act')) return;
-        state.selectedGroup = chip.getAttribute('data-rf-grp');
-        renderPeople(body);
-      };
-    });
-    body.querySelectorAll('[data-rf-grp-menu]').forEach(function (btn) {
-      btn.onclick = function (ev) {
+    var managePplGrp = document.getElementById('rf-ppl-grp-manage');
+    if (managePplGrp && activeGroupObj) {
+      managePplGrp.onclick = function (ev) {
         ev.stopPropagation();
-        var gs = btn.getAttribute('data-rf-grp-menu');
-        var g = state.peopleGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
-        if (!g) return;
+        var gs = String(activeGroupObj.slug || '').toLowerCase();
         var memberCnt = state.profiles.filter(function (p) { return personGroupSlug(p) === gs; }).length;
-        openFolderMenu(btn, {
-          onRename: function () { openGroupModal('people', g); },
+        openFolderMenu(managePplGrp, {
+          onRename: function () { openGroupModal('people', activeGroupObj); },
           onDelete: function () {
             openConfirmModal({
-              title: 'Delete Group Folder "' + g.name + '"?',
-              message: 'This removes the "' + g.name + '" folder. The ' + memberCnt + ' enrolled ' + (memberCnt === 1 ? 'person' : 'people') + ' inside will NOT be deleted — they will move safely to Unassigned.',
+              title: 'Delete Group Folder "' + activeGroupObj.name + '"?',
+              message: 'This removes the "' + activeGroupObj.name + '" folder. The ' + memberCnt + ' enrolled ' + (memberCnt === 1 ? 'person' : 'people') + ' inside will NOT be deleted — they will move safely to Unassigned.',
               confirmLabel: 'Delete Folder',
               onConfirm: async function () {
-                var r = await api('/admin/api/people-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
+                var r = await api('/admin/api/people-groups/' + encodeURIComponent(activeGroupObj.slug), { method: 'DELETE' });
                 if (r.ok) {
-                  if (state.selectedGroup === gs) state.selectedGroup = 'all';
-                  toast('Deleted folder "' + g.name + '"');
+                  state.selectedGroup = 'all';
+                  toast('Deleted folder "' + activeGroupObj.name + '"');
                   await refreshAll(false);
                 } else toast((r.data && r.data.reason) || 'Delete failed', false);
               }
             });
           }
         });
+      };
+    }
+    document.getElementById('rf-ppl-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.search = e.target.value;
+      renderPeople(body);
+      restoreFocus('rf-ppl-search', pos);
+    };
+    body.querySelectorAll('[data-rf-rev-p]').forEach(function (b) {
+      b.onclick = function () {
+        var slug = b.getAttribute('data-rf-rev-p');
+        var p = state.profiles.find(function (x) { return x.slug === slug; });
+        openRevisionsModal('profile', slug, p ? p.identity : slug);
       };
     });
     body.querySelectorAll('[data-rf-move-p]').forEach(function (sel) {
@@ -983,25 +1031,20 @@
       return !q || JSON.stringify(l).toLowerCase().indexOf(q) !== -1;
     });
 
-    var gq = state.locGroupSearch.trim().toLowerCase();
-    var visibleGroups = state.locationGroups.filter(function (g) {
-      return !gq || (String(g.name || '') + ' ' + String(g.description || '')).toLowerCase().indexOf(gq) !== -1;
-    });
-
-    var folderChips =
-      '<div class="rf-folder-search-wrap"><input class="rf-folder-search" id="rf-loc-grp-search" type="search" placeholder="🔍 Search group folders…" value="' + esc(state.locGroupSearch) + '"/></div>' +
-      '<div class="rf-folder-chip' + (state.selectedLocGroup === 'all' ? ' active' : '') + '" data-rf-lgrp="all">📂 All <span class="rf-fcnt">' + state.locations.length + '</span></div>' +
-      visibleGroups.map(function (g) {
+    var folderDropdownHtml =
+      '<div class="rf-folder-dd-wrap">' +
+      '<label class="rf-dd-label" for="rf-loc-grp-sel">📁 Group Folder</label>' +
+      '<select class="rf-select rf-folder-select" id="rf-loc-grp-sel">' +
+      '<option value="all"' + (state.selectedLocGroup === 'all' ? ' selected' : '') + '>📂 All Folders (' + state.locations.length + ')</option>' +
+      state.locationGroups.map(function (g) {
         var gs = String(g.slug || '').toLowerCase();
         var cnt = state.locations.filter(function (l) { return locGroupSlug(l) === gs; }).length;
-        return '<div class="rf-folder-chip' + (state.selectedLocGroup === gs ? ' active' : '') + '" data-rf-lgrp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
-          '<span>📁 ' + esc(g.name) + '</span>' +
-          '<span class="rf-fcnt">' + cnt + '</span>' +
-          '<button type="button" class="rf-folder-act" data-rf-lgrp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
-          '</div>';
+        return '<option value="' + esc(gs) + '"' + (state.selectedLocGroup === gs ? ' selected' : '') + '>📁 ' + esc(g.name) + ' (' + cnt + ')</option>';
       }).join('') +
-      (!visibleGroups.length && gq ? '<span style="font-size:.78rem;color:rgb(var(--text-secondary))">No matching folders</span>' : '') +
-      '<div class="rf-folder-chip' + (state.selectedLocGroup === 'unassigned' ? ' active' : '') + '" data-rf-lgrp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
+      '<option value="unassigned"' + (state.selectedLocGroup === 'unassigned' ? ' selected' : '') + '>📂 Unassigned (' + unassignedCnt + ')</option>' +
+      '</select>' +
+      (activeGroupObj ? '<button type="button" class="rf-btn rf-btn-sm" id="rf-loc-grp-manage" title="Rename or delete selected folder">' + DOTS_SVG + '<span>Manage Folder</span></button>' : '') +
+      '</div>';
 
     var groupOpts = function (curSlug) {
       return '<option value=""' + (!curSlug ? ' selected' : '') + '>📂 Unassigned</option>' +
@@ -1013,25 +1056,30 @@
 
     body.innerHTML =
       '<div class="rf-section-head"><div><h2>📍 Archival Locations &amp; Landmarks' + (activeGroupObj ? ' — 📁 ' + esc(activeGroupObj.name) : state.selectedLocGroup === 'unassigned' ? ' — Unassigned' : '') + '</h2>' +
-      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize halls, wings, rooms, and buildings into maintainable group folders (e.g. Arkib Negara Malaysia, Historical Landmarks). Use the ⋮ menu on any folder to rename or delete it.') + '</p></div>' +
+      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize halls, wings, rooms, and buildings into maintainable group folders. Select a folder from the dropdown to filter or manage it.') + '</p></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="rf-btn" id="rf-add-lgrp-btn">📁＋ New Group Folder</button>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-loc-btn">＋ Add Location</button>' +
       '</div></div>' +
-      '<div class="rf-folder-bar">' + folderChips + '</div>' +
-      '<div class="rf-toolbar"><input class="rf-input" id="rf-loc-search" style="flex:1;min-width:220px" type="search" placeholder="Search locations in this folder by name, wing, hall, or address…" value="' + esc(state.search) + '"/></div>' +
+      '<div class="rf-toolbar rf-toolbar-wrap">' +
+      folderDropdownHtml +
+      '<input class="rf-input" id="rf-loc-search" style="flex:1;min-width:220px" type="search" placeholder="Search locations in this folder by name, wing, hall, or address…" value="' + esc(state.search) + '"/>' +
+      '</div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (l) {
         var thumb = l.images && l.images[0] ? '<img class="rf-thumb" src="' + esc(apiUrl(l.images[0].admin_url)) + '" alt="' + esc(l.name) + '"/>' : '<div class="rf-thumb">📍</div>';
         var sub = [l.building_or_wing, l.floor_or_room].filter(Boolean).join(' · ') || l.parent_institution || l.category || 'Archival Location';
         var curGs = locGroupSlug(l);
+        var revCnt = Number(l.revision_count || 0);
         return '<article class="rf-card">' + thumb + '<div class="rf-card-body">' +
           '<h3 title="' + esc(l.name) + '">' + esc(l.name) + '</h3>' +
           '<div class="rf-sub" title="' + esc(sub) + '">' + esc(sub) + '</div>' +
           '<p class="rf-desc">' + esc(l.description || l.historical_significance || 'No description yet.') + '</p>' +
-          '<div class="rf-meta">' + (l.image_count || 0) + ' photo(s)' + (l.coordinates ? ' · ' + esc(l.coordinates) : '') + '</div>' +
+          '<div class="rf-meta">' + (l.image_count || 0) + ' photo(s)' + (l.coordinates ? ' · ' + esc(l.coordinates) : '') +
+          (revCnt > 0 ? ' · <span class="rf-badge rf-badge-info">🕒 ' + revCnt + ' change' + (revCnt === 1 ? '' : 's') + '</span>' : '') + '</div>' +
           '<div class="rf-actions">' +
           '<select class="rf-move-sel" data-rf-move-l="' + esc(l.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
+          (revCnt > 0 ? '<button type="button" class="rf-btn rf-btn-sm" data-rf-rev-l="' + esc(l.slug) + '" title="Compare before/after changes">🕒 Changes</button>' : '') +
           '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-l="' + esc(l.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
           '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-l="' + esc(l.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
@@ -1040,51 +1088,47 @@
 
     document.getElementById('rf-add-lgrp-btn').onclick = function () { openGroupModal('location', null); };
     document.getElementById('rf-add-loc-btn').onclick = function () { openLocationModal(null); };
-    document.getElementById('rf-loc-grp-search').oninput = function (e) {
-      var pos = e.target.selectionStart;
-      state.locGroupSearch = e.target.value;
+    document.getElementById('rf-loc-grp-sel').onchange = function (e) {
+      state.selectedLocGroup = e.target.value;
       renderLocations(body);
-      restoreFocus('rf-loc-grp-search', pos);
     };
-    document.getElementById('rf-loc-search').oninput = function (e) {
-      var pos = e.target.selectionStart;
-      state.search = e.target.value;
-      renderLocations(body);
-      restoreFocus('rf-loc-search', pos);
-    };
-
-    body.querySelectorAll('[data-rf-lgrp]').forEach(function (chip) {
-      chip.onclick = function (ev) {
-        if (ev.target.closest('.rf-folder-act')) return;
-        state.selectedLocGroup = chip.getAttribute('data-rf-lgrp');
-        renderLocations(body);
-      };
-    });
-    body.querySelectorAll('[data-rf-lgrp-menu]').forEach(function (btn) {
-      btn.onclick = function (ev) {
+    var manageLocGrp = document.getElementById('rf-loc-grp-manage');
+    if (manageLocGrp && activeGroupObj) {
+      manageLocGrp.onclick = function (ev) {
         ev.stopPropagation();
-        var gs = btn.getAttribute('data-rf-lgrp-menu');
-        var g = state.locationGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
-        if (!g) return;
+        var gs = String(activeGroupObj.slug || '').toLowerCase();
         var memberCnt = state.locations.filter(function (l) { return locGroupSlug(l) === gs; }).length;
-        openFolderMenu(btn, {
-          onRename: function () { openGroupModal('location', g); },
+        openFolderMenu(manageLocGrp, {
+          onRename: function () { openGroupModal('location', activeGroupObj); },
           onDelete: function () {
             openConfirmModal({
-              title: 'Delete Group Folder "' + g.name + '"?',
-              message: 'This removes the "' + g.name + '" folder. The ' + memberCnt + ' location' + (memberCnt === 1 ? '' : 's') + ' inside will NOT be deleted — they will move safely to Unassigned.',
+              title: 'Delete Group Folder "' + activeGroupObj.name + '"?',
+              message: 'This removes the "' + activeGroupObj.name + '" folder. The ' + memberCnt + ' location' + (memberCnt === 1 ? '' : 's') + ' inside will NOT be deleted — they will move safely to Unassigned.',
               confirmLabel: 'Delete Folder',
               onConfirm: async function () {
-                var r = await api('/admin/api/location-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
+                var r = await api('/admin/api/location-groups/' + encodeURIComponent(activeGroupObj.slug), { method: 'DELETE' });
                 if (r.ok) {
-                  if (state.selectedLocGroup === gs) state.selectedLocGroup = 'all';
-                  toast('Deleted folder "' + g.name + '"');
+                  state.selectedLocGroup = 'all';
+                  toast('Deleted folder "' + activeGroupObj.name + '"');
                   await refreshAll(false);
                 } else toast((r.data && r.data.reason) || 'Delete failed', false);
               }
             });
           }
         });
+      };
+    }
+    document.getElementById('rf-loc-search').oninput = function (e) {
+      var pos = e.target.selectionStart;
+      state.search = e.target.value;
+      renderLocations(body);
+      restoreFocus('rf-loc-search', pos);
+    };
+    body.querySelectorAll('[data-rf-rev-l]').forEach(function (b) {
+      b.onclick = function () {
+        var slug = b.getAttribute('data-rf-rev-l');
+        var l = state.locations.find(function (x) { return x.slug === slug; });
+        openRevisionsModal('location', slug, l ? l.name : slug);
       };
     });
     body.querySelectorAll('[data-rf-move-l]').forEach(function (sel) {
@@ -1241,6 +1285,12 @@
     return String(d.group_slug || '').trim().toLowerCase();
   }
 
+  function docYearNum(d) {
+    var raw = String((d && (d.year || d.gregorian_date_masihi || d.date_created)) || '');
+    var m = raw.match(/\b(1\d{3}|20\d{2})\b/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
   function renderDocuments(body) {
     closeMenus();
     var q = state.search.toLowerCase();
@@ -1253,32 +1303,109 @@
     var unassignedCnt = state.documents.filter(function (d) { return !docGroupSlug(d); }).length;
     var activeGroupObj = state.documentGroups.find(function (g) { return String(g.slug || '').toLowerCase() === state.selectedDocGroup; });
 
+    // Collect distinct sources for source filter dropdown
+    var sourceMap = {};
+    state.documents.forEach(function (d) {
+      var s = String(d.author_or_source || '').trim();
+      if (s) sourceMap[s] = (sourceMap[s] || 0) + 1;
+    });
+    var allSources = Object.keys(sourceMap).sort(function (a, b) { return a.localeCompare(b); });
+
+    var prefScores = (state.preferencesData && state.preferencesData.document_scores) || {};
+
     var list = state.documents.filter(function (d) {
       var gs = docGroupSlug(d);
       if (state.selectedDocGroup === 'unassigned' && gs) return false;
       if (state.selectedDocGroup !== 'all' && state.selectedDocGroup !== 'unassigned' && gs !== state.selectedDocGroup) return false;
+      if (state.docCategoryFilter !== 'all') {
+        var catLc = String(d.category || '').trim().toLowerCase();
+        if (state.docCategoryFilter === 'uncategorized') {
+          if (catLc) return false;
+        } else if (catLc !== state.docCategoryFilter.toLowerCase()) {
+          return false;
+        }
+      }
+      if (state.docSourceFilter !== 'all') {
+        var srcVal = String(d.author_or_source || '').trim();
+        if (srcVal !== state.docSourceFilter) return false;
+      }
       return !q || JSON.stringify(d).toLowerCase().indexOf(q) !== -1;
     });
 
-    var gq = state.docGroupSearch.trim().toLowerCase();
-    var visibleGroups = state.documentGroups.filter(function (g) {
-      return !gq || (String(g.name || '') + ' ' + String(g.description || '')).toLowerCase().indexOf(gq) !== -1;
+    list.sort(function (a, b) {
+      if (state.docSort === 'category') {
+        return String(a.category || 'zzz').localeCompare(String(b.category || 'zzz')) || String(a.title || '').localeCompare(String(b.title || ''));
+      }
+      if (state.docSort === 'year_desc') {
+        return (docYearNum(b) - docYearNum(a)) || String(a.title || '').localeCompare(String(b.title || ''));
+      }
+      if (state.docSort === 'year_asc') {
+        var ya = docYearNum(a) || 99999;
+        var yb = docYearNum(b) || 99999;
+        return (ya - yb) || String(a.title || '').localeCompare(String(b.title || ''));
+      }
+      if (state.docSort === 'source') {
+        return String(a.author_or_source || 'zzz').localeCompare(String(b.author_or_source || 'zzz')) || String(a.title || '').localeCompare(String(b.title || ''));
+      }
+      if (state.docSort === 'title') {
+        return String(a.title || '').localeCompare(String(b.title || ''));
+      }
+      if (state.docSort === 'for_you') {
+        var sa = Number(prefScores[a.slug] || 0);
+        var sb = Number(prefScores[b.slug] || 0);
+        return (sb - sa) || String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+      }
+      return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || ''));
     });
 
-    var folderChips =
-      '<div class="rf-folder-search-wrap"><input class="rf-folder-search" id="rf-doc-grp-search" type="search" placeholder="🔍 Search group folders…" value="' + esc(state.docGroupSearch) + '"/></div>' +
-      '<div class="rf-folder-chip' + (state.selectedDocGroup === 'all' ? ' active' : '') + '" data-rf-dgrp="all">📂 All <span class="rf-fcnt">' + state.documents.length + '</span></div>' +
-      visibleGroups.map(function (g) {
+    var folderDropdownHtml =
+      '<div class="rf-folder-dd-wrap">' +
+      '<label class="rf-dd-label" for="rf-doc-grp-sel">📁 Folder</label>' +
+      '<select class="rf-select rf-folder-select" id="rf-doc-grp-sel">' +
+      '<option value="all"' + (state.selectedDocGroup === 'all' ? ' selected' : '') + '>📂 All Folders (' + state.documents.length + ')</option>' +
+      state.documentGroups.map(function (g) {
         var gs = String(g.slug || '').toLowerCase();
         var cnt = state.documents.filter(function (d) { return docGroupSlug(d) === gs; }).length;
-        return '<div class="rf-folder-chip' + (state.selectedDocGroup === gs ? ' active' : '') + '" data-rf-dgrp="' + esc(gs) + '" title="' + esc(g.description || g.name) + '">' +
-          '<span>📁 ' + esc(g.name) + '</span>' +
-          '<span class="rf-fcnt">' + cnt + '</span>' +
-          '<button type="button" class="rf-folder-act" data-rf-dgrp-menu="' + esc(gs) + '" aria-label="Folder options" title="Folder options">' + DOTS_SVG + '</button>' +
-          '</div>';
+        return '<option value="' + esc(gs) + '"' + (state.selectedDocGroup === gs ? ' selected' : '') + '>📁 ' + esc(g.name) + ' (' + cnt + ')</option>';
       }).join('') +
-      (!visibleGroups.length && gq ? '<span style="font-size:.78rem;color:rgb(var(--text-secondary))">No matching folders</span>' : '') +
-      '<div class="rf-folder-chip' + (state.selectedDocGroup === 'unassigned' ? ' active' : '') + '" data-rf-dgrp="unassigned">📂 Unassigned <span class="rf-fcnt">' + unassignedCnt + '</span></div>';
+      '<option value="unassigned"' + (state.selectedDocGroup === 'unassigned' ? ' selected' : '') + '>📂 Unassigned (' + unassignedCnt + ')</option>' +
+      '</select>' +
+      (activeGroupObj ? '<button type="button" class="rf-btn rf-btn-sm" id="rf-doc-grp-manage" title="Rename or delete selected folder">' + DOTS_SVG + '</button>' : '') +
+      '</div>';
+
+    var catFilterHtml =
+      '<div class="rf-folder-dd-wrap">' +
+      '<label class="rf-dd-label" for="rf-doc-cat-filter">🏷️ Category</label>' +
+      '<select class="rf-select rf-compact-select" id="rf-doc-cat-filter">' +
+      '<option value="all"' + (state.docCategoryFilter === 'all' ? ' selected' : '') + '>All Categories</option>' +
+      state.categories.map(function (c) {
+        return '<option value="' + esc(c.name) + '"' + (state.docCategoryFilter === c.name ? ' selected' : '') + '>' + esc(c.name) + ' (' + Number(c.document_count || 0) + ')</option>';
+      }).join('') +
+      '<option value="uncategorized"' + (state.docCategoryFilter === 'uncategorized' ? ' selected' : '') + '>Uncategorized</option>' +
+      '</select></div>';
+
+    var srcFilterHtml =
+      '<div class="rf-folder-dd-wrap">' +
+      '<label class="rf-dd-label" for="rf-doc-src-filter">🏛️ Source</label>' +
+      '<select class="rf-select rf-compact-select" id="rf-doc-src-filter">' +
+      '<option value="all"' + (state.docSourceFilter === 'all' ? ' selected' : '') + '>All Sources</option>' +
+      allSources.map(function (s) {
+        return '<option value="' + esc(s) + '"' + (state.docSourceFilter === s ? ' selected' : '') + '>' + esc(s) + ' (' + sourceMap[s] + ')</option>';
+      }).join('') +
+      '</select></div>';
+
+    var sortHtml =
+      '<div class="rf-folder-dd-wrap">' +
+      '<label class="rf-dd-label" for="rf-doc-sort-sel">↕️ Sort</label>' +
+      '<select class="rf-select rf-compact-select" id="rf-doc-sort-sel">' +
+      '<option value="newest"' + (state.docSort === 'newest' ? ' selected' : '') + '>Newest Updated</option>' +
+      '<option value="for_you"' + (state.docSort === 'for_you' ? ' selected' : '') + '>⭐ For You (Preferences)</option>' +
+      '<option value="category"' + (state.docSort === 'category' ? ' selected' : '') + '>Category (A–Z)</option>' +
+      '<option value="year_desc"' + (state.docSort === 'year_desc' ? ' selected' : '') + '>Year (Newest First)</option>' +
+      '<option value="year_asc"' + (state.docSort === 'year_asc' ? ' selected' : '') + '>Year (Oldest First)</option>' +
+      '<option value="source"' + (state.docSort === 'source' ? ' selected' : '') + '>Source (A–Z)</option>' +
+      '<option value="title"' + (state.docSort === 'title' ? ' selected' : '') + '>Title (A–Z)</option>' +
+      '</select></div>';
 
     var groupOpts = function (curSlug) {
       return '<option value=""' + (!curSlug ? ' selected' : '') + '>📂 Unassigned</option>' +
@@ -1288,42 +1415,123 @@
         }).join('');
     };
 
+    // Personalized recommendation bar based on click preferences
+    var recs = (state.preferencesData && state.preferencesData.recommended_documents) || [];
+    var prefRecHtml = recs.length ? (
+      '<div class="rf-pref-strip">' +
+      '<div class="rf-pref-strip-head"><span>⭐ Recommended Based on Your Activity</span>' +
+      '<button type="button" class="rf-btn rf-btn-sm" id="rf-open-prefs-inline">⚙️ Customize Preferences</button></div>' +
+      '<div class="rf-pref-cards">' +
+      recs.slice(0, 4).map(function (r) {
+        return '<button type="button" class="rf-pref-chip" data-rf-pref-open="' + esc(r.slug) + '">' +
+          '<div class="rf-pref-chip-title">' + esc(r.title || r.slug) + '</div>' +
+          '<div class="rf-pref-chip-meta">' + esc((r.match_reasons || []).slice(0, 2).join(' · ') || 'Related item') + '</div>' +
+          '</button>';
+      }).join('') +
+      '</div></div>'
+    ) : '';
+
     body.innerHTML =
       '<div class="rf-section-head"><div><h2>📁 Archival Documents &amp; Manuscripts' + (activeGroupObj ? ' — 📁 ' + esc(activeGroupObj.name) : state.selectedDocGroup === 'unassigned' ? ' — Unassigned' : '') + '</h2>' +
-      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize digitized Jawi, Pallava, Kawi, Rencong, Rumi, and English documents into maintainable group folders. Use the ⋮ menu on any folder to rename or delete it.') + '</p></div>' +
+      '<p>' + esc(activeGroupObj && activeGroupObj.description ? activeGroupObj.description : 'Organize, filter, and sort digitized records by category, year, source, or your learned preferences.') + '</p></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
-      '<button type="button" class="rf-btn" id="rf-add-dgrp-btn">📁＋ New Group Folder</button>' +
+      '<button type="button" class="rf-btn" id="rf-manage-cats-btn">🏷️ Categories</button>' +
+      '<button type="button" class="rf-btn" id="rf-my-prefs-btn">⭐ My Preferences</button>' +
+      '<button type="button" class="rf-btn" id="rf-add-dgrp-btn">📁＋ New Folder</button>' +
       '<button type="button" class="rf-btn rf-btn-primary" id="rf-add-doc-btn">＋ Add Document</button>' +
       '</div></div>' +
-      '<div class="rf-folder-bar">' + folderChips + '</div>' +
-      '<div class="rf-toolbar"><input class="rf-input" id="rf-doc-search" style="flex:1;min-width:220px" type="search" placeholder="Search documents in this folder by title, code, script, or text…" value="' + esc(state.search) + '"/></div>' +
+      prefRecHtml +
+      '<div class="rf-toolbar rf-toolbar-wrap">' +
+      folderDropdownHtml + catFilterHtml + srcFilterHtml + sortHtml +
+      '<input class="rf-input" id="rf-doc-search" style="flex:1;min-width:200px" type="search" placeholder="Search title, category, year, source, or text…" value="' + esc(state.search) + '"/>' +
+      '</div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (d) {
-        var sub = [d.reference_code, d.script_type, d.category].filter(Boolean).join(' · ') || 'Archival Document';
+        var yr = d.year || (docYearNum(d) ? String(docYearNum(d)) : '');
+        var sub = [d.category, yr, d.author_or_source, d.script_type].filter(Boolean).join(' · ') || 'Archival Document';
         var verdict = d.authenticity_report && d.authenticity_report.verdict ? '<span class="rf-badge rf-badge-warn" style="margin-left:6px">' + esc(d.authenticity_report.verdict) + '</span>' : '';
+        var revCnt = Number(d.revision_count || 0);
+        var revBadge = revCnt > 0 ? '<span class="rf-badge rf-badge-info" style="margin-left:6px">🕒 ' + revCnt + ' change' + (revCnt === 1 ? '' : 's') + '</span>' : '';
         var curGs = docGroupSlug(d);
-        return '<article class="rf-card"><div class="rf-thumb">📁</div><div class="rf-card-body">' +
+        var firstImg = (d.files || []).find(function (f) { return f.is_image; });
+        var thumbHtml = firstImg
+          ? '<img class="rf-thumb" src="' + esc(apiUrl(firstImg.admin_url)) + '" alt="' + esc(d.title) + '"/>'
+          : '<div class="rf-thumb">📁</div>';
+        return '<article class="rf-card">' + thumbHtml + '<div class="rf-card-body">' +
           '<h3 title="' + esc(d.title) + '">' + esc(d.title) + '</h3>' +
-          '<div class="rf-sub">' + esc(sub) + '</div>' +
+          '<div class="rf-sub" title="' + esc(sub) + '">' + esc(sub) + '</div>' +
           '<p class="rf-desc">' + esc(d.summary || d.extracted_text || 'No summary yet.') + '</p>' +
-          '<div class="rf-meta">' + (d.file_count || 0) + ' file(s)' + verdict + '</div>' +
+          '<div class="rf-meta">' + (d.file_count || 0) + ' file(s)' + verdict + revBadge + '</div>' +
           '<div class="rf-actions">' +
           '<select class="rf-move-sel" data-rf-move-d="' + esc(d.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
-          '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl('/admin/api/documents/' + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx" title="Download as Word (.docx) with RTL Jawi &amp; Rumi">📄 DOCX</a>' +
-          '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl('/admin/api/documents/' + encodeURIComponent(d.slug) + '/export/pdf')) + '" download="' + esc(d.slug) + '.pdf" title="Download as Archival PDF (.pdf)">📕 PDF</a>' +
+          '<a class="rf-btn rf-btn-sm" data-rf-exp-d="' + esc(d.slug) + '" href="' + esc(apiUrl('/admin/api/documents/' + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx" title="Download as Word (.docx)">📄 DOCX</a>' +
+          '<a class="rf-btn rf-btn-sm" data-rf-exp-d="' + esc(d.slug) + '" href="' + esc(apiUrl('/admin/api/documents/' + encodeURIComponent(d.slug) + '/export/pdf')) + '" download="' + esc(d.slug) + '.pdf" title="Download as Archival PDF (.pdf)">📕 PDF</a>' +
+          (revCnt > 0 ? '<button type="button" class="rf-btn rf-btn-sm" data-rf-rev-d="' + esc(d.slug) + '" title="Compare before/after changes">🕒 Changes</button>' : '') +
           '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-d="' + esc(d.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
           '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-d="' + esc(d.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
           '</div></div></article>';
-      }).join('') : '<div class="rf-empty">No archival documents in this folder yet. Click "＋ Add Document" to create one.</div>') +
+      }).join('') : '<div class="rf-empty">No archival documents match your filters. Click "＋ Add Document" to create one.</div>') +
       '</div>';
 
+    document.getElementById('rf-manage-cats-btn').onclick = function () { openCategoriesModal(); };
+    document.getElementById('rf-my-prefs-btn').onclick = function () { openPreferencesModal(); };
+    var inlinePrefs = document.getElementById('rf-open-prefs-inline');
+    if (inlinePrefs) inlinePrefs.onclick = function () { openPreferencesModal(); };
     document.getElementById('rf-add-dgrp-btn').onclick = function () { openGroupModal('document', null); };
     document.getElementById('rf-add-doc-btn').onclick = function () { openDocumentModal(null); };
-    document.getElementById('rf-doc-grp-search').oninput = function (e) {
-      var pos = e.target.selectionStart;
-      state.docGroupSearch = e.target.value;
+
+    document.getElementById('rf-doc-grp-sel').onchange = function (e) {
+      state.selectedDocGroup = e.target.value;
+      if (state.selectedDocGroup !== 'all' && state.selectedDocGroup !== 'unassigned') {
+        var grpObj = state.documentGroups.find(function (x) { return String(x.slug || '').toLowerCase() === state.selectedDocGroup; });
+        trackUserPref({ event_type: 'filter_folder', group_folder: grpObj ? grpObj.name : state.selectedDocGroup });
+      }
       renderDocuments(body);
-      restoreFocus('rf-doc-grp-search', pos);
+    };
+    var manageDocGrp = document.getElementById('rf-doc-grp-manage');
+    if (manageDocGrp && activeGroupObj) {
+      manageDocGrp.onclick = function (ev) {
+        ev.stopPropagation();
+        var gs = String(activeGroupObj.slug || '').toLowerCase();
+        var memberCnt = state.documents.filter(function (d) { return docGroupSlug(d) === gs; }).length;
+        openFolderMenu(manageDocGrp, {
+          onRename: function () { openGroupModal('document', activeGroupObj); },
+          onDelete: function () {
+            openConfirmModal({
+              title: 'Delete Group Folder "' + activeGroupObj.name + '"?',
+              message: 'This removes the "' + activeGroupObj.name + '" folder. The ' + memberCnt + ' document' + (memberCnt === 1 ? '' : 's') + ' inside will NOT be deleted — they will move safely to Unassigned.',
+              confirmLabel: 'Delete Folder',
+              onConfirm: async function () {
+                var r = await api('/admin/api/document-groups/' + encodeURIComponent(activeGroupObj.slug), { method: 'DELETE' });
+                if (r.ok) {
+                  state.selectedDocGroup = 'all';
+                  toast('Deleted folder "' + activeGroupObj.name + '"');
+                  await refreshAll(false);
+                } else toast((r.data && r.data.reason) || 'Delete failed', false);
+              }
+            });
+          }
+        });
+      };
+    }
+
+    document.getElementById('rf-doc-cat-filter').onchange = function (e) {
+      state.docCategoryFilter = e.target.value;
+      if (state.docCategoryFilter !== 'all' && state.docCategoryFilter !== 'uncategorized') {
+        trackUserPref({ event_type: 'filter_category', category: state.docCategoryFilter });
+      }
+      renderDocuments(body);
+    };
+    document.getElementById('rf-doc-src-filter').onchange = function (e) {
+      state.docSourceFilter = e.target.value;
+      if (state.docSourceFilter !== 'all') {
+        trackUserPref({ event_type: 'filter_source', source: state.docSourceFilter });
+      }
+      renderDocuments(body);
+    };
+    document.getElementById('rf-doc-sort-sel').onchange = function (e) {
+      state.docSort = e.target.value;
+      renderDocuments(body);
     };
     document.getElementById('rf-doc-search').oninput = function (e) {
       var pos = e.target.selectionStart;
@@ -1332,39 +1540,48 @@
       restoreFocus('rf-doc-search', pos);
     };
 
-    body.querySelectorAll('[data-rf-dgrp]').forEach(function (chip) {
-      chip.onclick = function (ev) {
-        if (ev.target.closest('.rf-folder-act')) return;
-        state.selectedDocGroup = chip.getAttribute('data-rf-dgrp');
-        renderDocuments(body);
+    body.querySelectorAll('[data-rf-pref-open]').forEach(function (b) {
+      b.onclick = function () {
+        var slug = b.getAttribute('data-rf-pref-open');
+        var d = state.documents.find(function (x) { return x.slug === slug; });
+        if (d) {
+          trackUserPref({
+            event_type: 'click_document',
+            category: d.category || '',
+            source: d.author_or_source || '',
+            group_folder: d.group || '',
+            year: d.year || '',
+            tags: Array.isArray(d.key_topics) ? d.key_topics : [],
+            item_slug: d.slug,
+            item_title: d.title || ''
+          });
+          openDocumentModal(d);
+        }
       };
     });
-    body.querySelectorAll('[data-rf-dgrp-menu]').forEach(function (btn) {
-      btn.onclick = function (ev) {
-        ev.stopPropagation();
-        var gs = btn.getAttribute('data-rf-dgrp-menu');
-        var g = state.documentGroups.find(function (x) { return String(x.slug || '').toLowerCase() === gs; });
-        if (!g) return;
-        var memberCnt = state.documents.filter(function (d) { return docGroupSlug(d) === gs; }).length;
-        openFolderMenu(btn, {
-          onRename: function () { openGroupModal('document', g); },
-          onDelete: function () {
-            openConfirmModal({
-              title: 'Delete Group Folder "' + g.name + '"?',
-              message: 'This removes the "' + g.name + '" folder. The ' + memberCnt + ' document' + (memberCnt === 1 ? '' : 's') + ' inside will NOT be deleted — they will move safely to Unassigned.',
-              confirmLabel: 'Delete Folder',
-              onConfirm: async function () {
-                var r = await api('/admin/api/document-groups/' + encodeURIComponent(g.slug), { method: 'DELETE' });
-                if (r.ok) {
-                  if (state.selectedDocGroup === gs) state.selectedDocGroup = 'all';
-                  toast('Deleted folder "' + g.name + '"');
-                  await refreshAll(false);
-                } else toast((r.data && r.data.reason) || 'Delete failed', false);
-              }
-            });
-          }
-        });
+    body.querySelectorAll('[data-rf-rev-d]').forEach(function (b) {
+      b.onclick = function () {
+        var slug = b.getAttribute('data-rf-rev-d');
+        var d = state.documents.find(function (x) { return x.slug === slug; });
+        openRevisionsModal('document', slug, d ? d.title : slug);
       };
+    });
+    body.querySelectorAll('[data-rf-exp-d]').forEach(function (a) {
+      a.addEventListener('click', function () {
+        var slug = a.getAttribute('data-rf-exp-d');
+        var d = state.documents.find(function (x) { return x.slug === slug; });
+        if (d) {
+          trackUserPref({
+            event_type: 'export',
+            category: d.category || '',
+            source: d.author_or_source || '',
+            group_folder: d.group || '',
+            year: d.year || '',
+            item_slug: d.slug,
+            item_title: d.title || ''
+          });
+        }
+      });
     });
     body.querySelectorAll('[data-rf-move-d]').forEach(function (sel) {
       sel.onchange = async function () {
@@ -1387,6 +1604,18 @@
     body.querySelectorAll('[data-rf-edit-d]').forEach(function (b) {
       b.onclick = function () {
         var d = state.documents.find(function (x) { return x.slug === b.getAttribute('data-rf-edit-d'); });
+        if (d) {
+          trackUserPref({
+            event_type: 'click_document',
+            category: d.category || '',
+            source: d.author_or_source || '',
+            group_folder: d.group || '',
+            year: d.year || '',
+            tags: Array.isArray(d.key_topics) ? d.key_topics : [],
+            item_slug: d.slug,
+            item_title: d.title || ''
+          });
+        }
         openDocumentModal(d || null);
       };
     });
@@ -1412,40 +1641,192 @@
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
     var scripts = ['Jawi', 'Pallava', 'Kawi', 'Rencong', 'Rumi / Bahasa Melayu', 'English', 'Multilingual'];
-    var defaultGrp = doc ? docGroupSlug(doc) : (state.selectedDocGroup !== 'all' && state.selectedDocGroup !== 'unassigned' ? state.selectedDocGroup : '');
+    var pendingInitialFile = null;
+    var lastSuggestions = null;
+
+    var prefSummary = (state.preferencesData && state.preferencesData.preferences) || {};
+    var topCat = (prefSummary.top_categories && prefSummary.top_categories[0] && prefSummary.top_categories[0].value) || '';
+    var topSrc = (prefSummary.top_sources && prefSummary.top_sources[0] && prefSummary.top_sources[0].value) || '';
+    var topFld = (prefSummary.top_folders && prefSummary.top_folders[0] && prefSummary.top_folders[0].value) || '';
+
+    var defaultGrp = doc
+      ? docGroupSlug(doc)
+      : (state.selectedDocGroup !== 'all' && state.selectedDocGroup !== 'unassigned'
+        ? state.selectedDocGroup
+        : (topFld ? (state.documentGroups.find(function (g) { return g.name === topFld; }) || {}).slug || '' : ''));
     var grpSelectHtml =
       '<option value=""' + (!defaultGrp ? ' selected' : '') + '>Unassigned</option>' +
       state.documentGroups.map(function (g) {
         var gs = String(g.slug || '').toLowerCase();
         return '<option value="' + esc(gs) + '"' + (defaultGrp === gs ? ' selected' : '') + '>' + esc(g.name) + '</option>';
       }).join('');
+
+    var curCat = doc ? (doc.category || '') : topCat;
+    var catOptionsHtml = '<option value="">— Select Category —</option>' +
+      state.categories.map(function (c) {
+        var sel = curCat && c.name.toLowerCase() === curCat.toLowerCase();
+        return '<option value="' + esc(c.name) + '"' + (sel ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+      }).join('');
+    if (curCat && !state.categories.some(function (c) { return c.name.toLowerCase() === curCat.toLowerCase(); })) {
+      catOptionsHtml += '<option value="' + esc(curCat) + '" selected>' + esc(curCat) + '</option>';
+    }
+
+    var knownSources = {};
+    if (topSrc) knownSources[topSrc] = true;
+    (prefSummary.top_sources || []).forEach(function (x) { if (x.value) knownSources[x.value] = true; });
+    state.documents.forEach(function (d) { if (d.author_or_source) knownSources[d.author_or_source] = true; });
+    var sourceDatalistHtml = Object.keys(knownSources).map(function (s) {
+      return '<option value="' + esc(s) + '"></option>';
+    }).join('');
+
     wrap.innerHTML =
       '<div class="rf-modal"><h2>' + (doc ? 'Edit Document' : 'Add Archival Document') + '</h2>' +
+      '<div class="rf-ai-suggest-box">' +
+      '<div class="rf-ai-suggest-head"><strong>✨ AI Content Auto-Fill</strong><span>Upload an image, PDF, DOCX, or text file — AI will read it and suggest Category, Subject, Year, and Source.</span></div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<input class="rf-input" id="rf-d-aifile" type="file" style="flex:1;min-width:200px" accept=".txt,.md,.csv,.json,.html,.htm,.xml,.pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp"/>' +
+      '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-d-analyze-btn">✨ Analyze &amp; Suggest Fields</button>' +
+      '</div>' +
+      '<div id="rf-d-ai-results" style="margin-top:8px"></div>' +
+      '</div>' +
       '<form id="rf-d-form"><div class="rf-form-grid">' +
-      '<div class="rf-field"><label>Document Title</label><input class="rf-input" id="rf-d-title" required value="' + esc(doc ? doc.title || '' : '') + '"/></div>' +
+      '<div class="rf-field"><label>Subject / Title</label><input class="rf-input" id="rf-d-title" required value="' + esc(doc ? doc.title || '' : '') + '"/></div>' +
       '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-d-group">' + grpSelectHtml + '</select></div>' +
+      '<div class="rf-field"><label>Category</label><select class="rf-select" id="rf-d-cat">' + catOptionsHtml + '</select></div>' +
+      '<div class="rf-field"><label>Year (Masihi)</label><input class="rf-input" id="rf-d-year" placeholder="e.g. 1957" value="' + esc(doc ? (doc.year || (docYearNum(doc) ? String(docYearNum(doc)) : '')) : '') + '"/></div>' +
+      '<div class="rf-field"><label>Source / Agency / Donor</label><input class="rf-input" id="rf-d-auth" list="rf-d-src-list" placeholder="e.g. Arkib Negara Malaysia" value="' + esc(doc ? doc.author_or_source || '' : topSrc) + '"/><datalist id="rf-d-src-list">' + sourceDatalistHtml + '</datalist></div>' +
       '<div class="rf-field"><label>Reference Code</label><input class="rf-input" id="rf-d-ref" value="' + esc(doc ? doc.reference_code || '' : '') + '"/></div>' +
-      '<div class="rf-field"><label>Category</label><input class="rf-input" id="rf-d-cat" value="' + esc(doc ? doc.category || '' : '') + '"/></div>' +
       '<div class="rf-field"><label>Script / Writing System</label><select class="rf-select" id="rf-d-script">' +
-      scripts.map(function (s) { return '<option value="' + esc(s) + '"' + (doc && doc.script_type === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') +
+      scripts.map(function (s) { return '<option value="' + esc(s) + '"' + (doc && doc.script_type && doc.script_type.toLowerCase() === s.toLowerCase() ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') +
       '</select></div>' +
-      '<div class="rf-field"><label>Date / Era</label><input class="rf-input" id="rf-d-date" value="' + esc(doc ? doc.date_created || '' : '') + '"/></div>' +
-      '<div class="rf-field"><label>Origin / Location</label><input class="rf-input" id="rf-d-orig" value="' + esc(doc ? doc.origin_location || '' : '') + '"/></div>' +
-      '<div class="rf-field"><label>Author / Source</label><input class="rf-input" id="rf-d-auth" value="' + esc(doc ? doc.author_or_source || '' : '') + '"/></div>' +
-      (doc ? '<div class="rf-field full"><label>Uploaded Files (TXT, MD, CSV, JSON, HTML, PDF, DOCX, JPG, PNG · duplicate &amp; authenticity checked)</label><div id="rf-d-files" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div><input class="rf-input" id="rf-d-addfile" type="file" accept=".txt,.md,.csv,.json,.html,.htm,.xml,.pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp"/><div id="rf-d-authinfo" style="font-size:.8rem;margin-top:6px"></div></div>' : '') +
+      '<div class="rf-field"><label>Full Date / Era</label><input class="rf-input" id="rf-d-date" placeholder="e.g. 31 Aug 1957 or 13 Muharam 1324H" value="' + esc(doc ? doc.date_created || '' : '') + '"/></div>' +
+      '<div class="rf-field full"><label>Origin / Location</label><input class="rf-input" id="rf-d-orig" value="' + esc(doc ? doc.origin_location || '' : '') + '"/></div>' +
+      (doc ? '<div class="rf-field full"><label>Uploaded Files (duplicate &amp; change-tracked)</label><div id="rf-d-files" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div><input class="rf-input" id="rf-d-addfile" type="file" accept=".txt,.md,.csv,.json,.html,.htm,.xml,.pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp"/><div id="rf-d-authinfo" style="font-size:.8rem;margin-top:6px"></div></div>' : '') +
       '<div class="rf-field full"><div style="display:flex;justify-content:space-between;align-items:center"><label>Summary</label>' + (doc ? '<button type="button" class="rf-btn rf-btn-ok rf-btn-sm" id="rf-d-sum-btn">✨ Auto-Summarize</button>' : '') + '</div><textarea class="rf-textarea" id="rf-d-sum">' + esc(doc ? doc.summary || '' : '') + '</textarea></div>' +
       '<div class="rf-field full"><label>Digitized / Extracted Text</label><textarea class="rf-textarea" id="rf-d-text" style="min-height:110px">' + esc(doc ? doc.extracted_text || '' : '') + '</textarea></div>' +
       '<div class="rf-field"><label>Key Topics (comma-separated)</label><input class="rf-input" id="rf-d-topics" value="' + esc(doc && Array.isArray(doc.key_topics) ? doc.key_topics.join(', ') : '') + '"/></div>' +
       '<div class="rf-field"><label>Key Names (comma-separated)</label><input class="rf-input" id="rf-d-names" value="' + esc(doc && Array.isArray(doc.key_names) ? doc.key_names.join(', ') : '') + '"/></div>' +
       '<div class="rf-field full"><label>Key Dates (comma-separated)</label><input class="rf-input" id="rf-d-dates" value="' + esc(doc && Array.isArray(doc.key_dates) ? doc.key_dates.join(', ') : '') + '"/></div>' +
       '<div class="rf-field full"><label>Notes</label><textarea class="rf-textarea" id="rf-d-notes">' + esc(doc ? doc.notes || '' : '') + '</textarea></div>' +
-      '</div><div class="rf-actions" style="justify-content:flex-end;margin-top:16px">' +
-      '<button type="button" class="rf-btn" id="rf-d-cancel">Cancel</button>' +
-      '<button type="submit" class="rf-btn rf-btn-primary">Save Document</button></div></form></div>';
+      '</div><div class="rf-actions" style="justify-content:space-between;margin-top:16px">' +
+      (doc && Number(doc.revision_count || 0) > 0 ? '<button type="button" class="rf-btn" id="rf-d-compare-btn">🕒 Compare Changes (' + doc.revision_count + ')</button>' : '<span></span>') +
+      '<div style="display:flex;gap:8px"><button type="button" class="rf-btn" id="rf-d-cancel">Cancel</button>' +
+      '<button type="submit" class="rf-btn rf-btn-primary">Save Document</button></div></div></form></div>';
 
     document.body.appendChild(wrap);
     wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
     document.getElementById('rf-d-cancel').onclick = function () { wrap.remove(); };
+    var cmpBtn = document.getElementById('rf-d-compare-btn');
+    if (cmpBtn && doc) {
+      cmpBtn.onclick = function () { openRevisionsModal('document', doc.slug, doc.title || doc.slug); };
+    }
+
+    function applySuggestedField(field, val) {
+      if (!val) return;
+      if (field === 'category') {
+        var sel = document.getElementById('rf-d-cat');
+        var found = false;
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value.toLowerCase() === String(val).toLowerCase()) {
+            sel.selectedIndex = i;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          var opt = document.createElement('option');
+          opt.value = val;
+          opt.textContent = val;
+          opt.selected = true;
+          sel.appendChild(opt);
+        }
+      } else if (field === 'title' || field === 'subject') {
+        document.getElementById('rf-d-title').value = val;
+      } else if (field === 'year') {
+        document.getElementById('rf-d-year').value = val;
+        if (!document.getElementById('rf-d-date').value.trim()) {
+          document.getElementById('rf-d-date').value = val;
+        }
+      } else if (field === 'author_or_source' || field === 'source') {
+        document.getElementById('rf-d-auth').value = val;
+      } else if (field === 'summary') {
+        document.getElementById('rf-d-sum').value = val;
+      } else if (field === 'script_type') {
+        var scSel = document.getElementById('rf-d-script');
+        for (var j = 0; j < scSel.options.length; j++) {
+          if (scSel.options[j].value.toLowerCase().indexOf(String(val).toLowerCase()) !== -1) {
+            scSel.selectedIndex = j;
+            break;
+          }
+        }
+      }
+    }
+
+    var aiFileInput = document.getElementById('rf-d-aifile');
+    var aiBtn = document.getElementById('rf-d-analyze-btn');
+    var aiOut = document.getElementById('rf-d-ai-results');
+    async function runAiUploadAnalysis() {
+      var f = aiFileInput.files && aiFileInput.files[0];
+      if (!f) { toast('Choose an image or document file first', false); return; }
+      pendingInitialFile = f;
+      aiBtn.disabled = true;
+      aiBtn.textContent = '⏳ Analyzing…';
+      aiOut.innerHTML = '<div style="font-size:.82rem;color:rgb(var(--text-secondary))">Reading file content and generating field suggestions…</div>';
+      try {
+        var fd = new FormData();
+        fd.append('file', f);
+        var r = await api('/admin/api/analyze-upload', { method: 'POST', body: fd });
+        if (!r.ok) {
+          aiOut.innerHTML = '<div class="rf-err-banner">' + esc((r.data && r.data.reason) || 'Analysis failed') + '</div>';
+          return;
+        }
+        lastSuggestions = r.data;
+        var fields = Array.isArray(r.data.suggested_fields) ? r.data.suggested_fields : [];
+        aiOut.innerHTML =
+          '<div class="rf-ai-chips-head">' +
+          '<span>Suggested fields from <b>' + esc(f.name) + '</b> (' + esc(r.data.analysis_mode === 'ai_and_deterministic' ? 'AI + Rules' : 'Fast Rules') + ')</span>' +
+          '<button type="button" class="rf-btn rf-btn-ok rf-btn-sm" id="rf-d-apply-all">✓ Apply All Suggestions</button>' +
+          '</div>' +
+          '<div class="rf-ai-chips">' +
+          fields.map(function (sf, idx) {
+            return '<div class="rf-ai-chip">' +
+              '<div><div class="rf-ai-chip-lbl">' + esc(sf.label) + ' <span class="rf-badge rf-badge-info">' + esc(sf.confidence) + '</span></div>' +
+              '<div class="rf-ai-chip-val">' + esc(sf.value) + '</div>' +
+              '<div class="rf-ai-chip-why">' + esc(sf.reason) + '</div></div>' +
+              '<button type="button" class="rf-btn rf-btn-sm" data-rf-apply-one="' + idx + '">Apply</button>' +
+              '</div>';
+          }).join('') +
+          '</div>';
+        document.getElementById('rf-d-apply-all').onclick = function () {
+          fields.forEach(function (sf) { applySuggestedField(sf.field, sf.value); });
+          if (lastSuggestions.extracted_text && !document.getElementById('rf-d-text').value.trim()) {
+            document.getElementById('rf-d-text').value = lastSuggestions.extracted_text;
+          }
+          if (Array.isArray(lastSuggestions.key_topics) && lastSuggestions.key_topics.length && !document.getElementById('rf-d-topics').value.trim()) {
+            document.getElementById('rf-d-topics').value = lastSuggestions.key_topics.join(', ');
+          }
+          if (Array.isArray(lastSuggestions.key_names) && lastSuggestions.key_names.length && !document.getElementById('rf-d-names').value.trim()) {
+            document.getElementById('rf-d-names').value = lastSuggestions.key_names.join(', ');
+          }
+          if (Array.isArray(lastSuggestions.key_dates) && lastSuggestions.key_dates.length && !document.getElementById('rf-d-dates').value.trim()) {
+            document.getElementById('rf-d-dates').value = lastSuggestions.key_dates.join(', ');
+          }
+          toast('Applied all AI suggestions');
+        };
+        aiOut.querySelectorAll('[data-rf-apply-one]').forEach(function (b) {
+          b.onclick = function () {
+            var sf = fields[Number(b.getAttribute('data-rf-apply-one'))];
+            if (sf) { applySuggestedField(sf.field, sf.value); toast('Applied ' + sf.label); }
+          };
+        });
+      } catch (e) {
+        aiOut.innerHTML = '<div class="rf-err-banner">Could not analyze file.</div>';
+      } finally {
+        aiBtn.disabled = false;
+        aiBtn.textContent = '✨ Analyze & Suggest Fields';
+      }
+    }
+    aiBtn.onclick = runAiUploadAnalysis;
 
     function renderDocFiles(cur) {
       var box = document.getElementById('rf-d-files');
@@ -1459,11 +1840,11 @@
           var fn = x.getAttribute('data-del-f');
           openConfirmModal({
             title: 'Delete File?',
-            message: 'Delete file "' + fn + '" from document "' + cur.title + '"? This cannot be undone.',
+            message: 'Delete file "' + fn + '" from document "' + cur.title + '"? A snapshot will remain in Change History.',
             confirmLabel: 'Delete File',
             onConfirm: async function () {
               var r = await api('/admin/api/documents/' + encodeURIComponent(cur.slug) + '/files/' + encodeURIComponent(fn), { method: 'DELETE' });
-              if (r.ok && r.data.document) { cur = r.data.document; renderDocFiles(cur); toast('File deleted'); refreshAll(false); }
+              if (r.ok && r.data.document) { cur = r.data.document; renderDocFiles(cur); toast('File deleted (change logged)'); refreshAll(false); }
             }
           });
         };
@@ -1499,7 +1880,7 @@
           document.getElementById('rf-d-text').value = doc.extracted_text || '';
           document.getElementById('rf-d-sum').value = doc.summary || '';
           renderDocFiles(doc);
-          toast('File uploaded & verified');
+          toast('File uploaded & change recorded');
           refreshAll(false);
         } else toast((r.data && r.data.reason) || 'Upload failed', false);
       }
@@ -1526,9 +1907,11 @@
       ev.preventDefault();
       var payload = {
         title: document.getElementById('rf-d-title').value,
+        subject: document.getElementById('rf-d-title').value,
         group_slug: document.getElementById('rf-d-group').value,
         reference_code: document.getElementById('rf-d-ref').value,
         category: document.getElementById('rf-d-cat').value,
+        year: document.getElementById('rf-d-year').value,
         script_type: document.getElementById('rf-d-script').value,
         date_created: document.getElementById('rf-d-date').value,
         origin_location: document.getElementById('rf-d-orig').value,
@@ -1545,9 +1928,417 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (r.ok) { wrap.remove(); toast(doc ? 'Document updated' : 'Document folder created'); await refreshAll(false); }
-      else toast((r.data && r.data.reason) || 'Save failed', false);
+      if (r.ok) {
+        var savedSlug = (r.data && r.data.document && r.data.document.slug) || (doc && doc.slug);
+        if (!doc && pendingInitialFile && savedSlug) {
+          try {
+            var fd2 = new FormData();
+            fd2.append('file', pendingInitialFile);
+            await api('/admin/api/documents/' + encodeURIComponent(savedSlug) + '/files?force=1', { method: 'POST', body: fd2 });
+          } catch (e) {}
+        }
+        trackUserPref({
+          event_type: 'save_document',
+          category: payload.category,
+          source: payload.author_or_source,
+          year: payload.year,
+          item_slug: savedSlug || '',
+          item_title: payload.title
+        });
+        wrap.remove();
+        toast(doc ? 'Document updated (change history recorded)' : 'Document created');
+        await refreshAll(false);
+      } else toast((r.data && r.data.reason) || 'Save failed', false);
     };
+  }
+
+  // ─── Maintainable Categories Manager Modal ────────────────────────────────
+  function openCategoriesModal() {
+    var wrap = document.createElement('div');
+    wrap.className = 'rf-modal-backdrop';
+
+    function draw() {
+      var rows = state.categories.map(function (c) {
+        return '<div class="rf-cat-row">' +
+          '<span class="rf-cat-dot" style="background:' + esc(c.color || '#3b82f6') + '"></span>' +
+          '<div style="flex:1;min-width:0"><strong>' + esc(c.name) + '</strong> <span class="rf-badge rf-badge-info">' + Number(c.document_count || 0) + ' doc(s)</span>' +
+          '<div style="font-size:.76rem;color:rgb(var(--text-secondary))">' + esc(c.description || 'No description') + '</div></div>' +
+          '<button type="button" class="rf-btn rf-btn-sm" data-rf-cat-edit="' + esc(c.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
+          '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-cat-del="' + esc(c.slug) + '">' + TRASH_SVG + '</button>' +
+          '</div>';
+      }).join('');
+
+      wrap.innerHTML =
+        '<div class="rf-modal"><h2>🏷️ Manage Categories</h2>' +
+        '<p style="font-size:.84rem;color:rgb(var(--text-secondary));margin:-6px 0 14px">Add, rename, or remove archival categories. Renaming automatically updates matching documents.</p>' +
+        '<form id="rf-cat-add-form" class="rf-cat-add-bar">' +
+        '<input class="rf-input" id="rf-cat-name" placeholder="New category name (e.g. Perjanjian)" required style="flex:1;min-width:160px"/>' +
+        '<input class="rf-input" id="rf-cat-desc" placeholder="Short description (optional)" style="flex:1;min-width:160px"/>' +
+        '<input type="color" id="rf-cat-color" value="#3b82f6" title="Badge color" style="width:40px;height:36px;border-radius:8px;border:1px solid var(--border-medium);background:transparent;cursor:pointer"/>' +
+        '<button type="submit" class="rf-btn rf-btn-primary rf-btn-sm">＋ Add</button>' +
+        '</form>' +
+        '<div class="rf-cat-list">' + (rows || '<div class="rf-empty">No categories yet.</div>') + '</div>' +
+        '<div class="rf-actions" style="justify-content:flex-end;margin-top:14px"><button type="button" class="rf-btn" id="rf-cat-close">Done</button></div>' +
+        '</div>';
+
+      wrap.querySelector('#rf-cat-close').onclick = function () { wrap.remove(); };
+      wrap.querySelector('#rf-cat-add-form').onsubmit = async function (ev) {
+        ev.preventDefault();
+        var r = await api('/admin/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: wrap.querySelector('#rf-cat-name').value,
+            description: wrap.querySelector('#rf-cat-desc').value,
+            color: wrap.querySelector('#rf-cat-color').value
+          })
+        });
+        if (r.ok) {
+          toast('Category added');
+          var cr = await api('/admin/api/categories?ts=' + Date.now());
+          if (cr.ok && Array.isArray(cr.data)) state.categories = cr.data;
+          draw();
+          renderBody();
+        } else toast((r.data && r.data.reason) || 'Failed adding category', false);
+      };
+      wrap.querySelectorAll('[data-rf-cat-edit]').forEach(function (b) {
+        b.onclick = function () {
+          var slug = b.getAttribute('data-rf-cat-edit');
+          var cat = state.categories.find(function (x) { return x.slug === slug; });
+          if (!cat) return;
+          var newName = window.prompt('Rename category:', cat.name);
+          if (!newName || !newName.trim()) return;
+          var newDesc = window.prompt('Category description:', cat.description || '');
+          api('/admin/api/categories/' + encodeURIComponent(slug), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim(), description: newDesc == null ? cat.description : newDesc })
+          }).then(async function (r) {
+            if (r.ok) {
+              toast('Category updated (' + (r.data.updated_documents || 0) + ' doc(s) updated)');
+              await refreshAll(false);
+              draw();
+            } else toast((r.data && r.data.reason) || 'Update failed', false);
+          });
+        };
+      });
+      wrap.querySelectorAll('[data-rf-cat-del]').forEach(function (b) {
+        b.onclick = function () {
+          var slug = b.getAttribute('data-rf-cat-del');
+          var cat = state.categories.find(function (x) { return x.slug === slug; });
+          if (!cat) return;
+          openConfirmModal({
+            title: 'Delete Category "' + cat.name + '"?',
+            message: 'Remove "' + cat.name + '"? Any ' + Number(cat.document_count || 0) + ' linked document(s) will keep all their files and be reassigned to "Lain-lain".',
+            confirmLabel: 'Delete Category',
+            onConfirm: async function () {
+              var r = await api('/admin/api/categories/' + encodeURIComponent(slug) + '?reassign_to=lain_lain', { method: 'DELETE' });
+              if (r.ok) {
+                toast('Category deleted');
+                await refreshAll(false);
+                draw();
+              } else toast((r.data && r.data.reason) || 'Delete failed', false);
+            }
+          });
+        };
+      });
+    }
+
+    document.body.appendChild(wrap);
+    wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
+    draw();
+  }
+
+  // ─── User Preferences & Personalization Modal ─────────────────────────────
+  function openPreferencesModal() {
+    var wrap = document.createElement('div');
+    wrap.className = 'rf-modal-backdrop';
+    var pref = (state.preferencesData && state.preferencesData.preferences) || {};
+    var topCats = (pref.top_categories || []).map(function (x) { return '<span class="rf-badge rf-badge-info">' + esc(x.value) + ' (' + x.clicks + ')</span>'; }).join(' ');
+    var topSrcs = (pref.top_sources || []).map(function (x) { return '<span class="rf-badge rf-badge-ok">' + esc(x.value) + ' (' + x.clicks + ')</span>'; }).join(' ');
+    var topFlds = (pref.top_folders || []).map(function (x) { return '<span class="rf-badge">' + esc(x.value) + ' (' + x.clicks + ')</span>'; }).join(' ');
+
+    wrap.innerHTML =
+      '<div class="rf-modal"><h2>⭐ My Preferences &amp; Learned Interests</h2>' +
+      '<p style="font-size:.84rem;color:rgb(var(--text-secondary));margin:-6px 0 14px">ArkibVision learns which categories, sources, and folders you click most often, and lets you pin your own preferred items.</p>' +
+      '<div class="rf-pref-learned">' +
+      '<div><b>Most Clicked Categories:</b> ' + (topCats || '<span style="opacity:.7">No clicks recorded yet</span>') + '</div>' +
+      '<div><b>Most Clicked Sources:</b> ' + (topSrcs || '<span style="opacity:.7">No clicks recorded yet</span>') + '</div>' +
+      '<div><b>Most Clicked Folders:</b> ' + (topFlds || '<span style="opacity:.7">No clicks recorded yet</span>') + '</div>' +
+      '</div>' +
+      '<form id="rf-pref-form" class="rf-form-grid" style="margin-top:12px">' +
+      '<div class="rf-field full"><label>Pinned Preferred Categories (comma-separated)</label><input class="rf-input" id="rf-p-cats" placeholder="e.g. Manuskrip, Surat Rasmi" value="' + esc((pref.pinned_categories || []).join(', ')) + '"/></div>' +
+      '<div class="rf-field full"><label>Pinned Preferred Sources (comma-separated)</label><input class="rf-input" id="rf-p-srcs" placeholder="e.g. Arkib Negara Malaysia, Jabatan Perdana Menteri" value="' + esc((pref.pinned_sources || []).join(', ')) + '"/></div>' +
+      '<div class="rf-field full"><label>Pinned Preferred Folders (comma-separated)</label><input class="rf-input" id="rf-p-flds" placeholder="e.g. Historical Manuscripts" value="' + esc((pref.pinned_folders || []).join(', ')) + '"/></div>' +
+      '<div class="rf-field full"><label>Custom Interest Keywords / Tags (comma-separated)</label><input class="rf-input" id="rf-p-tags" placeholder="e.g. merdeka, jawi, perjanjian, sultan" value="' + esc((pref.custom_interests || []).join(', ')) + '"/></div>' +
+      '<div class="rf-actions full" style="justify-content:space-between;margin-top:10px">' +
+      '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" id="rf-pref-reset">Reset Learned History</button>' +
+      '<div style="display:flex;gap:8px"><button type="button" class="rf-btn" id="rf-pref-cancel">Cancel</button><button type="submit" class="rf-btn rf-btn-primary">Save Preferences</button></div>' +
+      '</div></form></div>';
+
+    document.body.appendChild(wrap);
+    wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
+    wrap.querySelector('#rf-pref-cancel').onclick = function () { wrap.remove(); };
+    wrap.querySelector('#rf-pref-reset').onclick = async function () {
+      var r = await api('/admin/api/preferences/reset', { method: 'POST' });
+      if (r.ok) { wrap.remove(); toast('Preferences reset'); await refreshAll(false); }
+    };
+    wrap.querySelector('#rf-pref-form').onsubmit = async function (ev) {
+      ev.preventDefault();
+      var splitCsv = function (id) {
+        return wrap.querySelector(id).value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+      };
+      var r = await api('/admin/api/preferences', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pinned_categories: splitCsv('#rf-p-cats'),
+          pinned_sources: splitCsv('#rf-p-srcs'),
+          pinned_folders: splitCsv('#rf-p-flds'),
+          custom_interests: splitCsv('#rf-p-tags')
+        })
+      });
+      if (r.ok) { wrap.remove(); toast('Preferences saved'); await refreshAll(false); }
+      else toast('Failed saving preferences', false);
+    };
+  }
+
+  // ─── Before vs. After Change Detection & Revision Diff Modal ──────────────
+  async function openRevisionsModal(entityType, slug, title) {
+    var wrap = document.createElement('div');
+    wrap.className = 'rf-modal-backdrop';
+    wrap.innerHTML = '<div class="rf-modal rf-modal-wide"><h2>🕒 Change History — ' + esc(title) + '</h2><div class="rf-empty">Loading revision history…</div></div>';
+    document.body.appendChild(wrap);
+    wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
+
+    var r = await api('/admin/api/revisions/' + encodeURIComponent(entityType) + '/' + encodeURIComponent(slug) + '?ts=' + Date.now());
+    var revs = (r.ok && r.data && Array.isArray(r.data.revisions)) ? r.data.revisions : [];
+    var selectedIdx = 0;
+
+    function drawRev() {
+      if (!revs.length) {
+        wrap.innerHTML =
+          '<div class="rf-modal"><h2>🕒 Change History — ' + esc(title) + '</h2>' +
+          '<div class="rf-empty">No edits or file changes recorded for this record yet.</div>' +
+          '<div class="rf-actions" style="justify-content:flex-end;margin-top:14px"><button type="button" class="rf-btn" id="rf-rev-close">Close</button></div></div>';
+        wrap.querySelector('#rf-rev-close').onclick = function () { wrap.remove(); };
+        return;
+      }
+      var cur = revs[selectedIdx] || revs[0];
+      var listHtml = revs.map(function (rv, idx) {
+        return '<button type="button" class="rf-rev-item' + (idx === selectedIdx ? ' active' : '') + '" data-rf-rev-idx="' + idx + '">' +
+          '<div class="rf-rev-item-title">' + esc(rv.summary || rv.action) + '</div>' +
+          '<div class="rf-rev-item-meta">' + esc(rv.actor || 'admin') + ' · ' + esc((rv.timestamp || '').replace('T', ' ').slice(0, 19)) + '</div>' +
+          '</button>';
+      }).join('');
+
+      var detailHtml = '';
+      if (cur.field_diffs && cur.field_diffs.length) {
+        detailHtml += '<div class="rf-diff-section"><h4>Metadata &amp; Text Changes</h4>' +
+          cur.field_diffs.map(function (fd) {
+            return '<div class="rf-diff-card">' +
+              '<div class="rf-diff-field-head"><strong>' + esc(fd.label || fd.field) + '</strong><span class="rf-badge ' + (fd.kind === 'added' ? 'rf-badge-ok' : fd.kind === 'removed' ? 'rf-badge-crit' : 'rf-badge-warn') + '">' + esc(fd.kind) + '</span></div>' +
+              '<div class="rf-diff-cols">' +
+              '<div class="rf-diff-before"><div class="rf-diff-lbl">Before</div><pre>' + esc(fd.before || '(empty)') + '</pre></div>' +
+              '<div class="rf-diff-after"><div class="rf-diff-lbl">After</div><pre>' + esc(fd.after || '(empty)') + '</pre></div>' +
+              '</div></div>';
+          }).join('') + '</div>';
+      }
+      if (cur.file_diff) {
+        var fd = cur.file_diff;
+        detailHtml += '<div class="rf-diff-section"><h4>File / Image Change — ' + esc(fd.filename) + ' (' + esc(fd.change_kind) + ')</h4>' +
+          '<div class="rf-diff-cols">' +
+          '<div class="rf-diff-before"><div class="rf-diff-lbl">Before</div>' +
+          (fd.is_image && fd.before_snapshot_url ? '<img class="rf-diff-img" src="' + esc(apiUrl(fd.before_snapshot_url)) + '" alt="Before"/>' : '<div class="rf-diff-placeholder">' + (fd.before_snapshot_url ? '📄 Previous file snapshot saved' : '(did not exist)') + '</div>') +
+          '<div class="rf-diff-meta">' +
+          (fd.before_dims ? 'Dimensions: ' + esc(fd.before_dims) + '<br/>' : '') +
+          (fd.before_size != null ? 'Size: ' + fd.before_size + ' bytes<br/>' : '') +
+          (fd.before_sha256 ? 'SHA-256: <code>' + esc(fd.before_sha256.slice(0, 16)) + '…</code>' : '') +
+          '</div></div>' +
+          '<div class="rf-diff-after"><div class="rf-diff-lbl">After</div>' +
+          (fd.is_image && fd.after_snapshot_url ? '<img class="rf-diff-img" src="' + esc(apiUrl(fd.after_snapshot_url)) + '" alt="After"/>' : '<div class="rf-diff-placeholder">' + (fd.after_snapshot_url ? '📄 Updated file snapshot saved' : '(removed)') + '</div>') +
+          '<div class="rf-diff-meta">' +
+          (fd.after_dims ? 'Dimensions: ' + esc(fd.after_dims) + '<br/>' : '') +
+          (fd.after_size != null ? 'Size: ' + fd.after_size + ' bytes<br/>' : '') +
+          (fd.after_sha256 ? 'SHA-256: <code>' + esc(fd.after_sha256.slice(0, 16)) + '…</code>' : '') +
+          '</div></div></div>' +
+          (fd.perceptual_distance != null ? '<div style="margin-top:8px;font-size:.82rem"><b>Visual Perceptual Difference (aHash):</b> ' + fd.perceptual_distance + ' / 64 bits changed</div>' : '') +
+          '</div>';
+      }
+
+      wrap.innerHTML =
+        '<div class="rf-modal rf-modal-wide">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div><h2 style="margin:0">🕒 Before vs. After Changes — ' + esc(title) + '</h2><div style="font-size:.82rem;color:rgb(var(--text-secondary))">' + revs.length + ' recorded revision(s)</div></div><button type="button" class="rf-btn rf-btn-sm" id="rf-rev-close">✕ Close</button></div>' +
+        '<div class="rf-rev-layout"><div class="rf-rev-list">' + listHtml + '</div><div class="rf-rev-detail">' + detailHtml + '</div></div>' +
+        '</div>';
+
+      wrap.querySelector('#rf-rev-close').onclick = function () { wrap.remove(); };
+      wrap.querySelectorAll('[data-rf-rev-idx]').forEach(function (b) {
+        b.onclick = function () { selectedIdx = Number(b.getAttribute('data-rf-rev-idx')); drawRev(); };
+      });
+    }
+    drawRev();
+  }
+
+  // ─── External SQL Audit Log Inspector Modal ───────────────────────────────
+  function openSqlInspectModal(onDone) {
+    var wrap = document.createElement('div');
+    wrap.className = 'rf-modal-backdrop';
+    wrap.innerHTML =
+      '<div class="rf-modal"><h2>🗄️ Inspect External SQL / Database Audit Logs</h2>' +
+      '<p style="font-size:.84rem;color:rgb(var(--text-secondary));margin:-6px 0 12px">Paste raw SQL queries or JSONL audit lines to scan for SQL injection, destructive queries missing WHERE, DDL schema changes, or unbounded SELECT * dumps.</p>' +
+      '<div class="rf-field"><label>Actor / DB User (optional)</label><input class="rf-input" id="rf-sql-actor" value="external_db_user"/></div>' +
+      '<div class="rf-field" style="margin-top:10px"><label>SQL Queries or Audit Log Lines</label><textarea class="rf-textarea" id="rf-sql-input" style="min-height:150px;font-family:monospace" placeholder="SELECT * FROM archival_profiles;\nDELETE FROM documents;\nSELECT * FROM users WHERE name = \'\' OR 1=1 UNION SELECT * FROM secrets--"></textarea></div>' +
+      '<div id="rf-sql-out" style="margin-top:10px"></div>' +
+      '<div class="rf-actions" style="justify-content:flex-end;margin-top:14px">' +
+      '<button type="button" class="rf-btn" id="rf-sql-cancel">Close</button>' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="rf-sql-run">🔍 Run Rules Engine</button>' +
+      '</div></div>';
+
+    document.body.appendChild(wrap);
+    wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
+    wrap.querySelector('#rf-sql-cancel').onclick = function () { wrap.remove(); };
+    wrap.querySelector('#rf-sql-run').onclick = async function () {
+      var sqlText = wrap.querySelector('#rf-sql-input').value;
+      var actor = wrap.querySelector('#rf-sql-actor').value;
+      var r = await api('/admin/api/audit/inspect-sql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql_log: sqlText, actor: actor })
+      });
+      if (!r.ok) {
+        toast((r.data && r.data.reason) || 'Inspection failed', false);
+        return;
+      }
+      state.sqlInspectResult = r.data;
+      var alerts = r.data.alerts || [];
+      wrap.querySelector('#rf-sql-out').innerHTML =
+        '<div class="rf-audit-summary-box"><b>Scanned ' + Number(r.data.lines_analyzed || 0) + ' line(s) · Found ' + alerts.length + ' anomaly(ies) · Risk: ' + esc(r.data.risk_level) + '</b>' +
+        (alerts.length ? '<ul style="margin:8px 0 0;padding-left:18px">' + alerts.map(function (a) {
+          return '<li><span class="rf-badge ' + (a.severity === 'CRITICAL' || a.severity === 'HIGH' ? 'rf-badge-crit' : 'rf-badge-warn') + '">' + esc(a.severity) + '</span> <b>' + esc(a.title) + '</b> — ' + esc(a.recommended_action) + '</li>';
+        }).join('') + '</ul>' : '<div style="margin-top:6px;color:#10b981">✓ No abnormal SQL patterns found.</div>') +
+        '</div>';
+      if (onDone) onDone();
+    };
+  }
+
+  // ─── Tab 5: Audit Management, Anomaly Detection & Change Log ──────────────
+  function renderAudit(body) {
+    var data = state.auditData || {};
+    var snap = data.snapshot || {
+      risk_level: 'LOW',
+      risk_score: 0,
+      total_events_analyzed: 0,
+      severity_counts: {},
+      rule_alerts: [],
+      statistical_outliers: [],
+      recent_events: []
+    };
+    var revs = data.recent_revisions || [];
+    var sevCls = function (s) {
+      return s === 'CRITICAL' || s === 'HIGH' ? 'rf-badge-crit' : s === 'MEDIUM' ? 'rf-badge-warn' : 'rf-badge-ok';
+    };
+
+    var explanationText = state.auditAiExplanation || data.deterministic_summary || 'No anomalies detected.';
+    var diskHtml = '';
+    if (state.diskScanResult) {
+      var ds = state.diskScanResult;
+      diskHtml = '<div class="rf-audit-panel"><h3>💾 External On-Disk File Change Scan</h3>' +
+        '<div style="font-size:.84rem;margin-bottom:8px">Checked <b>' + Number(ds.checked_files || 0) + '</b> registered files · Modified externally: <b>' + Number(ds.modified_count || 0) + '</b> · Missing: <b>' + Number(ds.missing_count || 0) + '</b></div>' +
+        ((ds.findings && ds.findings.length)
+          ? ds.findings.map(function (f) {
+            return '<div class="rf-alert-row"><span class="rf-badge rf-badge-crit">' + esc(f.kind) + '</span> <b>' + esc(f.label || f.path) + '</b> <code>' + esc(f.path) + '</code></div>';
+          }).join('')
+          : '<div style="font-size:.84rem;color:#10b981">✓ All registered archival files match their verified SHA-256 checksums on disk.</div>') +
+        '</div>';
+    }
+
+    body.innerHTML =
+      '<div class="rf-section-head"><div><h2>🛡️ Audit Management, Anomaly Inspection &amp; Change Log</h2>' +
+      '<p>Hybrid Deterministic Rules Engine (suspicious CRUD, auth brute-force, SQL/NoSQL injection), Statistical Outlier Detection (Z-score/IQR), AI Anomaly Explainer, and Before/After Change Tracking.</p></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="rf-aud-explain-btn">✨ AI Explain Anomalies</button>' +
+      '<button type="button" class="rf-btn" id="rf-aud-sql-btn">🗄️ Inspect SQL Logs</button>' +
+      '<button type="button" class="rf-btn" id="rf-aud-disk-btn">🔍 Scan Disk Changes</button>' +
+      '<a class="rf-btn" href="' + esc(apiUrl('/admin/api/audit/report/docx')) + '" download="arkib_audit_report.docx">📄 DOCX Report</a>' +
+      '<a class="rf-btn" href="' + esc(apiUrl('/admin/api/audit/report/pdf')) + '" download="arkib_audit_report.pdf">📕 PDF Report</a>' +
+      '</div></div>' +
+      '<div class="rf-kpi-grid">' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Overall Risk</div><div class="rf-kpi-val"><span class="rf-badge ' + sevCls(snap.risk_level) + '" style="font-size:.95rem;padding:4px 10px">' + esc(snap.risk_level) + '</span> <span style="font-size:.9rem">' + Number(snap.risk_score || 0) + '/100</span></div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Events Analyzed</div><div class="rf-kpi-val">' + Number(snap.total_events_analyzed || 0) + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Rules Engine Alerts</div><div class="rf-kpi-val">' + (snap.rule_alerts ? snap.rule_alerts.length : 0) + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Statistical Outliers</div><div class="rf-kpi-val">' + (snap.statistical_outliers ? snap.statistical_outliers.length : 0) + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Tracked Revisions</div><div class="rf-kpi-val">' + revs.length + '</div></div>' +
+      '</div>' +
+      '<div class="rf-audit-panel"><h3>✨ Anomaly Explanation &amp; Executive Summary' + (state.auditAiSource ? ' <span class="rf-badge rf-badge-info">' + esc(state.auditAiSource) + '</span>' : '') + '</h3>' +
+      '<pre class="rf-audit-explain-pre">' + esc(explanationText) + '</pre></div>' +
+      diskHtml +
+      '<div class="rf-audit-panel"><h3>🚨 Rules Engine Alerts (' + (snap.rule_alerts ? snap.rule_alerts.length : 0) + ')</h3>' +
+      (snap.rule_alerts && snap.rule_alerts.length ? snap.rule_alerts.map(function (a) {
+        return '<div class="rf-alert-row">' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="rf-badge ' + sevCls(a.severity) + '">' + esc(a.severity) + '</span><span class="rf-badge">' + esc(a.rule_id) + '</span><strong>' + esc(a.title) + '</strong><span style="margin-left:auto;font-size:.76rem;color:rgb(var(--text-secondary))">' + esc(a.actor) + ' · ' + esc((a.timestamp || '').replace('T', ' ').slice(0, 19)) + '</span></div>' +
+          '<div style="font-size:.83rem;margin-top:4px">' + esc(a.description) + '</div>' +
+          '<div style="font-size:.78rem;margin-top:4px;color:rgb(var(--text-secondary))"><b>Recommended Action:</b> ' + esc(a.recommended_action) + '</div>' +
+          '</div>';
+      }).join('') : '<div style="font-size:.84rem;color:#10b981">✓ No suspicious CRUD bursts, auth brute-force attempts, or injection probes detected.</div>') +
+      '</div>' +
+      '<div class="rf-audit-panel"><h3>📈 Statistical Outlier Findings (' + (snap.statistical_outliers ? snap.statistical_outliers.length : 0) + ')</h3>' +
+      (snap.statistical_outliers && snap.statistical_outliers.length ? snap.statistical_outliers.map(function (o) {
+        return '<div class="rf-alert-row"><span class="rf-badge ' + sevCls(o.severity) + '">' + esc(o.severity) + '</span> <b>' + esc(o.metric) + '</b> (Z=' + o.z_score + ') — ' + esc(o.explanation) + '</div>';
+      }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No behavioral outliers detected against current rolling baselines.</div>') +
+      '</div>' +
+      '<div class="rf-audit-panel"><h3>🕒 Recent File &amp; Data Changes (Before vs. After)</h3>' +
+      (revs.length ? revs.map(function (rv) {
+        return '<div class="rf-alert-row" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<div><span class="rf-badge rf-badge-info">' + esc(rv.entity_type) + '</span> <strong>' + esc(rv.title || rv.slug) + '</strong> — ' + esc(rv.summary) +
+          '<div style="font-size:.76rem;color:rgb(var(--text-secondary))">' + esc(rv.actor) + ' · ' + esc((rv.timestamp || '').replace('T', ' ').slice(0, 19)) + '</div></div>' +
+          '<button type="button" class="rf-btn rf-btn-sm" data-rf-aud-cmp="' + esc(rv.entity_type + '::' + rv.slug + '::' + (rv.title || rv.slug)) + '">🔍 Compare Before/After</button>' +
+          '</div>';
+      }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No record modifications logged yet. Edit any document, photo, or profile to compare Before vs. After.</div>') +
+      '</div>' +
+      '<div class="rf-audit-panel"><h3>📜 Recent Access &amp; CRUD Activity (' + (snap.recent_events ? snap.recent_events.length : 0) + ')</h3>' +
+      '<div style="overflow-x:auto"><table class="rf-audit-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Endpoint</th><th>Status</th><th>Latency</th></tr></thead><tbody>' +
+      (snap.recent_events && snap.recent_events.length ? snap.recent_events.slice(0, 25).map(function (ev) {
+        return '<tr><td>' + esc((ev.timestamp || '').replace('T', ' ').slice(0, 19)) + '</td><td>' + esc(ev.actor) + '</td><td><span class="rf-badge">' + esc(ev.action) + '</span></td><td><code>' + esc(ev.method + ' ' + ev.path + (ev.query ? '?' + ev.query : '')) + '</code></td><td>' + Number(ev.status_code || 0) + '</td><td>' + Number(ev.duration_ms || 0) + ' ms</td></tr>';
+      }).join('') : '<tr><td colspan="6" style="text-align:center;color:rgb(var(--text-secondary))">No audit events recorded yet.</td></tr>') +
+      '</tbody></table></div></div>';
+
+    document.getElementById('rf-aud-explain-btn').onclick = async function (ev) {
+      var btn = ev.target;
+      btn.disabled = true;
+      btn.textContent = '⏳ Analyzing with AI…';
+      var r = await api('/admin/api/audit/explain', { method: 'POST' });
+      btn.disabled = false;
+      btn.textContent = '✨ AI Explain Anomalies';
+      if (r.ok && r.data) {
+        state.auditAiExplanation = r.data.explanation || '';
+        state.auditAiSource = r.data.source || 'ai';
+        toast('Audit explanation updated');
+        renderAudit(body);
+      } else toast('Failed explaining anomalies', false);
+    };
+    document.getElementById('rf-aud-sql-btn').onclick = function () {
+      openSqlInspectModal(function () { refreshAll(false); });
+    };
+    document.getElementById('rf-aud-disk-btn').onclick = async function (ev) {
+      var btn = ev.target;
+      btn.disabled = true;
+      btn.textContent = '⏳ Scanning…';
+      var r = await api('/admin/api/revisions/scan-disk', { method: 'POST' });
+      btn.disabled = false;
+      btn.textContent = '🔍 Scan Disk Changes';
+      if (r.ok && r.data) {
+        state.diskScanResult = r.data;
+        toast('Disk scan complete (' + Number(r.data.modified_count || 0) + ' modified)');
+        renderAudit(body);
+      } else toast('Disk scan failed', false);
+    };
+    body.querySelectorAll('[data-rf-aud-cmp]').forEach(function (b) {
+      b.onclick = function () {
+        var parts = b.getAttribute('data-rf-aud-cmp').split('::');
+        openRevisionsModal(parts[0], parts[1], parts[2] || parts[1]);
+      };
+    });
   }
 
   // ─── Tab 5: System Monitor, File Integrity & Conservation Lab ─────────────

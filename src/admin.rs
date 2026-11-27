@@ -1,8 +1,12 @@
 #![forbid(unsafe_code)]
 
 use crate::archives;
+use crate::audit;
+use crate::categories;
 use crate::config::{ADMIN_SESSION_COOKIE, ADMIN_SESSION_TTL_SECS, is_document_ext, is_image_ext};
 use crate::metadata::value_to_trimmed_string;
+use crate::preferences;
+use crate::revisions;
 use crate::service::ArkibService;
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, Request, State};
@@ -135,6 +139,97 @@ pub async fn cors_middleware(
         h.insert(header::VARY, HeaderValue::from_static("Origin"));
     }
     resp
+}
+
+async fn audit_middleware(State(state): State<AdminState>, req: Request, next: Next) -> Response {
+    let method = req.method().as_str().to_string();
+    let path = req.uri().path().to_string();
+    let query = req.uri().query().unwrap_or("").to_string();
+    let is_authed = valid_session_token(req.headers(), &state.sessions).is_some();
+    let ip = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or("127.0.0.1").trim().to_string())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let started = std::time::Instant::now();
+
+    let resp = next.run(req).await;
+    let status = resp.status().as_u16();
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    let skip_quiet = method == "GET"
+        && status < 400
+        && query.is_empty()
+        && (path.starts_with("/admin/profile-images/")
+            || path.starts_with("/admin/location-images/")
+            || path.starts_with("/admin/document-files/")
+            || path.starts_with("/admin/images/")
+            || path.starts_with("/admin/enhanced-images/")
+            || path.starts_with("/admin/revision-snapshots/")
+            || matches!(
+                path.as_str(),
+                "/admin/api/session"
+                    | "/admin/api/audit/dashboard"
+                    | "/admin/api/system/health"
+                    | "/admin/api/preferences"
+            ));
+    if skip_quiet || method == "OPTIONS" {
+        return resp;
+    }
+
+    let action = if path == "/admin/api/login" {
+        if status == 200 {
+            "LOGIN_OK"
+        } else {
+            "LOGIN_FAIL"
+        }
+    } else if path.contains("/export/") || path.contains("/report/") {
+        "EXPORT"
+    } else {
+        match method.as_str() {
+            "POST" => "CREATE",
+            "PATCH" | "PUT" => "UPDATE",
+            "DELETE" => "DELETE",
+            _ => "READ",
+        }
+    };
+
+    let (resource_type, resource_id) = classify_resource(&path);
+    let actor = if is_authed || (path == "/admin/api/login" && status == 200) {
+        state.service.cfg.admin_user.clone()
+    } else {
+        "guest".to_string()
+    };
+    let role = if is_authed { "admin" } else { "guest" };
+
+    audit::log_event(
+        &state.service.cfg,
+        &actor,
+        role,
+        &ip,
+        &method,
+        &path,
+        &query,
+        action,
+        &resource_type,
+        &resource_id,
+        status,
+        "",
+        duration_ms,
+    );
+    resp
+}
+
+fn classify_resource(path: &str) -> (String, String) {
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() >= 3 && parts[0] == "admin" && parts[1] == "api" {
+        let rtype = parts[2].to_string();
+        let rid = parts.get(3).copied().unwrap_or("").to_string();
+        (rtype, rid)
+    } else {
+        ("admin".to_string(), path.to_string())
+    }
 }
 
 async fn auth_middleware(State(state): State<AdminState>, req: Request, next: Next) -> Response {
@@ -289,10 +384,60 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
             "/admin/enhanced-images/{*filename}",
             get(admin_enhanced_image),
         )
+        // Maintainable Categories CRUD
+        .route(
+            "/admin/api/categories",
+            get(admin_api_categories).post(admin_create_category),
+        )
+        .route(
+            "/admin/api/categories/{slug}",
+            patch(admin_update_category).delete(admin_delete_category),
+        )
+        // AI Content Analysis -> Auto-Suggest Form Fields on Upload
+        .route("/admin/api/analyze-upload", post(admin_analyze_upload))
+        // Change Detection & Before/After Revision Comparison
+        .route("/admin/api/revisions", get(admin_api_revisions))
+        .route(
+            "/admin/api/revisions/{entity_type}/{slug}",
+            get(admin_api_entity_revisions),
+        )
+        .route(
+            "/admin/api/revisions/scan-disk",
+            post(admin_revisions_scan_disk),
+        )
+        .route(
+            "/admin/revision-snapshots/{entity_type}/{slug}/{filename}",
+            get(admin_revision_snapshot),
+        )
+        // Audit Management, Rules Engine, Outlier Detection & AI Summary Report
+        .route("/admin/api/audit/dashboard", get(admin_audit_dashboard))
+        .route("/admin/api/audit/inspect-sql", post(admin_audit_inspect_sql))
+        .route("/admin/api/audit/explain", post(admin_audit_explain))
+        .route(
+            "/admin/api/audit/report/{format}",
+            get(admin_audit_export_report),
+        )
+        // User Click Preference Learning & Personalization
+        .route(
+            "/admin/api/preferences",
+            get(admin_api_preferences).patch(admin_update_preferences),
+        )
+        .route(
+            "/admin/api/preferences/track",
+            post(admin_track_preference),
+        )
+        .route(
+            "/admin/api/preferences/reset",
+            post(admin_reset_preferences),
+        )
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            audit_middleware,
         ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -418,12 +563,25 @@ async fn admin_api_requests(State(state): State<AdminState>) -> Json<Value> {
 async fn admin_api_profiles(State(state): State<AdminState>) -> Json<Value> {
     let svc = state.service.clone();
     let profiles = tokio::task::spawn_blocking(move || {
+        let rev_map = revisions::revision_summary_map(&svc.cfg, "profile");
         let counts = svc.store.list_counts();
         let mut entries: Vec<(String, usize)> = counts.into_iter().collect();
         entries.sort_by_key(|(name, _)| name.to_ascii_lowercase());
         entries
             .into_iter()
-            .map(|(n, count)| svc.admin_profile_record_with_count(&n, count))
+            .map(|(n, count)| {
+                let mut rec = svc.admin_profile_record_with_count(&n, count);
+                if let Some(obj) = rec.as_object_mut() {
+                    let slug = obj["slug"].as_str().unwrap_or("").to_string();
+                    if let Some((rc, lm)) = rev_map.get(&slug) {
+                        obj.insert("revision_count".to_string(), json!(rc));
+                        obj.insert("last_modified_at".to_string(), json!(lm));
+                    } else {
+                        obj.insert("revision_count".to_string(), json!(0));
+                    }
+                }
+                rec
+            })
             .collect::<Vec<_>>()
     })
     .await
@@ -781,6 +939,7 @@ async fn admin_update_profile(
 
     let svc = state.service.clone();
     let (status, body) = tokio::task::spawn_blocking(move || {
+        let before_rec = svc.admin_profile_record(&identity);
         if new_identity != identity {
             let res = svc.tool_rename_identity(&identity, &new_identity, &svc.cfg.admin_key);
             if res.get("status").and_then(Value::as_str) != Some("updated") {
@@ -796,9 +955,23 @@ async fn admin_update_profile(
                 return (StatusCode::BAD_REQUEST, res);
             }
         }
+        let after_rec = svc.admin_profile_record(&identity);
+        if let (Some(bm), Some(am)) = (before_rec.as_object(), after_rec.as_object()) {
+            let slug = am["slug"].as_str().unwrap_or(&identity);
+            let _ = revisions::record_metadata_change(
+                &svc.cfg,
+                "profile",
+                slug,
+                &identity,
+                &svc.cfg.admin_user,
+                "metadata_edit",
+                bm,
+                am,
+            );
+        }
         (
             StatusCode::OK,
-            json!({ "status": "updated", "profile": svc.admin_profile_record(&identity) }),
+            json!({ "status": "updated", "profile": after_rec }),
         )
     })
     .await
@@ -888,12 +1061,26 @@ async fn admin_add_profile_image(
 
     let svc = state.service.clone();
     let tp = temp_path.clone();
+    let bytes_clone = bytes.clone();
+    let upload_name_clone = upload_name.clone();
+    let slug_clone = slug.clone();
     let (status, body) = tokio::task::spawn_blocking(move || {
         let res = svc.admin_add_profile_image(&identity, &tp);
         let _ = fs::remove_file(&tp);
         if res.get("status").and_then(Value::as_str) != Some("image_added") {
             return (StatusCode::BAD_REQUEST, res);
         }
+        let _ = revisions::record_file_change(
+            &svc.cfg,
+            "profile",
+            &slug_clone,
+            &identity,
+            &svc.cfg.admin_user,
+            &upload_name_clone,
+            "added",
+            None,
+            Some(&bytes_clone),
+        );
         let mut out = res.as_object().cloned().unwrap_or_default();
         out.insert("profile".to_string(), svc.admin_profile_record(&identity));
         (StatusCode::OK, Value::Object(out))
@@ -1160,9 +1347,26 @@ async fn admin_reject(
 
 async fn admin_api_locations(State(state): State<AdminState>) -> Json<Value> {
     let cfg = state.service.cfg.clone();
-    let list = tokio::task::spawn_blocking(move || archives::list_locations(&cfg))
-        .await
-        .unwrap_or_default();
+    let list = tokio::task::spawn_blocking(move || {
+        let rev_map = revisions::revision_summary_map(&cfg, "location");
+        archives::list_locations(&cfg)
+            .into_iter()
+            .map(|mut rec| {
+                if let Some(obj) = rec.as_object_mut() {
+                    let slug = obj["slug"].as_str().unwrap_or("").to_string();
+                    if let Some((rc, lm)) = rev_map.get(&slug) {
+                        obj.insert("revision_count".to_string(), json!(rc));
+                        obj.insert("last_modified_at".to_string(), json!(lm));
+                    } else {
+                        obj.insert("revision_count".to_string(), json!(0));
+                    }
+                }
+                rec
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
     Json(Value::Array(list))
 }
 
@@ -1204,7 +1408,26 @@ async fn admin_update_location(
     };
     let cfg = state.service.cfg.clone();
     match tokio::task::spawn_blocking(move || {
-        archives::save_location(&cfg, Some(&clean_slug), &payload)
+        let before = archives::load_location(&cfg, &clean_slug);
+        let saved = archives::save_location(&cfg, Some(&clean_slug), &payload)?;
+        if let (Some(b), Some(a)) = (
+            before.as_ref().and_then(Value::as_object),
+            saved.as_object(),
+        ) {
+            let slug = a["slug"].as_str().unwrap_or(&clean_slug);
+            let title = a["name"].as_str().unwrap_or(slug);
+            let _ = revisions::record_metadata_change(
+                &cfg,
+                "location",
+                slug,
+                title,
+                &cfg.admin_user,
+                "metadata_edit",
+                b,
+                a,
+            );
+        }
+        Ok::<Value, String>(saved)
     })
     .await
     {
@@ -1392,9 +1615,26 @@ async fn admin_location_image(
 
 async fn admin_api_documents(State(state): State<AdminState>) -> Json<Value> {
     let cfg = state.service.cfg.clone();
-    let list = tokio::task::spawn_blocking(move || archives::list_documents(&cfg))
-        .await
-        .unwrap_or_default();
+    let list = tokio::task::spawn_blocking(move || {
+        let rev_map = revisions::revision_summary_map(&cfg, "document");
+        archives::list_documents(&cfg)
+            .into_iter()
+            .map(|mut rec| {
+                if let Some(obj) = rec.as_object_mut() {
+                    let slug = obj["slug"].as_str().unwrap_or("").to_string();
+                    if let Some((rc, lm)) = rev_map.get(&slug) {
+                        obj.insert("revision_count".to_string(), json!(rc));
+                        obj.insert("last_modified_at".to_string(), json!(lm));
+                    } else {
+                        obj.insert("revision_count".to_string(), json!(0));
+                    }
+                }
+                rec
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default();
     Json(Value::Array(list))
 }
 
@@ -1436,7 +1676,26 @@ async fn admin_update_document(
     };
     let cfg = state.service.cfg.clone();
     match tokio::task::spawn_blocking(move || {
-        archives::save_document(&cfg, Some(&clean_slug), &payload)
+        let before = archives::load_document(&cfg, &clean_slug);
+        let saved = archives::save_document(&cfg, Some(&clean_slug), &payload)?;
+        if let (Some(b), Some(a)) = (
+            before.as_ref().and_then(Value::as_object),
+            saved.as_object(),
+        ) {
+            let slug = a["slug"].as_str().unwrap_or(&clean_slug);
+            let title = a["title"].as_str().unwrap_or(slug);
+            let _ = revisions::record_metadata_change(
+                &cfg,
+                "document",
+                slug,
+                title,
+                &cfg.admin_user,
+                "metadata_edit",
+                b,
+                a,
+            );
+        }
+        Ok::<Value, String>(saved)
     })
     .await
     {
@@ -1521,7 +1780,27 @@ async fn admin_add_document_file(
     let force = is_force(&q);
     let cfg = state.service.cfg.clone();
     match tokio::task::spawn_blocking(move || {
-        archives::add_document_file(&cfg, &clean_slug, &upload_name, &bytes, force)
+        let existing_path = cfg.documents_dir.join(&clean_slug).join("files").join(&upload_name);
+        let before_bytes = fs::read(&existing_path).ok();
+        let doc = archives::add_document_file(&cfg, &clean_slug, &upload_name, &bytes, force)?;
+        let title = doc["title"].as_str().unwrap_or(&clean_slug).to_string();
+        let kind = if before_bytes.is_some() {
+            "replaced"
+        } else {
+            "added"
+        };
+        let _ = revisions::record_file_change(
+            &cfg,
+            "document",
+            &clean_slug,
+            &title,
+            &cfg.admin_user,
+            &upload_name,
+            kind,
+            before_bytes.as_deref(),
+            Some(&bytes),
+        );
+        Ok::<Value, String>(doc)
     })
     .await
     {
@@ -1558,12 +1837,34 @@ async fn admin_delete_document_file(
         )
             .into_response();
     };
+    let old_path = state
+        .service
+        .cfg
+        .documents_dir
+        .join(clean_slug)
+        .join("files")
+        .join(clean_name);
+    let before_bytes = fs::read(&old_path).ok();
     match archives::delete_document_file(&state.service.cfg, clean_slug, clean_name) {
-        Ok(doc) => (
-            StatusCode::OK,
-            Json(json!({ "status": "file_deleted", "document": doc })),
-        )
-            .into_response(),
+        Ok(doc) => {
+            let title = doc["title"].as_str().unwrap_or(clean_slug);
+            let _ = revisions::record_file_change(
+                &state.service.cfg,
+                "document",
+                clean_slug,
+                title,
+                &state.service.cfg.admin_user,
+                clean_name,
+                "deleted",
+                before_bytes.as_deref(),
+                None,
+            );
+            (
+                StatusCode::OK,
+                Json(json!({ "status": "file_deleted", "document": doc })),
+            )
+                .into_response()
+        }
         Err(reason) => (
             StatusCode::NOT_FOUND,
             Json(json!({ "status": "not_found", "reason": reason })),
@@ -2209,6 +2510,539 @@ async fn admin_delete_location_group(
         Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
         Ok(Err(reason)) => (
             StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+
+// ─── Maintainable Categories CRUD Endpoints ──────────────────────────────────
+
+#[derive(Deserialize)]
+struct CategoryPayload {
+    name: Option<String>,
+    color: Option<String>,
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeleteCategoryQuery {
+    reassign_to: Option<String>,
+}
+
+async fn admin_api_categories(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let list = tokio::task::spawn_blocking(move || {
+        let docs = archives::list_documents(&cfg);
+        categories::list_categories_with_counts(&cfg, &docs)
+    })
+    .await
+    .unwrap_or_default();
+    Json(Value::Array(list))
+}
+
+async fn admin_create_category(
+    State(state): State<AdminState>,
+    Json(payload): Json<CategoryPayload>,
+) -> Response {
+    let cfg = state.service.cfg.clone();
+    let name = payload.name.unwrap_or_default();
+    let color = payload.color;
+    let desc = payload.description;
+    match tokio::task::spawn_blocking(move || {
+        categories::create_category(&cfg, &name, color.as_deref(), desc.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(cat)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "created", "category": cat })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_update_category(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    Json(payload): Json<CategoryPayload>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid category slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    let name = payload.name;
+    let color = payload.color;
+    let desc = payload.description;
+    match tokio::task::spawn_blocking(move || {
+        categories::update_category(
+            &cfg,
+            &clean_slug,
+            name.as_deref(),
+            color.as_deref(),
+            desc.as_deref(),
+        )
+    })
+    .await
+    {
+        Ok(Ok((cat, updated_docs))) => (
+            StatusCode::OK,
+            Json(json!({
+                "status": "updated",
+                "category": cat,
+                "updated_documents": updated_docs,
+            })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_delete_category(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+    Query(q): Query<DeleteCategoryQuery>,
+) -> Response {
+    let Some(clean_slug) = safe_filename(&slug).map(str::to_string) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "not_found", "reason": "Invalid category slug." })),
+        )
+            .into_response();
+    };
+    let cfg = state.service.cfg.clone();
+    let reassign = q.reassign_to;
+    match tokio::task::spawn_blocking(move || {
+        categories::delete_category(&cfg, &clean_slug, reassign.as_deref())
+    })
+    .await
+    {
+        Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+// ─── AI Auto-Suggest on File Upload ──────────────────────────────────────────
+
+async fn admin_analyze_upload(
+    State(state): State<AdminState>,
+    mut multipart: Multipart,
+) -> Response {
+    let mut upload_bytes: Option<Vec<u8>> = None;
+    let mut upload_name = String::new();
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if matches!(field.name(), Some("file") | Some("image") | Some("document")) {
+            upload_name = field.file_name().unwrap_or("upload.txt").to_string();
+            if let Ok(bytes) = field.bytes().await {
+                upload_bytes = Some(bytes.to_vec());
+            }
+        }
+    }
+    let Some(bytes) = upload_bytes else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Please choose an image or document file to analyze." })),
+        )
+            .into_response();
+    };
+    if !is_document_ext(Path::new(&upload_name)) && !is_image_ext(Path::new(&upload_name)) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Supported formats: JPG, PNG, WEBP, BMP, PDF, DOCX, TXT, MD, CSV, HTML, XML, JSON." })),
+        )
+            .into_response();
+    }
+    match archives::analyze_file_for_suggestions(&state.service.cfg, &upload_name, &bytes).await {
+        Ok(res) => (StatusCode::OK, Json(res)).into_response(),
+        Err(reason) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+    }
+}
+
+// ─── Change Detection & Before/After Revision Endpoints ──────────────────────
+
+#[derive(Deserialize)]
+struct RevisionListQuery {
+    entity_type: Option<String>,
+    limit: Option<usize>,
+}
+
+async fn admin_api_revisions(
+    State(state): State<AdminState>,
+    Query(q): Query<RevisionListQuery>,
+) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let et = q.entity_type;
+    let limit = q.limit.unwrap_or(50);
+    let list = tokio::task::spawn_blocking(move || {
+        revisions::list_recent_revisions(&cfg, et.as_deref(), limit)
+    })
+    .await
+    .unwrap_or_default();
+    Json(json!({
+        "status": "ok",
+        "count": list.len(),
+        "revisions": list,
+    }))
+}
+
+async fn admin_api_entity_revisions(
+    State(state): State<AdminState>,
+    AxumPath((entity_type, slug)): AxumPath<(String, String)>,
+) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let list = tokio::task::spawn_blocking(move || {
+        revisions::get_entity_revisions(&cfg, &entity_type, &slug)
+    })
+    .await
+    .unwrap_or_default();
+    Json(json!({
+        "status": "ok",
+        "count": list.len(),
+        "revisions": list,
+    }))
+}
+
+async fn admin_revisions_scan_disk(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let result = tokio::task::spawn_blocking(move || revisions::scan_external_disk_changes(&cfg))
+        .await
+        .unwrap_or_else(|_| json!({ "status": "error" }));
+    Json(result)
+}
+
+async fn admin_revision_snapshot(
+    State(state): State<AdminState>,
+    AxumPath((entity_type, slug, filename)): AxumPath<(String, String, String)>,
+) -> Response {
+    let Some(path) =
+        revisions::resolve_snapshot_path(&state.service.cfg, &entity_type, &slug, &filename)
+    else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    serve_file_bytes(&path)
+}
+
+// ─── Audit Management, Rules Engine, Outlier Detection & Report Export ───────
+
+#[derive(Deserialize)]
+struct InspectSqlPayload {
+    sql_log: Option<String>,
+    actor: Option<String>,
+}
+
+async fn admin_audit_dashboard(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let snapshot = audit::build_audit_snapshot(&cfg);
+        let recent_revisions = revisions::list_recent_revisions(&cfg, None, 25);
+        let deterministic_summary = audit::deterministic_anomaly_explanation(&snapshot);
+        json!({
+            "status": "ok",
+            "snapshot": snapshot,
+            "deterministic_summary": deterministic_summary,
+            "recent_revisions": recent_revisions,
+        })
+    })
+    .await
+    .unwrap_or_else(|_| json!({ "status": "error" }));
+    Json(res)
+}
+
+async fn admin_audit_inspect_sql(
+    State(state): State<AdminState>,
+    Json(payload): Json<InspectSqlPayload>,
+) -> Response {
+    let raw = payload.sql_log.unwrap_or_default();
+    if raw.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Paste SQL queries or audit log lines to inspect." })),
+        )
+            .into_response();
+    }
+    let actor = payload
+        .actor
+        .unwrap_or_else(|| "external_db_user".to_string());
+    let result = audit::inspect_external_sql_logs(&raw, &actor);
+
+    audit::log_event(
+        &state.service.cfg,
+        &state.service.cfg.admin_user,
+        "admin",
+        "127.0.0.1",
+        "POST",
+        "/admin/api/audit/inspect-sql",
+        "",
+        "READ",
+        "sql_audit",
+        &format!("anomalies={}", result["anomaly_count"]),
+        200,
+        raw.lines().next().unwrap_or(""),
+        1,
+    );
+
+    (StatusCode::OK, Json(result)).into_response()
+}
+
+async fn admin_audit_explain(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let snapshot = tokio::task::spawn_blocking(move || audit::build_audit_snapshot(&cfg))
+        .await
+        .unwrap_or_else(|_| audit::build_audit_snapshot(&state.service.cfg));
+    let out = audit::explain_anomalies_with_ai(&state.service.cfg, &snapshot).await;
+    Json(out)
+}
+
+async fn admin_audit_export_report(
+    State(state): State<AdminState>,
+    AxumPath(format): AxumPath<String>,
+) -> Response {
+    let fmt = format.trim().to_ascii_lowercase();
+    if fmt != "docx" && fmt != "pdf" {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Format must be 'docx' or 'pdf'." })),
+        )
+            .into_response();
+    }
+
+    let cfg = state.service.cfg.clone();
+    let snapshot = tokio::task::spawn_blocking(move || audit::build_audit_snapshot(&cfg))
+        .await
+        .unwrap_or_else(|_| audit::build_audit_snapshot(&state.service.cfg));
+    let ai_summary = audit::deterministic_anomaly_explanation(&snapshot);
+
+    let mut body_lines = vec![
+        format!("Generated At: {}", snapshot.generated_at),
+        format!(
+            "Overall Risk Level: {} (Score: {}/100)",
+            snapshot.risk_level, snapshot.risk_score
+        ),
+        format!("Total Events Analyzed: {}", snapshot.total_events_analyzed),
+        format!(
+            "Severity Breakdown: CRITICAL={}, HIGH={}, MEDIUM={}, LOW={}",
+            snapshot.severity_counts.get("CRITICAL").copied().unwrap_or(0),
+            snapshot.severity_counts.get("HIGH").copied().unwrap_or(0),
+            snapshot.severity_counts.get("MEDIUM").copied().unwrap_or(0),
+            snapshot.severity_counts.get("LOW").copied().unwrap_or(0),
+        ),
+        String::new(),
+        "=== RULES ENGINE ALERTS ===".to_string(),
+    ];
+    if snapshot.rule_alerts.is_empty() {
+        body_lines.push("No rules-engine anomalies detected.".to_string());
+    } else {
+        for a in &snapshot.rule_alerts {
+            body_lines.push(format!(
+                "[{}] {} ({}) | Actor: {} | Events: {} | {}",
+                a.severity, a.title, a.rule_id, a.actor, a.event_count, a.description
+            ));
+            body_lines.push(format!("  Recommended Action: {}", a.recommended_action));
+        }
+    }
+    body_lines.push(String::new());
+    body_lines.push("=== STATISTICAL OUTLIER FINDINGS ===".to_string());
+    if snapshot.statistical_outliers.is_empty() {
+        body_lines.push("No statistical behavioral outliers detected.".to_string());
+    } else {
+        for o in &snapshot.statistical_outliers {
+            body_lines.push(format!(
+                "[{}] {} | Actor: {} | Observed: {} vs Baseline: {} (Z={}) — {}",
+                o.severity,
+                o.metric,
+                o.actor,
+                o.observed_value,
+                o.baseline_mean,
+                o.z_score,
+                o.explanation
+            ));
+        }
+    }
+
+    let export_input = crate::export::ExportDocumentInput {
+        title: "ArkibVision Audit & Anomaly Inspection Report".to_string(),
+        reference_code: format!("ANM-AUDIT-{}", &snapshot.generated_at[..10]),
+        group: "Audit & Security Governance".to_string(),
+        script_type: "english".to_string(),
+        verified_by_human: false,
+        hijri_date: String::new(),
+        gregorian_date_masihi: snapshot.generated_at[..10].to_string(),
+        jawi_text: String::new(),
+        rumi_text: body_lines.join("\n"),
+        summary: ai_summary,
+        notes: "Generated by ArkibVision Pure-Rust Rules Engine & Statistical Outlier Detector."
+            .to_string(),
+    };
+
+    let (bytes_res, content_type, ext) = if fmt == "docx" {
+        (
+            crate::export::build_docx_bytes(&export_input),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        )
+    } else {
+        (
+            crate::export::build_pdf_bytes(&export_input),
+            "application/pdf",
+            "pdf",
+        )
+    };
+
+    match bytes_res {
+        Ok(bytes) => {
+            let fname = format!("arkib_audit_report_{}.{ext}", &snapshot.generated_at[..10]);
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, content_type)
+                .header(
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"{fname}\""),
+                )
+                .body(Body::from(bytes))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        Err(reason) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+    }
+}
+
+// ─── User Click Preference Learning & Personalization Endpoints ──────────────
+
+#[derive(Deserialize)]
+struct UpdatePrefsPayload {
+    pinned_categories: Option<Vec<String>>,
+    pinned_sources: Option<Vec<String>>,
+    pinned_folders: Option<Vec<String>>,
+    custom_interests: Option<Vec<String>>,
+}
+
+async fn admin_api_preferences(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let user = cfg.admin_user.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let docs = archives::list_documents(&cfg);
+        preferences::get_preferences_and_recommendations(&cfg, &user, &docs)
+    })
+    .await
+    .unwrap_or_else(|_| json!({ "status": "error" }));
+    Json(res)
+}
+
+async fn admin_track_preference(
+    State(state): State<AdminState>,
+    Json(event): Json<preferences::InteractionEvent>,
+) -> Response {
+    let cfg = state.service.cfg.clone();
+    let user = cfg.admin_user.clone();
+    match tokio::task::spawn_blocking(move || preferences::track_interaction(&cfg, &user, event))
+        .await
+    {
+        Ok(Ok(summary)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "tracked", "preferences": summary })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_update_preferences(
+    State(state): State<AdminState>,
+    Json(payload): Json<UpdatePrefsPayload>,
+) -> Response {
+    let cfg = state.service.cfg.clone();
+    let user = cfg.admin_user.clone();
+    match tokio::task::spawn_blocking(move || {
+        preferences::update_pinned_preferences(
+            &cfg,
+            &user,
+            payload.pinned_categories,
+            payload.pinned_sources,
+            payload.pinned_folders,
+            payload.custom_interests,
+        )
+    })
+    .await
+    {
+        Ok(Ok(summary)) => (
+            StatusCode::OK,
+            Json(json!({ "status": "updated", "preferences": summary })),
+        )
+            .into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn admin_reset_preferences(State(state): State<AdminState>) -> Response {
+    let cfg = state.service.cfg.clone();
+    let user = cfg.admin_user.clone();
+    match tokio::task::spawn_blocking(move || preferences::reset_preferences(&cfg, &user)).await {
+        Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
             Json(json!({ "status": "error", "reason": reason })),
         )
             .into_response(),

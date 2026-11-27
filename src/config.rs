@@ -38,6 +38,10 @@ pub struct AppConfig {
     pub people_groups_file: PathBuf,
     pub location_groups_file: PathBuf,
     pub document_groups_file: PathBuf,
+    pub categories_file: PathBuf,
+    pub revisions_dir: PathBuf,
+    pub audit_log_file: PathBuf,
+    pub preferences_file: PathBuf,
     pub librechat_dir: PathBuf,
     pub profile_web_dir: PathBuf,
     pub location_web_dir: PathBuf,
@@ -275,6 +279,10 @@ impl AppConfig {
         let people_groups_file = processed_dir.join("people_groups.json");
         let location_groups_file = processed_dir.join("location_groups.json");
         let document_groups_file = processed_dir.join("document_groups.json");
+        let categories_file = processed_dir.join("categories.json");
+        let revisions_dir = interim_dir.join("revisions");
+        let audit_log_file = interim_dir.join("audit_log.jsonl");
+        let preferences_file = interim_dir.join("user_preferences.json");
 
         let default_lc = project_root
             .parent()
@@ -318,6 +326,7 @@ impl AppConfig {
         let clip_model_path = find_clip_model(&project_root);
 
         let _ = fs::create_dir_all(&pending_images_dir);
+        let _ = fs::create_dir_all(&revisions_dir);
         let _ = fs::create_dir_all(&profile_dir);
         let _ = fs::create_dir_all(&locations_dir);
         let _ = fs::create_dir_all(&documents_dir);
@@ -341,6 +350,10 @@ impl AppConfig {
             people_groups_file,
             location_groups_file,
             document_groups_file,
+            categories_file,
+            revisions_dir,
+            audit_log_file,
+            preferences_file,
             librechat_dir,
             profile_web_dir,
             location_web_dir,

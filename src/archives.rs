@@ -244,6 +244,19 @@ pub fn save_location(
         meta.entry("group".to_string())
             .or_insert_with(|| Value::String(String::new()));
     }
+    if meta
+        .get("year")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        let derived = derive_document_year(&meta);
+        if !derived.is_empty() {
+            meta.insert("year".to_string(), Value::String(derived));
+        }
+    }
+
     meta.insert("slug".to_string(), Value::String(target_slug.clone()));
     meta.insert(
         "updated_at".to_string(),
@@ -414,6 +427,32 @@ pub fn list_documents(cfg: &AppConfig) -> Vec<Value> {
     items
 }
 
+pub fn extract_four_digit_year(s: &str) -> Option<String> {
+    static YEAR_RE: OnceLock<Regex> = OnceLock::new();
+    let re = YEAR_RE.get_or_init(|| Regex::new(r"\b(1[0-9]{3}|20[0-9]{2})\b").expect("year regex"));
+    re.captures(s).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+}
+
+pub fn derive_document_year(meta: &Map<String, Value>) -> String {
+    for key in ["year", "gregorian_date_masihi", "date_created", "hijri_date"] {
+        if let Some(val) = meta.get(key).and_then(Value::as_str)
+            && let Some(y) = extract_four_digit_year(val)
+        {
+            return y;
+        }
+    }
+    if let Some(arr) = meta.get("key_dates").and_then(Value::as_array) {
+        for item in arr {
+            if let Some(s) = item.as_str()
+                && let Some(y) = extract_four_digit_year(s)
+            {
+                return y;
+            }
+        }
+    }
+    String::new()
+}
+
 pub fn load_document(cfg: &AppConfig, slug: &str) -> Option<Value> {
     let meta_path = cfg.documents_dir.join(slug).join("metadata.json");
     let text = fs::read_to_string(&meta_path).ok()?;
@@ -422,6 +461,17 @@ pub fn load_document(cfg: &AppConfig, slug: &str) -> Option<Value> {
         .as_object()
         .cloned()?;
     let files = collect_document_files(cfg, slug);
+    let derived_year = derive_document_year(&meta);
+    if meta
+        .get("year")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+        && !derived_year.is_empty()
+    {
+        meta.insert("year".to_string(), Value::String(derived_year));
+    }
     meta.insert("slug".to_string(), Value::String(slug.to_string()));
     meta.insert("file_count".to_string(), json!(files.len()));
     meta.insert("files".to_string(), Value::Array(files));
@@ -526,8 +576,10 @@ pub fn save_document(
 
     for key in [
         "title",
+        "subject",
         "reference_code",
         "category",
+        "year",
         "script_type",
         "date_created",
         "origin_location",
@@ -660,6 +712,19 @@ pub fn save_document(
                 "gregorian_date_masihi".to_string(),
                 Value::String(g.to_string()),
             );
+        }
+    }
+
+    if meta
+        .get("year")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .is_empty()
+    {
+        let derived = derive_document_year(&meta);
+        if !derived.is_empty() {
+            meta.insert("year".to_string(), Value::String(derived));
         }
     }
 
@@ -1945,6 +2010,361 @@ pub fn delete_location_group(cfg: &AppConfig, slug: &str) -> Result<Value, Strin
         "slug": old_slug,
         "name": old_name,
         "unassigned_locations": unassigned,
+    }))
+}
+
+fn guess_category_deterministic(
+    filename: &str,
+    text: &str,
+    is_image: bool,
+    categories: &[crate::categories::CategoryItem],
+) -> (String, &'static str) {
+    let lower = format!("{} {}", filename, text).to_ascii_lowercase();
+    let find_name = |slug: &str, fallback: &str| -> String {
+        categories
+            .iter()
+            .find(|c| c.slug.eq_ignore_ascii_case(slug) || c.name.eq_ignore_ascii_case(fallback))
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    if lower.contains("peta") || lower.contains("map") || lower.contains("pelan") || lower.contains("survey") {
+        return (find_name("peta", "Peta"), "Matched map/plan keywords");
+    }
+    if lower.contains("warta") || lower.contains("gazette") || lower.contains("proclamation") || lower.contains("perisytiharan") {
+        return (find_name("warta", "Warta"), "Matched gazette/proclamation keywords");
+    }
+    if lower.contains("laporan") || lower.contains("report") || lower.contains("annual") || lower.contains("kajian") {
+        return (find_name("laporan", "Laporan"), "Matched report/study keywords");
+    }
+    if lower.contains("surat") || lower.contains("memo") || lower.contains("pekeliling") || lower.contains("letter") || lower.contains("ruj.") || lower.contains("bil.") {
+        return (find_name("surat_rasmi", "Surat Rasmi"), "Matched official correspondence keywords");
+    }
+    if lower.contains("hikayat")
+        || lower.contains("manuskrip")
+        || lower.contains("manuscript")
+        || lower.contains("syair")
+        || lower.contains("watikah")
+        || text.chars().any(|c| ('\u{0600}'..='\u{06FF}').contains(&c))
+    {
+        return (find_name("manuskrip", "Manuskrip"), "Detected Jawi/manuscript script or terms");
+    }
+    if is_image && text.trim().len() < 40 {
+        return (find_name("gambar", "Gambar"), "Uploaded image without dense body text");
+    }
+    if lower.contains("akhbar") || lower.contains("newspaper") || lower.contains("buku") || lower.contains("risalah") {
+        return (find_name("bahan_bercetak", "Bahan Bercetak"), "Matched printed publication keywords");
+    }
+    (find_name("lain_lain", "Lain-lain"), "General archival default")
+}
+
+fn guess_source_deterministic(text: &str) -> String {
+    static SOURCE_RE: OnceLock<Regex> = OnceLock::new();
+    let re = SOURCE_RE.get_or_init(|| {
+        Regex::new(r"(?i)\b((?:Arkib Negara Malaysia|Jabatan Perdana Menteri|Kementerian\s+[A-Za-z\s]{3,35}|Jabatan\s+[A-Za-z\s]{3,35}|Pejabat\s+[A-Za-z\s]{3,35}|Dewan Bahasa dan Pustaka|Kerajaan\s+[A-Za-z\s]{3,25}|Perpustakaan Negara Malaysia|Istana\s+[A-Za-z\s]{3,25}))\b")
+            .expect("source regex")
+    });
+    re.captures(text)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().trim().to_string())
+        .unwrap_or_default()
+}
+
+fn parse_llm_json_object(raw: &str) -> Option<Map<String, Value>> {
+    let trimmed = raw.trim();
+    if let Ok(Value::Object(m)) = serde_json::from_str::<Value>(trimmed) {
+        return Some(m);
+    }
+    let start = trimmed.find('{')?;
+    let end = trimmed.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str::<Value>(&trimmed[start..=end])
+        .ok()
+        .and_then(|v| v.as_object().cloned())
+}
+
+/// Analyze an uploaded image or document file (PDF/DOCX/TXT/Image) and suggest archival fields
+/// (Category, Subject/Title, Year, Source, Script, Summary) using pure-Rust deterministic
+/// extraction + local Ollama `qwen3-vl:4b-instruct-16k` with graceful fallback.
+pub async fn analyze_file_for_suggestions(
+    cfg: &AppConfig,
+    filename: &str,
+    bytes: &[u8],
+) -> Result<Value, String> {
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "bin".to_string());
+    let is_img = is_image_ext(Path::new(filename));
+    let tmp_path = std::env::temp_dir().join(format!(
+        "arkib_suggest_{}.{}",
+        Uuid::new_v4().simple(),
+        ext
+    ));
+    fs::write(&tmp_path, bytes).map_err(|e| format!("Failed staging file for analysis: {e}"))?;
+
+    let mut extracted_text = if !is_img {
+        extract_text_from_file(&tmp_path).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let _ = fs::remove_file(&tmp_path);
+
+    let categories = crate::categories::load_categories(cfg);
+    let cat_names: Vec<String> = categories.iter().map(|c| c.name.clone()).collect();
+    let stem_title = Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Archival Record")
+        .replace(['_', '-'], " ")
+        .trim()
+        .to_string();
+
+    // Call Ollama (`qwen3-vl:4b-instruct-16k`) for rich content understanding (image or text).
+    let mut ai_obj: Option<Map<String, Value>> = None;
+    let mut ai_used = false;
+    if let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(55))
+        .build()
+    {
+        let cat_list = cat_names.join(", ");
+        let prompt = if is_img {
+            format!(
+                "Analyze this uploaded archival image (filename: '{filename}'). \
+Return ONLY a valid JSON object (no markdown) with keys: \
+\"category\" (choose ONE from: [{cat_list}]), \
+\"subject\" (concise archival title/subject), \
+\"year\" (4-digit Masihi year if visible, else empty string), \
+\"source\" (issuing agency, ministry, archive, publisher, or donor if visible, else empty string), \
+\"script_type\" (jawi/rumi/english/mixed/other), \
+\"summary\" (1-2 sentence archival description), \
+\"extracted_text\" (key readable text or caption from image)."
+            )
+        } else {
+            let excerpt: String = extracted_text.chars().take(3000).collect();
+            format!(
+                "Analyze this uploaded archival document (filename: '{filename}'). \
+Return ONLY a valid JSON object (no markdown) with keys: \
+\"category\" (choose ONE from: [{cat_list}]), \
+\"subject\" (concise archival title/subject), \
+\"year\" (4-digit Masihi year if found, else empty string), \
+\"source\" (issuing agency, ministry, archive, author, or donor if found, else empty string), \
+\"script_type\" (jawi/rumi/english/mixed/other), \
+\"summary\" (1-2 sentence archival summary).\n\nDocument text:\n{excerpt}"
+            )
+        };
+
+        let message = if is_img {
+            use base64::Engine as _;
+            let b64_img = if let Ok(img) = image::load_from_memory(bytes) {
+                let resized = if img.width() > 1024 || img.height() > 1024 {
+                    img.resize(1024, 1024, image::imageops::FilterType::Triangle)
+                } else {
+                    img
+                };
+                let mut out = Cursor::new(Vec::new());
+                if resized.write_to(&mut out, image::ImageFormat::Png).is_ok() {
+                    base64::engine::general_purpose::STANDARD.encode(out.into_inner())
+                } else {
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                }
+            } else {
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            };
+            json!({
+                "role": "user",
+                "content": prompt,
+                "images": [b64_img],
+            })
+        } else {
+            json!({
+                "role": "user",
+                "content": prompt,
+            })
+        };
+
+        let body = json!({
+            "model": cfg.vision_model,
+            "stream": false,
+            "options": { "num_ctx": OLLAMA_UNIFORM_NUM_CTX, "temperature": 0.1 },
+            "messages": [message],
+        });
+
+        if let Ok(resp) = client.post(&cfg.ollama_url).json(&body).send().await
+            && resp.status().is_success()
+            && let Ok(val) = resp.json::<Value>().await
+            && let Some(content) = val["message"]["content"].as_str()
+            && let Some(parsed) = parse_llm_json_object(content)
+        {
+            ai_used = true;
+            if extracted_text.trim().is_empty()
+                && let Some(et) = parsed.get("extracted_text").and_then(Value::as_str)
+            {
+                extracted_text = et.trim().to_string();
+            }
+            ai_obj = Some(parsed);
+        }
+    }
+
+    let structured = extract_document_structure(&extracted_text);
+    let script_info = detect_script(&extracted_text);
+    let (det_cat, det_cat_reason) =
+        guess_category_deterministic(filename, &extracted_text, is_img, &categories);
+    let det_source = guess_source_deterministic(&extracted_text);
+
+    let ai_str = |k: &str| -> String {
+        ai_obj
+            .as_ref()
+            .and_then(|m| m.get(k))
+            .map(value_to_trimmed_string)
+            .unwrap_or_default()
+    };
+
+    // Match AI category to maintainable registry, fallback to deterministic match
+    let raw_ai_cat = ai_str("category");
+    let (category, cat_reason) = if let Some(resolved) =
+        crate::categories::resolve_category(cfg, &raw_ai_cat)
+    {
+        (resolved.name, "AI content classification")
+    } else {
+        (det_cat, det_cat_reason)
+    };
+
+    let subject = {
+        let s = ai_str("subject");
+        if !s.is_empty() {
+            s
+        } else if !stem_title.is_empty() {
+            stem_title.clone()
+        } else {
+            "Untitled Archival Record".to_string()
+        }
+    };
+
+    let hijri_date = structured["hijri_date"].as_str().unwrap_or("").to_string();
+    let gregorian_date_masihi = structured["gregorian_date_masihi"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    let year = extract_four_digit_year(&ai_str("year"))
+        .or_else(|| extract_four_digit_year(&gregorian_date_masihi))
+        .or_else(|| extract_four_digit_year(&extracted_text))
+        .or_else(|| extract_four_digit_year(filename))
+        .unwrap_or_default();
+
+    let source = {
+        let s = ai_str("source");
+        if !s.is_empty() { s } else { det_source }
+    };
+
+    let script_type = {
+        let det = script_info.as_str();
+        let ai_s = ai_str("script_type");
+        if !det.is_empty() && det != "unknown" {
+            det.to_string()
+        } else if !ai_s.is_empty() {
+            ai_s
+        } else {
+            "rumi".to_string()
+        }
+    };
+
+    let summary = {
+        let s = ai_str("summary");
+        if !s.is_empty() {
+            s
+        } else {
+            structured["extractive_summary"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        }
+    };
+
+    let mut suggested_fields = Vec::new();
+    let push_field = |list: &mut Vec<Value>, field: &str, label: &str, val: &str, conf: &str, reason: &str| {
+        if !val.trim().is_empty() {
+            list.push(json!({
+                "field": field,
+                "label": label,
+                "value": val.trim(),
+                "confidence": conf,
+                "reason": reason,
+            }));
+        }
+    };
+    push_field(
+        &mut suggested_fields,
+        "category",
+        "Category",
+        &category,
+        if ai_used { "high" } else { "medium" },
+        cat_reason,
+    );
+    push_field(
+        &mut suggested_fields,
+        "title",
+        "Subject / Title",
+        &subject,
+        if ai_used { "high" } else { "medium" },
+        if ai_used { "Extracted from content" } else { "Derived from filename" },
+    );
+    push_field(
+        &mut suggested_fields,
+        "year",
+        "Year",
+        &year,
+        if !gregorian_date_masihi.is_empty() || ai_used { "high" } else { "medium" },
+        if !hijri_date.is_empty() { "Converted from Hijri colophon" } else { "Detected in file content" },
+    );
+    push_field(
+        &mut suggested_fields,
+        "author_or_source",
+        "Source / Agency",
+        &source,
+        if ai_used { "high" } else { "medium" },
+        "Detected agency, donor, or letterhead",
+    );
+    push_field(
+        &mut suggested_fields,
+        "script_type",
+        "Script Type",
+        &script_type,
+        "high",
+        "Unicode & script analysis",
+    );
+    push_field(
+        &mut suggested_fields,
+        "summary",
+        "Summary",
+        &summary,
+        if ai_used { "high" } else { "medium" },
+        if ai_used { "AI content summary" } else { "Extractive summary" },
+    );
+
+    Ok(json!({
+        "status": "ok",
+        "filename": filename,
+        "is_image": is_img,
+        "analysis_mode": if ai_used { "ai_and_deterministic" } else { "deterministic_fallback" },
+        "category": category,
+        "subject": subject,
+        "title": subject,
+        "year": year,
+        "source": source,
+        "author_or_source": source,
+        "script_type": script_type,
+        "hijri_date": hijri_date,
+        "gregorian_date_masihi": gregorian_date_masihi,
+        "summary": summary,
+        "extracted_text": extracted_text,
+        "key_topics": structured["key_topics"],
+        "key_names": structured["key_names"],
+        "key_dates": structured["key_dates"],
+        "suggested_fields": suggested_fields,
     }))
 }
 
