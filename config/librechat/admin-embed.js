@@ -117,6 +117,69 @@
     }, 3000);
   }
 
+  // ─── Shared ArkibVision Structured Input Validation & AI Helpers ──────────
+  function setFieldError(inputEl, message) {
+    if (!inputEl) return;
+    var field = inputEl.closest('.arkib-field, .rf-field, .ac-field');
+    if (!field) {
+      field = inputEl.parentElement;
+    }
+    if (!field) return;
+    field.classList.add('is-invalid');
+    inputEl.setAttribute('aria-invalid', 'true');
+    var errEl = field.querySelector(':scope > .arkib-field-error');
+    if (!errEl) {
+      errEl = document.createElement('div');
+      errEl.className = 'arkib-field-error';
+      errEl.setAttribute('role', 'alert');
+      if (inputEl.nextSibling) field.insertBefore(errEl, inputEl.nextSibling);
+      else field.appendChild(errEl);
+    }
+    errEl.textContent = String(message || 'This field is invalid.');
+    if (!inputEl.__arkibErrBound) {
+      inputEl.__arkibErrBound = true;
+      var clearSelf = function () { clearFieldError(inputEl); };
+      inputEl.addEventListener('input', clearSelf);
+      inputEl.addEventListener('change', clearSelf);
+    }
+  }
+
+  function clearFieldError(inputEl) {
+    if (!inputEl) return;
+    var field = inputEl.closest('.arkib-field, .rf-field, .ac-field') || inputEl.parentElement;
+    if (field) {
+      field.classList.remove('is-invalid');
+      var errEl = field.querySelector(':scope > .arkib-field-error');
+      if (errEl) errEl.remove();
+    }
+    inputEl.removeAttribute('aria-invalid');
+  }
+
+  function clearFormErrors(containerEl) {
+    if (!containerEl) return;
+    containerEl.querySelectorAll('.is-invalid').forEach(function (f) {
+      f.classList.remove('is-invalid');
+    });
+    containerEl.querySelectorAll('.arkib-field-error').forEach(function (e) {
+      e.remove();
+    });
+    containerEl.querySelectorAll('[aria-invalid="true"]').forEach(function (el) {
+      el.removeAttribute('aria-invalid');
+    });
+  }
+
+  function isMissingDescription(val) {
+    var s = String(val == null ? '' : val).trim().toLowerCase();
+    return !s || s === 'unknown' || s === 'n/a' || s === 'none' || s === '-' || s === 'null' || s === 'no description' || s === 'no description yet.';
+  }
+
+  window.ArkibForm = {
+    setFieldError: setFieldError,
+    clearFieldError: clearFieldError,
+    clearFormErrors: clearFormErrors,
+    isMissingDescription: isMissingDescription
+  };
+
   function openViewer(src) {
     var v = document.createElement('div');
     v.className = 'rf-viewer';
@@ -466,10 +529,9 @@
         '<span class="rf-pill">🛡️ ARKIBVISION · ADMIN PORTAL</span>' +
         '<h2>Sign in to Admin Portal</h2>' +
         '<p>Manage approvals, enrolled people, archival locations, documents, file integrity, and system health right inside LibreChat.</p>' +
-        '<div id="rf-login-err" class="rf-err-banner" style="display:none"></div>' +
-        '<form id="rf-login-form">' +
-        '<div class="rf-field" style="margin-bottom:14px"><label for="rf-u">Username</label><input class="rf-input" id="rf-u" autocomplete="username" required/></div>' +
-        '<div class="rf-field" style="margin-bottom:18px"><label for="rf-p">Password</label><input class="rf-input" id="rf-p" type="password" autocomplete="current-password" required/></div>' +
+        '<form id="rf-login-form" novalidate>' +
+        '<div class="rf-field arkib-field" style="margin-bottom:14px"><label class="arkib-label" for="rf-u">Username</label><input class="rf-input arkib-input" id="rf-u" placeholder="Enter username" autocomplete="username" required/></div>' +
+        '<div class="rf-field arkib-field" style="margin-bottom:18px"><label class="arkib-label" for="rf-p">Password</label><input class="rf-input arkib-input" id="rf-p" type="password" placeholder="Enter password" autocomplete="current-password" required/></div>' +
         '<button type="submit" class="rf-btn rf-btn-primary" style="width:100%;padding:10px">Sign in</button>' +
         '</form>' +
         '<div class="rf-login-guest-sep"><span>or browse without signing in</span></div>' +
@@ -480,20 +542,27 @@
       var form = document.getElementById('rf-login-form');
       form.addEventListener('submit', async function (ev) {
         ev.preventDefault();
-        var err = document.getElementById('rf-login-err');
-        err.style.display = 'none';
+        clearFormErrors(form);
+        var uEl = document.getElementById('rf-u');
+        var pEl = document.getElementById('rf-p');
+        var uVal = uEl.value.trim();
+        var pVal = pEl.value;
+        var hasErr = false;
+        if (!uVal) { setFieldError(uEl, 'Username is required.'); hasErr = true; }
+        if (!pVal) { setFieldError(pEl, 'Password is required.'); hasErr = true; }
+        if (hasErr) { (uVal ? pEl : uEl).focus(); return; }
         try {
           var r = await api('/admin/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              username: document.getElementById('rf-u').value,
-              password: document.getElementById('rf-p').value
+              username: uVal,
+              password: pVal
             })
           });
           if (!r.ok) {
-            err.textContent = (r.data && r.data.reason) || 'Invalid username or password.';
-            err.style.display = 'block';
+            setFieldError(pEl, (r.data && r.data.reason) || 'Invalid username or password.');
+            pEl.focus();
             return;
           }
           state.authed = true;
@@ -502,8 +571,7 @@
           await refreshAll(false);
           toast('Signed in to Admin Portal');
         } catch (e) {
-          err.textContent = 'Could not reach local ArkibVision service (port 8005).';
-          err.style.display = 'block';
+          setFieldError(pEl, 'Could not reach local ArkibVision service (port 8005).');
         }
       });
       return;
@@ -844,7 +912,7 @@
       '</div>') + '</div>' +
       '<div class="rf-toolbar rf-toolbar-wrap">' +
       folderDropdownHtml +
-      '<input class="rf-input" id="rf-ppl-search" style="flex:1;min-width:220px" type="search" placeholder="Search enrolled people in this folder…" value="' + esc(state.search) + '"/>' +
+      '<input class="rf-input arkib-input arkib-input--underline" id="rf-ppl-search" style="flex:1;min-width:220px" type="search" placeholder="Search enrolled people in this folder…" value="' + esc(state.search) + '"/>' +
       '</div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (p) {
@@ -998,9 +1066,9 @@
     wrap.className = 'rf-modal-backdrop';
     wrap.innerHTML =
       '<div class="rf-modal" style="width:min(520px,100%)"><h2>' + (group ? 'Rename Group Folder' : newTitle) + '</h2>' +
-      '<form id="rf-g-form"><div class="rf-form-grid">' +
-      '<div class="rf-field full"><label>Group Folder Name</label><input class="rf-input" id="rf-g-name" required placeholder="' + placeholder + '" value="' + esc(group ? group.name || '' : '') + '"/></div>' +
-      '<div class="rf-field full"><label>Description</label><textarea class="rf-textarea" id="rf-g-desc" placeholder="Optional description of what belongs in this folder…">' + esc(group ? group.description || '' : '') + '</textarea></div>' +
+      '<form id="rf-g-form" novalidate><div class="rf-form-grid">' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-g-name">Group Folder Name</label><input class="rf-input arkib-input" id="rf-g-name" required placeholder="' + placeholder + '" value="' + esc(group ? group.name || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-g-desc">Description</label><textarea class="rf-textarea arkib-input" id="rf-g-desc" placeholder="Optional description of what belongs in this folder…">' + esc(group ? group.description || '' : '') + '</textarea></div>' +
       '</div><div class="rf-actions" style="justify-content:flex-end;margin-top:16px">' +
       '<button type="button" class="rf-btn" id="rf-g-cancel">Cancel</button>' +
       '<button type="submit" class="rf-btn rf-btn-primary">' + (group ? 'Save Rename' : 'Create Folder') + '</button>' +
@@ -1010,8 +1078,16 @@
     document.getElementById('rf-g-cancel').onclick = function () { wrap.remove(); };
     document.getElementById('rf-g-form').onsubmit = async function (ev) {
       ev.preventDefault();
-      var name = document.getElementById('rf-g-name').value.trim();
+      var gForm = ev.target;
+      clearFormErrors(gForm);
+      var nameEl = document.getElementById('rf-g-name');
+      var name = nameEl.value.trim();
       var description = document.getElementById('rf-g-desc').value.trim();
+      if (!name) {
+        setFieldError(nameEl, 'Group folder name is required.');
+        nameEl.focus();
+        return;
+      }
       var r = await api(group ? endpoint + '/' + encodeURIComponent(group.slug) : endpoint, {
         method: group ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1028,7 +1104,10 @@
         wrap.remove();
         toast(group ? 'Renamed group folder to "' + name + '"' : 'Created group folder "' + name + '"');
         await refreshAll(false);
-      } else toast((r.data && r.data.reason) || 'Could not save group folder', false);
+      } else {
+        setFieldError(nameEl, (r.data && r.data.reason) || 'Could not save group folder.');
+        nameEl.focus();
+      }
     };
   }
 
@@ -1064,10 +1143,10 @@
 
     wrap.innerHTML =
       '<div class="rf-modal"><h2>' + (profile ? 'Edit Person — ' + esc(profile.identity) : 'Add Enrolled Person') + '</h2>' +
-      '<form id="rf-p-form"><div class="rf-form-grid">' +
-      '<div class="rf-field"><label>Name</label><input class="rf-input" id="rf-p-name" required value="' + esc(profile ? profile.identity : '') + '"/></div>' +
-      '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-p-group">' + grpSelectHtml + '</select></div>' +
-      (!profile ? '<div class="rf-field full"><label>Face Photo (required)</label><input class="rf-input" id="rf-p-img" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" required/></div>' : '') +
+      '<form id="rf-p-form" novalidate><div class="rf-form-grid">' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-p-name">Name</label><input class="rf-input arkib-input" id="rf-p-name" placeholder="Full name" required value="' + esc(profile ? profile.identity : '') + '"/></div>' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-p-group">Group Folder</label><select class="rf-select arkib-input" id="rf-p-group">' + grpSelectHtml + '</select></div>' +
+      (!profile ? '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-p-img">Face Photo (required)</label><input class="rf-input arkib-input" id="rf-p-img" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" required/></div>' : '') +
       (profile ? '<div class="rf-field full"><label>Stored Photos (click to view/edit details; hover for × delete)</label><div class="rf-gallery" id="rf-p-gal"></div>' +
         '<div id="rf-photo-meta" class="rf-box" style="display:none;margin-top:8px"></div>' +
         '<input class="rf-input" id="rf-p-addimg" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" style="margin-top:8px"/></div>' : '') +
@@ -1133,16 +1212,82 @@
           var box = document.getElementById('rf-photo-meta');
           box.style.display = 'block';
           box.innerHTML =
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b>Photo: ' + esc(fn) + '</b>' +
-            '<div style="display:flex;gap:6px"><button type="button" class="rf-btn rf-btn-sm" id="rf-pm-zoom">🔍 Enlarge</button>' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px"><b>Photo: ' + esc(fn) + '</b>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+            '<button type="button" class="rf-btn rf-btn-sm" id="rf-pm-ai-btn" title="Generate AI description from image">✨ AI Suggest</button>' +
+            '<button type="button" class="rf-btn rf-btn-sm" id="rf-pm-zoom">🔍 Enlarge</button>' +
             '<button type="button" class="rf-btn rf-btn-ok rf-btn-sm" id="rf-pm-save">Save photo details</button></div></div>' +
             '<div class="rf-form-grid">' +
-            '<div class="rf-field full"><label>Description</label><input class="rf-input" id="rf-pm-desc" value="' + esc(im.description || '') + '"/></div>' +
-            '<div class="rf-field"><label>Photograph by</label><input class="rf-input" id="rf-pm-by" value="' + esc(im.photograph_by || '') + '"/></div>' +
-            '<div class="rf-field"><label>Location</label><input class="rf-input" id="rf-pm-loc" value="' + esc(im.location || '') + '"/></div>' +
-            '<div class="rf-field"><label>Date</label><input class="rf-input" id="rf-pm-date" type="date" value="' + esc(im.date || '') + '"/></div>' +
-            '<div class="rf-field"><label>Time</label><input class="rf-input" id="rf-pm-time" type="time" value="' + esc(im.time || '') + '"/></div>' +
+            '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-pm-desc">Description</label>' +
+            '<input class="rf-input arkib-input" id="rf-pm-desc" placeholder="Describe this photo (or use AI Suggest)…" value="' + esc(im.description || '') + '"/>' +
+            '<div id="rf-pm-ai-slot"></div></div>' +
+            '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-pm-by">Photograph by</label><input class="rf-input arkib-input" id="rf-pm-by" value="' + esc(im.photograph_by || '') + '"/></div>' +
+            '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-pm-loc">Location</label><input class="rf-input arkib-input" id="rf-pm-loc" value="' + esc(im.location || '') + '"/></div>' +
+            '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-pm-date">Date</label><input class="rf-input arkib-input" id="rf-pm-date" type="date" value="' + esc(im.date || '') + '"/></div>' +
+            '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-pm-time">Time</label><input class="rf-input arkib-input" id="rf-pm-time" type="time" value="' + esc(im.time || '') + '"/></div>' +
             '</div>';
+
+          async function fetchAiPhotoDesc() {
+            var slot = document.getElementById('rf-pm-ai-slot');
+            var aiBtn = document.getElementById('rf-pm-ai-btn');
+            if (!slot) return;
+            if (aiBtn) aiBtn.disabled = true;
+            slot.innerHTML =
+              '<div class="rf-ai-desc-box">' +
+              '<div class="rf-ai-desc-head"><span>✨ AI Description Suggestion</span><span class="rf-badge rf-badge-info">Analyzing…</span></div>' +
+              '<div class="rf-ai-desc-text" style="opacity:.8">⏳ Inspecting photo with local Vision AI…</div>' +
+              '</div>';
+            try {
+              var res = await api('/admin/api/suggest-image-description', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  entity_type: 'profile',
+                  slug: cur.slug,
+                  filename: fn,
+                  context_label: cur.identity || cur.slug
+                })
+              });
+              // Guard against user clicking another photo while request was in flight
+              if (state.selectedPhoto !== fn) return;
+              slot = document.getElementById('rf-pm-ai-slot');
+              if (!slot) return;
+              var sug = res.ok && res.data && res.data.suggested_description ? String(res.data.suggested_description).trim() : '';
+              if (!sug) {
+                slot.innerHTML = '';
+                return;
+              }
+              var srcBadge = res.data.source === 'ollama_vision' ? 'Local Vision AI' : 'Metadata Fallback';
+              slot.innerHTML =
+                '<div class="rf-ai-desc-box">' +
+                '<div class="rf-ai-desc-head"><span>✨ AI Suggested Description</span><span class="rf-badge rf-badge-ok">' + esc(srcBadge) + '</span></div>' +
+                '<div class="rf-ai-desc-text">' + esc(sug) + '</div>' +
+                '<div class="rf-ai-desc-actions">' +
+                '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-pm-ai-apply">✓ Apply Description</button>' +
+                '<button type="button" class="rf-btn rf-btn-sm" id="rf-pm-ai-retry">↻ Regenerate</button>' +
+                '<button type="button" class="rf-btn rf-btn-sm" id="rf-pm-ai-dismiss">✕ Dismiss</button>' +
+                '</div></div>';
+              document.getElementById('rf-pm-ai-apply').onclick = function () {
+                var descInput = document.getElementById('rf-pm-desc');
+                if (descInput) {
+                  descInput.value = sug;
+                  clearFieldError(descInput);
+                  descInput.focus();
+                }
+                slot.innerHTML = '';
+                toast('AI description applied — click "Save photo details" to persist');
+              };
+              document.getElementById('rf-pm-ai-retry').onclick = fetchAiPhotoDesc;
+              document.getElementById('rf-pm-ai-dismiss').onclick = function () { slot.innerHTML = ''; };
+            } catch (err) {
+              if (slot) slot.innerHTML = '';
+            } finally {
+              var b = document.getElementById('rf-pm-ai-btn');
+              if (b) b.disabled = false;
+            }
+          }
+
+          document.getElementById('rf-pm-ai-btn').onclick = fetchAiPhotoDesc;
           document.getElementById('rf-pm-zoom').onclick = function () { openViewer(apiUrl(im.url)); };
           document.getElementById('rf-pm-save').onclick = async function () {
             var r = await api('/admin/api/profiles/' + encodeURIComponent(cur.slug) + '/images/' + encodeURIComponent(fn), {
@@ -1163,6 +1308,11 @@
               refreshAll(false);
             } else toast(r.data.reason || 'Save failed', false);
           };
+
+          // Auto-suggest description when the clicked photo has no description (or "Unknown")
+          if (isMissingDescription(im.description)) {
+            fetchAiPhotoDesc();
+          }
         };
       });
       gal.querySelectorAll('.rf-tile-del').forEach(function (d) {
@@ -1206,6 +1356,23 @@
 
     document.getElementById('rf-p-form').onsubmit = async function (ev) {
       ev.preventDefault();
+      var pForm = ev.target;
+      clearFormErrors(pForm);
+      var nameEl = document.getElementById('rf-p-name');
+      var imgEl = document.getElementById('rf-p-img');
+      var hasErr = false;
+      if (!nameEl.value.trim()) {
+        setFieldError(nameEl, 'Person name is required.');
+        hasErr = true;
+      }
+      if (!profile && imgEl && (!imgEl.files || !imgEl.files[0])) {
+        setFieldError(imgEl, 'Please choose a face photo to enroll.');
+        hasErr = true;
+      }
+      if (hasErr) {
+        (nameEl.value.trim() ? imgEl : nameEl).focus();
+        return;
+      }
       var other = {};
       wrap.querySelectorAll('.rf-kv-row').forEach(function (row) {
         var k = row.querySelector('.rf-kv-k').value.trim();
@@ -1344,7 +1511,7 @@
       '</div>') + '</div>' +
       '<div class="rf-toolbar rf-toolbar-wrap">' +
       folderDropdownHtml +
-      '<input class="rf-input" id="rf-loc-search" style="flex:1;min-width:220px" type="search" placeholder="Search locations in this folder by name, wing, hall, or address…" value="' + esc(state.search) + '"/>' +
+      '<input class="rf-input arkib-input arkib-input--underline" id="rf-loc-search" style="flex:1;min-width:220px" type="search" placeholder="Search locations in this folder by name, wing, hall, or address…" value="' + esc(state.search) + '"/>' +
       '</div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (l) {
@@ -1484,19 +1651,19 @@
       }).join('');
     wrap.innerHTML =
       '<div class="rf-modal"><h2>' + (loc ? 'Edit Location' : 'Add Archival Location') + '</h2>' +
-      '<form id="rf-l-form"><div class="rf-form-grid">' +
-      '<div class="rf-field"><label>Location Name</label><input class="rf-input" id="rf-l-name" required value="' + esc(loc ? loc.name || '' : '') + '"/></div>' +
-      '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-l-group">' + grpSelectHtml + '</select></div>' +
-      '<div class="rf-field"><label>Parent Institution</label><input class="rf-input" id="rf-l-inst" value="' + esc(loc ? loc.parent_institution || '' : '') + '"/></div>' +
-      '<div class="rf-field"><label>Category</label><input class="rf-input" id="rf-l-cat" value="' + esc(loc ? loc.category || '' : '') + '"/></div>' +
-      '<div class="rf-field"><label>Building / Wing</label><input class="rf-input" id="rf-l-bld" value="' + esc(loc ? loc.building_or_wing || '' : '') + '"/></div>' +
-      '<div class="rf-field"><label>Floor / Room</label><input class="rf-input" id="rf-l-flr" value="' + esc(loc ? loc.floor_or_room || '' : '') + '"/></div>' +
-      '<div class="rf-field full"><label>Address</label><input class="rf-input" id="rf-l-addr" value="' + esc(loc ? loc.address || '' : '') + '"/></div>' +
-      '<div class="rf-field full"><label>GPS Coordinates</label><input class="rf-input" id="rf-l-gps" value="' + esc(loc ? loc.coordinates || '' : '') + '"/></div>' +
-      '<div class="rf-field full"><label>Historical Significance</label><textarea class="rf-textarea" id="rf-l-hist">' + esc(loc ? loc.historical_significance || '' : '') + '</textarea></div>' +
-      '<div class="rf-field full"><label>Description</label><textarea class="rf-textarea" id="rf-l-desc">' + esc(loc ? loc.description || '' : '') + '</textarea></div>' +
-      '<div class="rf-field full"><label>Notes</label><textarea class="rf-textarea" id="rf-l-notes">' + esc(loc ? loc.notes || '' : '') + '</textarea></div>' +
-      (loc ? '<div class="rf-field full"><label>Reference Photos (CLIP-indexed · duplicate-checked)</label><div class="rf-gallery" id="rf-l-gal"></div><input class="rf-input" id="rf-l-addimg" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" style="margin-top:8px"/></div>' : '') +
+      '<form id="rf-l-form" novalidate><div class="rf-form-grid">' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-l-name">Location Name</label><input class="rf-input arkib-input" id="rf-l-name" required value="' + esc(loc ? loc.name || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-l-group">Group Folder</label><select class="rf-select arkib-input" id="rf-l-group">' + grpSelectHtml + '</select></div>' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-l-inst">Parent Institution</label><input class="rf-input arkib-input" id="rf-l-inst" value="' + esc(loc ? loc.parent_institution || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-l-cat">Category</label><input class="rf-input arkib-input" id="rf-l-cat" value="' + esc(loc ? loc.category || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-l-bld">Building / Wing</label><input class="rf-input arkib-input" id="rf-l-bld" value="' + esc(loc ? loc.building_or_wing || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-l-flr">Floor / Room</label><input class="rf-input arkib-input" id="rf-l-flr" value="' + esc(loc ? loc.floor_or_room || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-l-addr">Address</label><input class="rf-input arkib-input" id="rf-l-addr" value="' + esc(loc ? loc.address || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-l-gps">GPS Coordinates</label><input class="rf-input arkib-input" id="rf-l-gps" value="' + esc(loc ? loc.coordinates || '' : '') + '"/></div>' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-l-hist">Historical Significance</label><textarea class="rf-textarea arkib-input" id="rf-l-hist">' + esc(loc ? loc.historical_significance || '' : '') + '</textarea></div>' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-l-desc">Description</label><textarea class="rf-textarea arkib-input" id="rf-l-desc">' + esc(loc ? loc.description || '' : '') + '</textarea><div id="rf-l-desc-ai-slot"></div></div>' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-l-notes">Notes</label><textarea class="rf-textarea arkib-input" id="rf-l-notes">' + esc(loc ? loc.notes || '' : '') + '</textarea></div>' +
+      (loc ? '<div class="rf-field arkib-field full"><label class="arkib-label">Reference Photos (click photo to view · auto-suggests description if empty)</label><div class="rf-gallery" id="rf-l-gal"></div><input class="rf-input arkib-input" id="rf-l-addimg" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp" style="margin-top:8px"/></div>' : '') +
       '</div><div class="rf-actions" style="justify-content:flex-end;margin-top:16px">' +
       '<button type="button" class="rf-btn" id="rf-l-cancel">Cancel</button>' +
       '<button type="submit" class="rf-btn rf-btn-primary">Save Location</button></div></form></div>';
@@ -1510,9 +1677,38 @@
       if (!gal) return;
       var imgs = cur.images || [];
       gal.innerHTML = imgs.length ? imgs.map(function (im) {
-        return '<div class="rf-tile"><img src="' + esc(apiUrl(im.admin_url)) + '" data-zoom="' + esc(apiUrl(im.admin_url)) + '"/><button type="button" class="rf-tile-del" data-del="' + esc(im.filename) + '" title="Delete photo">' + TRASH_SVG + '</button></div>';
+        return '<div class="rf-tile"><img src="' + esc(apiUrl(im.admin_url)) + '" data-fn="' + esc(im.filename) + '" data-zoom="' + esc(apiUrl(im.admin_url)) + '"/><button type="button" class="rf-tile-del" data-del="' + esc(im.filename) + '" title="Delete photo">' + TRASH_SVG + '</button></div>';
       }).join('') : '<div style="font-size:.78rem;color:rgb(var(--text-secondary));padding:10px">No reference photos yet.</div>';
-      gal.querySelectorAll('[data-zoom]').forEach(function (img) { img.onclick = function () { openViewer(img.getAttribute('data-zoom')); }; });
+      gal.querySelectorAll('[data-zoom]').forEach(function (img) {
+        img.onclick = async function () {
+          openViewer(img.getAttribute('data-zoom'));
+          var descTa = document.getElementById('rf-l-desc');
+          var slot = document.getElementById('rf-l-desc-ai-slot');
+          var fn = img.getAttribute('data-fn');
+          if (descTa && slot && fn && isMissingDescription(descTa.value)) {
+            slot.innerHTML = '<div class="rf-ai-desc-box"><div class="rf-ai-desc-head"><span>✨ AI Description Suggestion</span><span class="rf-badge rf-badge-info">Analyzing…</span></div><div class="rf-ai-desc-text" style="opacity:.8">⏳ Generating description from clicked photo…</div></div>';
+            try {
+              var res = await api('/admin/api/suggest-image-description', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ entity_type: 'location', slug: cur.slug, filename: fn, context_label: cur.name || cur.slug })
+              });
+              var sug = res.ok && res.data && res.data.suggested_description ? String(res.data.suggested_description).trim() : '';
+              if (!sug) { slot.innerHTML = ''; return; }
+              slot.innerHTML =
+                '<div class="rf-ai-desc-box">' +
+                '<div class="rf-ai-desc-head"><span>✨ AI Suggested Location Description</span><span class="rf-badge rf-badge-ok">' + esc(res.data.source === 'ollama_vision' ? 'Local Vision AI' : 'Metadata Fallback') + '</span></div>' +
+                '<div class="rf-ai-desc-text">' + esc(sug) + '</div>' +
+                '<div class="rf-ai-desc-actions">' +
+                '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-l-ai-apply">✓ Apply to Description</button>' +
+                '<button type="button" class="rf-btn rf-btn-sm" id="rf-l-ai-dismiss">✕ Dismiss</button>' +
+                '</div></div>';
+              document.getElementById('rf-l-ai-apply').onclick = function () { descTa.value = sug; slot.innerHTML = ''; descTa.focus(); toast('AI description applied'); };
+              document.getElementById('rf-l-ai-dismiss').onclick = function () { slot.innerHTML = ''; };
+            } catch (e) { slot.innerHTML = ''; }
+          }
+        };
+      });
       gal.querySelectorAll('[data-del]').forEach(function (btn) {
         btn.onclick = function (e) {
           e.stopPropagation();
@@ -1556,6 +1752,14 @@
 
     document.getElementById('rf-l-form').onsubmit = async function (ev) {
       ev.preventDefault();
+      var lForm = ev.target;
+      clearFormErrors(lForm);
+      var lNameEl = document.getElementById('rf-l-name');
+      if (!lNameEl.value.trim()) {
+        setFieldError(lNameEl, 'Location name is required.');
+        lNameEl.focus();
+        return;
+      }
       var payload = {
         name: document.getElementById('rf-l-name').value,
         group_slug: document.getElementById('rf-l-group').value,
@@ -1795,7 +1999,7 @@
       prefRecHtml +
       '<div class="rf-toolbar rf-toolbar-wrap">' +
       folderDropdownHtml + catFilterHtml + srcFilterHtml + sortHtml +
-      '<input class="rf-input" id="rf-doc-search" style="flex:1;min-width:200px" type="search" placeholder="Search title, category, year, source, or text…" value="' + esc(state.search) + '"/>' +
+      '<input class="rf-input arkib-input arkib-input--underline" id="rf-doc-search" style="flex:1;min-width:200px" type="search" placeholder="Search title, category, year, source, or text…" value="' + esc(state.search) + '"/>' +
       '</div>' +
       '<div class="rf-grid">' +
       (list.length ? list.map(function (d) {
@@ -2062,8 +2266,8 @@
       '</div>' +
       '<div id="rf-d-ai-results" style="margin-top:8px"></div>' +
       '</div>' +
-      '<form id="rf-d-form"><div class="rf-form-grid">' +
-      '<div class="rf-field"><label>Subject / Title</label><input class="rf-input" id="rf-d-title" required value="' + esc(doc ? doc.title || '' : '') + '"/></div>' +
+      '<form id="rf-d-form" novalidate><div class="rf-form-grid">' +
+      '<div class="rf-field arkib-field"><label class="arkib-label" for="rf-d-title">Subject / Title</label><input class="rf-input arkib-input" id="rf-d-title" required value="' + esc(doc ? doc.title || '' : '') + '"/></div>' +
       '<div class="rf-field"><label>Group Folder</label><select class="rf-select" id="rf-d-group">' + grpSelectHtml + '</select></div>' +
       '<div class="rf-field"><label>Category</label><select class="rf-select" id="rf-d-cat">' + catOptionsHtml + '</select></div>' +
       '<div class="rf-field"><label>Year (Masihi)</label><input class="rf-input" id="rf-d-year" placeholder="e.g. 1957" value="' + esc(doc ? (doc.year || (docYearNum(doc) ? String(docYearNum(doc)) : '')) : '') + '"/></div>' +
@@ -2278,6 +2482,14 @@
 
     document.getElementById('rf-d-form').onsubmit = async function (ev) {
       ev.preventDefault();
+      var dForm = ev.target;
+      clearFormErrors(dForm);
+      var titleEl = document.getElementById('rf-d-title');
+      if (!titleEl.value.trim()) {
+        setFieldError(titleEl, 'Document title / subject is required.');
+        titleEl.focus();
+        return;
+      }
       var payload = {
         title: document.getElementById('rf-d-title').value,
         subject: document.getElementById('rf-d-title').value,
@@ -4034,10 +4246,10 @@
       '  <details style="margin-top:4px;border-top:1px solid rgb(var(--border-light));padding-top:8px">' +
       '    <summary style="cursor:pointer;font-size:.75rem;font-weight:600;color:rgb(var(--text-secondary))">📖 Teach a New Jawi Word to Dictionary (Optional)</summary>' +
       '    <div style="font-size:.72rem;color:rgb(var(--text-secondary));margin:6px 0">If any Jawi word was misread, add its correct Malay (Rumi) spelling here so ArkibVision translates it accurately next time.</div>' +
-      '    <div style="display:flex;gap:6px;align-items:center">' +
-      '      <input id="ac-lex-jawi" class="rf-input" dir="rtl" style="flex:1" placeholder="Jawi spelling (e.g. ڤرلمباݢأن)"/>' +
-      '      <input id="ac-lex-rumi" class="rf-input" style="flex:1" placeholder="Correct Malay word (e.g. Perlembagaan)"/>' +
-      '      <button type="button" class="rf-btn" id="ac-lex-add">+ Add Word</button>' +
+      '    <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">' +
+      '      <div class="ac-field arkib-field" style="flex:1;min-width:150px"><label class="arkib-label" for="ac-lex-jawi">Jawi Word</label><input id="ac-lex-jawi" class="rf-input arkib-input" dir="rtl" placeholder="ڤرلمباݢأن"/></div>' +
+      '      <div class="ac-field arkib-field" style="flex:1;min-width:150px"><label class="arkib-label" for="ac-lex-rumi">DBP Rumi Word</label><input id="ac-lex-rumi" class="rf-input arkib-input" placeholder="Perlembagaan"/></div>' +
+      '      <button type="button" class="rf-btn" id="ac-lex-add" style="margin-top:24px">+ Add Word</button>' +
       '    </div>' +
       '    <div id="ac-lex-list" style="display:flex;flex-wrap:wrap;gap:6px;font-size:.74rem;margin-top:6px"></div>' +
       '  </details>' +
@@ -4263,12 +4475,27 @@
       });
     };
     document.getElementById('ac-lex-add').onclick = function () {
-      var j = document.getElementById('ac-lex-jawi').value.trim();
-      var r = document.getElementById('ac-lex-rumi').value.trim();
-      if (!j || !r) { acToast('Enter both Jawi and DBP Rumi words.', false); return; }
+      var jEl = document.getElementById('ac-lex-jawi');
+      var rEl = document.getElementById('ac-lex-rumi');
+      var j = jEl.value.trim();
+      var r = rEl.value.trim();
+      if (window.ArkibForm) {
+        window.ArkibForm.clearFieldError(jEl);
+        window.ArkibForm.clearFieldError(rEl);
+      }
+      if (!j || !r) {
+        if (window.ArkibForm) {
+          if (!j) window.ArkibForm.setFieldError(jEl, 'Enter a Jawi word.');
+          if (!r) window.ArkibForm.setFieldError(rEl, 'Enter the DBP Rumi spelling.');
+        } else {
+          acToast('Enter both Jawi and DBP Rumi words.', false);
+        }
+        (!j ? jEl : rEl).focus();
+        return;
+      }
       ac.lexiconPairs.push({ jawi: j, rumi: r });
-      document.getElementById('ac-lex-jawi').value = '';
-      document.getElementById('ac-lex-rumi').value = '';
+      jEl.value = '';
+      rEl.value = '';
       renderLexList();
     };
     renderLexList();
@@ -4646,10 +4873,25 @@
     document.getElementById('ac-enr-submit').onclick = async function () {
       var btn = this;
       var isExist = ac.enrollMode === 'existing';
-      var existingId = isExist ? document.getElementById('ac-enr-existing').value.trim() : '';
-      var newName = isExist ? '' : document.getElementById('ac-enr-name').value.trim();
+      var existingEl = document.getElementById('ac-enr-existing');
+      var newNameEl = document.getElementById('ac-enr-name');
+      if (window.ArkibForm) {
+        window.ArkibForm.clearFieldError(existingEl);
+        window.ArkibForm.clearFieldError(newNameEl);
+      }
+      var existingId = isExist && existingEl ? existingEl.value.trim() : '';
+      var newName = !isExist && newNameEl ? newNameEl.value.trim() : '';
       var target = existingId || newName;
-      if (!target) { acToast('Please enter or select a person name.', false); return; }
+      if (!target) {
+        var targetEl = isExist ? existingEl : newNameEl;
+        if (window.ArkibForm && targetEl) {
+          window.ArkibForm.setFieldError(targetEl, isExist ? 'Please select an enrolled person.' : 'Person name is required.');
+          targetEl.focus();
+        } else {
+          acToast('Please enter or select a person name.', false);
+        }
+        return;
+      }
       var imgB64 = ac.croppedDataUrl || (ac.enrollImg ? exportCroppedDataUrl() : '');
       if (!imgB64 && (!ac.sessionId || ac.sessionId === 'new')) {
         acToast('Upload or paste a photo first.', false);

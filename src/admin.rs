@@ -480,8 +480,12 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
             "/admin/api/categories/{slug}",
             patch(admin_update_category).delete(admin_delete_category),
         )
-        // AI Content Analysis -> Auto-Suggest Form Fields on Upload
+        // AI Content Analysis -> Auto-Suggest Form Fields on Upload & Missing Image Descriptions
         .route("/admin/api/analyze-upload", post(admin_analyze_upload))
+        .route(
+            "/admin/api/suggest-image-description",
+            post(admin_suggest_image_description),
+        )
         // Change Detection & Before/After Revision Comparison
         .route("/admin/api/revisions", get(admin_api_revisions))
         .route(
@@ -3009,6 +3013,107 @@ async fn admin_analyze_upload(
         )
             .into_response(),
     }
+}
+
+#[derive(Deserialize)]
+struct SuggestImageDescPayload {
+    #[serde(default)]
+    entity_type: String,
+    #[serde(default)]
+    slug: String,
+    #[serde(default)]
+    filename: String,
+    #[serde(default)]
+    context_label: String,
+}
+
+async fn admin_suggest_image_description(
+    State(state): State<AdminState>,
+    Json(payload): Json<SuggestImageDescPayload>,
+) -> Response {
+    let etype = payload.entity_type.trim().to_ascii_lowercase();
+    let Some(clean_slug) = safe_filename(&payload.slug) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Invalid slug." })),
+        )
+            .into_response();
+    };
+    let Some(clean_name) = safe_filename(&payload.filename) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Invalid filename." })),
+        )
+            .into_response();
+    };
+    if !is_image_ext(Path::new(&clean_name)) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Only image files are supported for visual description." })),
+        )
+            .into_response();
+    }
+
+    let (path, fallback_label) = match etype.as_str() {
+        "location" => (
+            state
+                .service
+                .cfg
+                .locations_dir
+                .join(clean_slug)
+                .join("images")
+                .join(clean_name),
+            clean_slug.replace('_', " "),
+        ),
+        "document" => (
+            state
+                .service
+                .cfg
+                .documents_dir
+                .join(clean_slug)
+                .join("files")
+                .join(clean_name),
+            clean_slug.replace('_', " "),
+        ),
+        _ => {
+            let ident = state
+                .service
+                .admin_profile_identity(clean_slug)
+                .unwrap_or_else(|| clean_slug.replace('_', " "));
+            (
+                state
+                    .service
+                    .cfg
+                    .profile_dir
+                    .join(clean_slug)
+                    .join("images")
+                    .join(clean_name),
+                ident,
+            )
+        }
+    };
+
+    let Ok(bytes) = fs::read(&path) else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": "Image file not found on disk." })),
+        )
+            .into_response();
+    };
+    let label = if payload.context_label.trim().is_empty() {
+        fallback_label
+    } else {
+        payload.context_label.trim().to_string()
+    };
+    let out = archives::suggest_image_description(
+        &state.service.cfg,
+        &bytes,
+        clean_name,
+        if etype.is_empty() { "profile" } else { &etype },
+        &label,
+    )
+    .await;
+    (StatusCode::OK, Json(out)).into_response()
 }
 
 // ─── Change Detection & Before/After Revision Endpoints ──────────────────────

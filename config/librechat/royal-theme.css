@@ -2556,3 +2556,242 @@ a[href*="#arkib-canvas:"]:hover .ac-cc-open {
   align-items: flex-start;
   justify-content: space-between;
 }
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   ArkibVision Unified Theme-Aware Structured Input System (Light & Dark Safe)
+   Strictly scoped to ArkibVision containers — LibreChat inputs are untouched.
+   ═════════════════════════════════════════════════════════════════════════════ */
+#rf-admin-stage,
+#arkib-admin,
+.rf-modal-backdrop,
+.arkib-modal,
+#ac-drawer,
+.arkib-canvas {
+  --arkib-surface: rgb(var(--field-fill, var(--surface-primary, 15 23 42)));
+  --arkib-surface-alt: rgb(var(--surface-secondary, 23 32 51));
+  --arkib-surface-focus: rgb(var(--surface-tertiary, 30 41 59));
+  --arkib-text: rgb(var(--text-primary, 241 245 249));
+  --arkib-text-muted: rgb(var(--text-secondary, 148 163 184));
+  --arkib-border: rgb(var(--border-medium, 71 85 105));
+  --arkib-accent: rgb(var(--border-field-focus, 59 130 246));
+  --arkib-danger: #c81010;
+  --arkib-danger-text: #ffffff;
+}
+html:not(.dark) #rf-admin-stage,
+html:not(.dark) #arkib-admin,
+html:not(.dark) .rf-modal-backdrop,
+html:not(.dark) .arkib-modal,
+html:not(.dark) #ac-drawer,
+html:not(.dark) .arkib-canvas {
+  --arkib-surface: rgb(var(--field-fill, var(--surface-primary, 255 255 255)));
+  --arkib-surface-alt: rgb(var(--surface-secondary, 241 245 249));
+  --arkib-surface-focus: rgb(var(--surface-tertiary, 238 242 255));
+  --arkib-text: rgb(var(--text-primary, 15 23 42));
+  --arkib-text-muted: rgb(var(--text-secondary, 71 85 105));
+  --arkib-border: rgb(var(--border-medium, 148 163 184));
+  --arkib-accent: rgb(var(--button-primary, 29 78 216));
+  --arkib-danger: #c81010;
+  --arkib-danger-text: #ffffff;
+}
+
+/* 1. Label Above Input (.arkib-field / .rf-field / .ac-field) */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-field,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .rf-field,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .ac-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-label,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .rf-field > label,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .ac-field > label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.35;
+  margin: 0 0 6px;
+  color: var(--arkib-text);
+  font-family: inherit;
+}
+
+/* 2. Default Input Style (Clean Outlined + Subtle Surface) */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea, .ac-rumi-textarea, .ac-jawi-textarea) {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--arkib-border);
+  background: var(--arkib-surface);
+  color: var(--arkib-text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  outline: none;
+  box-shadow: none;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea, .ac-rumi-textarea, .ac-jawi-textarea)::placeholder {
+  color: var(--arkib-text-muted);
+  opacity: 0.65;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) input[type="file"]:is(.arkib-input, .rf-input) {
+  padding: 8px 12px;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) textarea:is(.arkib-input, .rf-textarea, .ac-textarea, .ac-rumi-textarea) {
+  min-height: 88px;
+  resize: vertical;
+}
+
+/* Preserve RTL Jawi Typography & Direction inside Jawi OCR Workbench */
+:is(#ac-drawer, .arkib-canvas) .ac-jawi-textarea {
+  min-height: 122px;
+  font-family: "Amiri", "Scheherazade New", "Traditional Arabic", "Arial", serif !important;
+  font-size: 1.32rem;
+  line-height: 1.85;
+  direction: rtl;
+  text-align: right;
+  resize: vertical;
+}
+
+/* 3. Focused / Active State (Crisp 2px Solid Accent Border, Zero Layout Shift) */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea, .ac-rumi-textarea, .ac-jawi-textarea):focus,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea, .ac-rumi-textarea, .ac-jawi-textarea):focus-visible {
+  outline: none;
+  border-color: var(--arkib-accent);
+  background: var(--arkib-surface-focus);
+  box-shadow: inset 0 0 0 1px var(--arkib-accent);
+}
+
+/* Disabled & Read-Only States */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea):disabled,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea)[readonly] {
+  background: var(--arkib-surface-alt);
+  color: var(--arkib-text-muted);
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+/* Compact Toolbar / Card-Inline Select & Number Overrides (Preserve Same 4px Geometry) */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, #ac-drawer) :is(.rf-folder-select, .rf-compact-select, .rf-move-sel, .rf-kv-k, .rf-kv-v) {
+  width: auto;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  border-radius: 4px;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, #ac-drawer) .rf-move-sel {
+  border: 1px solid var(--arkib-border);
+  background: var(--arkib-surface);
+  color: var(--arkib-text);
+  font-family: inherit;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, #ac-drawer) .rf-move-sel:focus {
+  outline: none;
+  border-color: var(--arkib-accent);
+  box-shadow: inset 0 0 0 1px var(--arkib-accent);
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop) .rf-kv-k,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop) .rf-kv-v {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 0.84rem;
+}
+
+/* 4. Optional Utility Variants (.arkib-input--filled & .arkib-input--underline) */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-input--filled {
+  border-color: transparent;
+  background: var(--arkib-surface-alt);
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-input--filled:focus,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-input--filled:focus-visible {
+  border-color: var(--arkib-accent);
+  background: var(--arkib-surface-focus);
+  box-shadow: inset 0 0 0 1px var(--arkib-accent);
+}
+
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-input--underline {
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 2px solid var(--arkib-border);
+  border-radius: 4px 4px 0 0;
+  background: var(--arkib-surface-alt);
+  box-shadow: none;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-input--underline:focus,
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-input--underline:focus-visible {
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 2px solid var(--arkib-accent);
+  background: var(--arkib-surface-focus);
+  box-shadow: none;
+}
+
+/* 5. Attached Full-Width Error Banner (.is-invalid) */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-field, .rf-field, .ac-field).is-invalid :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea, .ac-rumi-textarea, .ac-jawi-textarea) {
+  background: var(--arkib-surface-alt);
+  border-color: var(--arkib-danger);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  box-shadow: none;
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) :is(.arkib-field, .rf-field, .ac-field).is-invalid :is(.arkib-input, .rf-input, .rf-select, .rf-textarea, .ac-input, .ac-textarea, .ac-rumi-textarea, .ac-jawi-textarea):focus {
+  border-color: var(--arkib-danger);
+  box-shadow: inset 0 0 0 1px var(--arkib-danger);
+}
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal, #ac-drawer, .arkib-canvas) .arkib-field-error {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0;
+  padding: 7px 14px;
+  border-radius: 0 0 4px 4px;
+  background: var(--arkib-danger);
+  color: var(--arkib-danger-text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+/* Inline AI Image Description Suggestion Card */
+.rf-ai-desc-box {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(59, 130, 246, 0.38);
+  background: rgba(59, 130, 246, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+html:not(.dark) .rf-ai-desc-box {
+  background: rgba(37, 99, 235, 0.06);
+  border-color: rgba(37, 99, 235, 0.32);
+}
+.rf-ai-desc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--arkib-text);
+}
+.rf-ai-desc-text {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--arkib-text);
+}
+.rf-ai-desc-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

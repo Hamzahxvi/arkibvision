@@ -2431,6 +2431,147 @@ Return ONLY a valid JSON object (no markdown) with keys: \
     }))
 }
 
+/// Generate a concise, factual archival description for an image using local Ollama vision
+/// (`qwen3-vl:4b-instruct-16k`), with a deterministic image-metadata fallback if Ollama is unavailable.
+pub async fn suggest_image_description(
+    cfg: &AppConfig,
+    bytes: &[u8],
+    filename: &str,
+    entity_type: &str,
+    context_label: &str,
+) -> Value {
+    let mut ai_desc = String::new();
+    let mut ai_used = false;
+
+    let (width, height, is_grayscale) = if let Ok(img) = image::load_from_memory(bytes) {
+        let rgb = img.to_rgb8();
+        let (w, h) = rgb.dimensions();
+        let step_x = (w / 24).max(1) as usize;
+        let step_y = (h / 24).max(1) as usize;
+        let mut color_diff = 0u64;
+        let mut samples = 0u64;
+        for y in (0..h as usize).step_by(step_y) {
+            for x in (0..w as usize).step_by(step_x) {
+                let p = rgb.get_pixel(x as u32, y as u32).0;
+                let dr = u64::from((p[0] as i32 - p[1] as i32).unsigned_abs());
+                let dg = u64::from((p[1] as i32 - p[2] as i32).unsigned_abs());
+                color_diff += dr + dg;
+                samples += 1;
+            }
+        }
+        let avg_diff = color_diff.checked_div(samples).unwrap_or(0);
+        (w, h, avg_diff < 12)
+    } else {
+        (0, 0, false)
+    };
+
+    if let Ok(client) = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+    {
+        use base64::Engine as _;
+        let b64_img = if let Ok(img) = image::load_from_memory(bytes) {
+            let resized = if img.width() > 896 || img.height() > 896 {
+                img.resize(896, 896, image::imageops::FilterType::Triangle)
+            } else {
+                img
+            };
+            let mut out = Cursor::new(Vec::new());
+            if resized.write_to(&mut out, image::ImageFormat::Png).is_ok() {
+                base64::engine::general_purpose::STANDARD.encode(out.into_inner())
+            } else {
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            }
+        } else {
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        };
+
+        let role_ctx = match entity_type {
+            "location" => format!("archival photograph of location '{context_label}'"),
+            "document" => format!("digitized archival document image from '{context_label}'"),
+            _ => format!("reference portrait/photograph of '{context_label}'"),
+        };
+
+        let prompt = format!(
+            "Describe this {role_ctx} in 1 to 2 concise, factual archival sentences (max 40 words). \
+Focus on visible clothing/headwear, pose or action, background/setting, and lighting. \
+Do NOT include markdown, quotes, bullet points, or introductory phrases like 'This image shows'."
+        );
+
+        let body = json!({
+            "model": cfg.vision_model,
+            "stream": false,
+            "options": {
+                "num_ctx": OLLAMA_UNIFORM_NUM_CTX,
+                "temperature": 0.15,
+                "num_predict": 140
+            },
+            "messages": [{
+                "role": "user",
+                "content": prompt,
+                "images": [b64_img],
+            }],
+        });
+
+        if let Ok(resp) = client.post(&cfg.ollama_url).json(&body).send().await
+            && resp.status().is_success()
+            && let Ok(val) = resp.json::<Value>().await
+            && let Some(raw) = val["message"]["content"].as_str()
+        {
+            // Strip optional <think>...</think> blocks if present
+            let cleaned = if let Some(end_idx) = raw.rfind("</think>") {
+                &raw[end_idx + "</think>".len()..]
+            } else {
+                raw
+            };
+            let trimmed = cleaned
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .replace('\n', " ");
+            let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !collapsed.is_empty() {
+                ai_desc = collapsed;
+                ai_used = true;
+            }
+        }
+    }
+
+    let suggested = if !ai_desc.is_empty() {
+        ai_desc
+    } else {
+        let tone = if is_grayscale { "Monochrome" } else { "Color" };
+        let orient = if width > height {
+            "landscape"
+        } else if height > width {
+            "portrait"
+        } else {
+            "square"
+        };
+        let dim_part = if width > 0 && height > 0 {
+            format!(" ({width}x{height}px)")
+        } else {
+            String::new()
+        };
+        match entity_type {
+            "location" => format!(
+                "{tone} {orient} archival photograph of {context_label}{dim_part} (file: {filename})."
+            ),
+            "document" => format!(
+                "{tone} {orient} scanned page from {context_label}{dim_part} (file: {filename})."
+            ),
+            _ => format!("{tone} {orient} reference photograph of {context_label}{dim_part}."),
+        }
+    };
+
+    json!({
+        "status": "ok",
+        "suggested_description": suggested,
+        "source": if ai_used { "ollama_vision" } else { "heuristic_fallback" },
+        "model": if ai_used { cfg.vision_model.clone() } else { "local-metadata".to_string() },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
