@@ -3526,13 +3526,19 @@
         ac.activeStripIdx = -1;
         ac.jawiText = String(r.data.raw_jawi_text || '');
         ac.rumiText = String(r.data.standard_malay_rumi_text || '');
+        ac.initialJawiText = ac.jawiText;
+        ac.initialRumiText = ac.rumiText;
+        ac.initialCoveragePct = typeof r.data.coverage_pct === 'number' ? r.data.coverage_pct : null;
+        ac.latestCoveragePct = ac.initialCoveragePct;
+        ac.latestHijriDates = Array.isArray(r.data.hijri_colophon_dates) ? r.data.hijri_colophon_dates : [];
+        ac.ocrDiffMode = 'side';
         ac.rumiManualOverride = false;
         ac.lexiconPairs = [];
         renderOcrWorkbench(body, footer);
       } else if (mode === 'compare') {
         ac.compareView = 'slider';
+        ac.compareDiffMode = 'side';
         ac.compareSliderPct = 50;
-        ac.compareBlendPct = 50;
         ac.compareMetaChangedOnly = false;
         renderCompareCanvas(body, footer);
       } else {
@@ -3616,6 +3622,16 @@
       hijriHtml +
       '  <textarea id="ac-rumi-ta" class="ac-rumi-textarea" placeholder="Deterministic Rumi transliteration appears here automatically (<5ms)…">' + esc(ac.rumiText) + '</textarea>' +
       '</div>' +
+      '<div class="ac-card" id="ac-ocr-diff-card">' +
+      '  <div class="ac-diff-toolbar">' +
+      '    <div class="ac-seg-group">' +
+      '      <button type="button" class="ac-seg-btn' + (ac.ocrDiffMode !== 'unified' ? ' active' : '') + '" data-ac-ocr-dm="side">Side-by-Side Diff</button>' +
+      '      <button type="button" class="ac-seg-btn' + (ac.ocrDiffMode === 'unified' ? ' active' : '') + '" data-ac-ocr-dm="unified">Unified Diff</button>' +
+      '    </div>' +
+      '    <div class="ac-diff-pills" id="ac-ocr-diff-pills"></div>' +
+      '  </div>' +
+      '  <div id="ac-ocr-diff-view"></div>' +
+      '</div>' +
       '<div class="ac-card">' +
       '  <div class="ac-card-head"><span>💾 Save to Archive (Optional)</span></div>' +
       '  <div style="font-size:.73rem;color:rgb(var(--text-secondary));line-height:1.45">Save your corrected Jawi &amp; Rumi text as an archival record under <b>Admin Portal → Documents</b>, or attach it to an existing document.</div>' +
@@ -3682,6 +3698,100 @@
       };
     });
 
+    function computeWordDiffJs(beforeStr, afterStr) {
+      var a = String(beforeStr || '').trim().split(/\s+/).filter(Boolean);
+      var b = String(afterStr || '').trim().split(/\s+/).filter(Boolean);
+      var n = a.length, m = b.length;
+      if (n > 300 || m > 300) {
+        var same = String(beforeStr || '').trim() === String(afterStr || '').trim();
+        var bt = [{ text: String(beforeStr || '').trim(), kind: same ? 'eq' : 'del' }];
+        var at = [{ text: String(afterStr || '').trim(), kind: same ? 'eq' : 'add' }];
+        return { before: bt, after: at, unified: same ? bt : [bt[0], at[0]], changes: same ? 0 : 1 };
+      }
+      var dp = new Array(n + 1);
+      for (var i = 0; i <= n; i++) dp[i] = new Uint16Array(m + 1);
+      for (var ii = n - 1; ii >= 0; ii--) {
+        for (var jj = m - 1; jj >= 0; jj--) {
+          dp[ii][jj] = a[ii] === b[jj] ? dp[ii + 1][jj + 1] + 1 : Math.max(dp[ii + 1][jj], dp[ii][jj + 1]);
+        }
+      }
+      var before = [], after = [], unified = [], changes = 0, x = 0, y = 0;
+      while (x < n && y < m) {
+        if (a[x] === b[y]) {
+          var t = { text: a[x], kind: 'eq' };
+          before.push(t); after.push(t); unified.push(t); x++; y++;
+        } else if (dp[x + 1][y] >= dp[x][y + 1]) {
+          var td = { text: a[x], kind: 'del' };
+          before.push(td); unified.push(td); changes++; x++;
+        } else {
+          var ta = { text: b[y], kind: 'add' };
+          after.push(ta); unified.push(ta); changes++; y++;
+        }
+      }
+      while (x < n) { var td2 = { text: a[x++], kind: 'del' }; before.push(td2); unified.push(td2); changes++; }
+      while (y < m) { var ta2 = { text: b[y++], kind: 'add' }; after.push(ta2); unified.push(ta2); changes++; }
+      return { before: before, after: after, unified: unified, changes: changes };
+    }
+
+    function tokensToHtml(tokens) {
+      if (!Array.isArray(tokens) || !tokens.length) return '<span style="opacity:.55">(empty)</span>';
+      return tokens.map(function (t) {
+        if (t.kind === 'del') return '<span class="ac-tok-del">' + esc(t.text) + '</span>';
+        if (t.kind === 'add') return '<span class="ac-tok-add">' + esc(t.text) + '</span>';
+        return esc(t.text);
+      }).join(' ');
+    }
+
+    function renderOcrLiveDiff() {
+      var viewEl = document.getElementById('ac-ocr-diff-view');
+      var pillsEl = document.getElementById('ac-ocr-diff-pills');
+      if (!viewEl) return;
+      var pillsHtml = '';
+      if (typeof ac.initialCoveragePct === 'number' && typeof ac.latestCoveragePct === 'number') {
+        pillsHtml += '<span class="ac-st-pill ac-pill-ok">DBP Coverage: ' + ac.initialCoveragePct.toFixed(1) + '% → ' + ac.latestCoveragePct.toFixed(1) + '%</span>';
+      } else if (typeof ac.latestCoveragePct === 'number') {
+        pillsHtml += '<span class="ac-st-pill ac-pill-ok">DBP Coverage: ' + ac.latestCoveragePct.toFixed(1) + '%</span>';
+      }
+      if (Array.isArray(ac.latestHijriDates) && ac.latestHijriDates.length) {
+        var h0 = ac.latestHijriDates[0];
+        pillsHtml += '<span class="ac-st-pill ac-pill-gold">' + esc(h0.hijri_date) + ' → ' + esc(h0.gregorian_date_masihi) + '</span>';
+      }
+      if (pillsEl) pillsEl.innerHTML = pillsHtml;
+
+      var jDiff = computeWordDiffJs(ac.initialJawiText || '', ac.jawiText || '');
+      var rDiff = computeWordDiffJs(ac.initialRumiText || '', ac.rumiText || '');
+      if (ac.ocrDiffMode === 'unified') {
+        viewEl.innerHTML =
+          '<div class="ac-diff-pane" style="margin-bottom:10px">' +
+          '<div class="ac-diff-pane-lbl">UNIFIED DIFF · JAWI (RTL)</div>' +
+          '<div class="ac-diff-pane-body ac-diff-rtl">' + tokensToHtml(jDiff.unified) + '</div></div>' +
+          '<div class="ac-diff-pane">' +
+          '<div class="ac-diff-pane-lbl">UNIFIED DIFF · STANDARD BAHASA MALAYSIA (RUMI)</div>' +
+          '<div class="ac-diff-pane-body">' + tokensToHtml(rDiff.unified) + '</div></div>';
+      } else {
+        viewEl.innerHTML =
+          '<div class="ac-diff-pair" style="margin-bottom:10px">' +
+          '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">BEFORE · RAW OCR (JAWI RTL)</div><div class="ac-diff-pane-body ac-diff-rtl">' + tokensToHtml(jDiff.before) + '</div></div>' +
+          '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">AFTER · CORRECTED (JAWI RTL)</div><div class="ac-diff-pane-body ac-diff-rtl">' + tokensToHtml(jDiff.after) + '</div></div>' +
+          '</div>' +
+          '<div class="ac-diff-pair">' +
+          '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">BEFORE · RUMI OUTPUT (DBP)</div><div class="ac-diff-pane-body">' + tokensToHtml(rDiff.before) + '</div></div>' +
+          '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">AFTER · VERIFIED STANDARD BM (RUMI)</div><div class="ac-diff-pane-body">' + tokensToHtml(rDiff.after) + '</div></div>' +
+          '</div>';
+      }
+    }
+
+    body.querySelectorAll('[data-ac-ocr-dm]').forEach(function (btn) {
+      btn.onclick = function () {
+        ac.ocrDiffMode = btn.getAttribute('data-ac-ocr-dm');
+        body.querySelectorAll('[data-ac-ocr-dm]').forEach(function (b) {
+          b.classList.toggle('active', b.getAttribute('data-ac-ocr-dm') === ac.ocrDiffMode);
+        });
+        renderOcrLiveDiff();
+      };
+    });
+    renderOcrLiveDiff();
+
     // Jawi editor + 6-key helper bar + debounced 250ms deterministic preview
     var jawiTa = document.getElementById('ac-jawi-ta');
     var rumiTa = document.getElementById('ac-rumi-ta');
@@ -3690,6 +3800,7 @@
       ac.jawiText = text;
       if (!text.trim()) {
         if (!ac.rumiManualOverride) { rumiTa.value = ''; ac.rumiText = ''; }
+        renderOcrLiveDiff();
         return;
       }
       try {
@@ -3704,11 +3815,16 @@
             rumiTa.value = ac.rumiText;
           }
           var covEl = document.getElementById('ac-cov-badge');
-          if (covEl && typeof r.data.coverage_pct === 'number') covEl.textContent = 'FST Coverage: ' + r.data.coverage_pct.toFixed(1) + '%';
+          if (typeof r.data.coverage_pct === 'number') {
+            ac.latestCoveragePct = r.data.coverage_pct;
+            if (ac.initialCoveragePct === null) ac.initialCoveragePct = r.data.coverage_pct;
+            if (covEl) covEl.textContent = 'FST Coverage: ' + r.data.coverage_pct.toFixed(1) + '%';
+          }
           var stEl = document.getElementById('ac-style-lbl');
           if (stEl) stEl.textContent = r.data.script_style === 'old_classical_jawi_or_mixed' ? 'Old Classical Jawi' : 'Modern Jawi';
           var hb = document.getElementById('ac-hijri-bar');
           var hd = Array.isArray(r.data.hijri_colophon_dates) ? r.data.hijri_colophon_dates : [];
+          ac.latestHijriDates = hd;
           if (hb) {
             if (hd.length) {
               hb.style.display = 'block';
@@ -3718,11 +3834,13 @@
               hb.style.display = 'none';
             }
           }
+          renderOcrLiveDiff();
         }
       } catch (_) {}
     };
     var schedulePreview = function () {
       ac.rumiManualOverride = false;
+      renderOcrLiveDiff();
       clearTimeout(ac.previewTimer);
       ac.previewTimer = setTimeout(runPreview, 250);
     };
@@ -3730,6 +3848,7 @@
     rumiTa.addEventListener('input', function () {
       ac.rumiText = rumiTa.value;
       ac.rumiManualOverride = true;
+      renderOcrLiveDiff();
     });
 
     body.querySelectorAll('[data-ac-jawi]').forEach(function (kbtn) {
@@ -4331,20 +4450,42 @@
       var changed = Array.isArray(pgObj.changed_pages) ? pgObj.changed_pages : [];
       var total = Number(pgObj.total_pages || 0);
       var unchangedCnt = Number(pgObj.unchanged_page_count || 0);
+      var isUnified = ac.compareDiffMode === 'unified';
+      var covPill = (typeof d.dbp_coverage_before === 'number' && typeof d.dbp_coverage_after === 'number')
+        ? '<span class="ac-st-pill ac-pill-ok">DBP Coverage: ' + d.dbp_coverage_before.toFixed(1) + '% → ' + d.dbp_coverage_after.toFixed(1) + '%</span>'
+        : '';
+      var hijriPill = (d.hijri_date && d.gregorian_date_masihi)
+        ? '<span class="ac-st-pill ac-pill-gold">' + esc(d.hijri_date) + ' → ' + esc(d.gregorian_date_masihi) + '</span>'
+        : '';
       var badge = '<span class="ac-st-pill ac-pill-ok">Showing ' + changed.length + ' changed page(s) of ' + total + ' total' + (unchangedCnt > 0 ? ' · ' + unchangedCnt + ' unchanged hidden' : '') + '</span>';
+      var toggleBar =
+        '<div class="ac-diff-toolbar">' +
+        '  <div class="ac-seg-group">' +
+        '    <button type="button" class="ac-seg-btn' + (!isUnified ? ' active' : '') + '" data-ac-cdm="side">Side-by-Side Diff</button>' +
+        '    <button type="button" class="ac-seg-btn' + (isUnified ? ' active' : '') + '" data-ac-cdm="unified">Unified Diff</button>' +
+        '  </div>' +
+        '  <div class="ac-diff-pills">' + covPill + hijriPill + badge + '</div>' +
+        '</div>';
+
       if (!changed.length) {
-        return '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>' + esc(headingLabel) + '</strong>' + badge + '</div>' +
+        return '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>' + esc(headingLabel) + '</strong></div>' + toggleBar +
           '<div style="font-size:.82rem;color:#34d399">✓ Original and Latest pages are identical — no text differences found.</div></div>';
       }
-      return '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>' + esc(headingLabel) + '</strong>' + badge + '</div>' +
+      return '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>' + esc(headingLabel) + '</strong></div>' + toggleBar +
         changed.map(function (pg) {
           var rtlCls = (forceRtl || pg.is_rtl) ? ' ac-diff-rtl' : '';
+          var uniTokens = Array.isArray(pg.unified_tokens) && pg.unified_tokens.length
+            ? pg.unified_tokens
+            : (pg.before_tokens || []).concat(pg.after_tokens || []);
+          var contentHtml = isUnified
+            ? '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">' + (forceRtl || pg.is_rtl ? 'UNIFIED DIFF · JAWI (RTL)' : 'UNIFIED DIFF · STANDARD BAHASA MALAYSIA (RUMI)') + ' · PAGE ' + Number(pg.page || 1) + '</div><div class="ac-diff-pane-body' + rtlCls + '">' + renderTokenStream(uniTokens, 'unified') + '</div></div>'
+            : '<div class="ac-diff-pair">' +
+              '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">' + (forceRtl || pg.is_rtl ? 'BEFORE · RAW OCR (JAWI RTL)' : 'BEFORE · ORIGINAL') + ' (PAGE ' + Number(pg.page || 1) + ')</div><div class="ac-diff-pane-body' + rtlCls + '">' + renderTokenStream(pg.before_tokens, 'before') + '</div></div>' +
+              '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">' + (forceRtl || pg.is_rtl ? 'AFTER · CORRECTED (JAWI RTL)' : 'AFTER · LATEST') + ' (PAGE ' + Number(pg.page || 1) + ')</div><div class="ac-diff-pane-body' + rtlCls + '">' + renderTokenStream(pg.after_tokens, 'after') + '</div></div>' +
+              '</div>';
           return '<div class="ac-page-diff-block">' +
             '<div class="ac-page-diff-bar"><span>📄 Page ' + Number(pg.page || 1) + '</span>' + statusPill(pg.status) + '<span style="font-size:.73rem;opacity:.75">' + Number(pg.word_changes || 0) + ' word change(s)</span></div>' +
-            '<div class="ac-diff-pair">' +
-            '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">BEFORE · ORIGINAL (PAGE ' + Number(pg.page || 1) + ')</div><div class="ac-diff-pane-body' + rtlCls + '">' + renderTokenStream(pg.before_tokens, 'before') + '</div></div>' +
-            '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">AFTER · LATEST (PAGE ' + Number(pg.page || 1) + ')</div><div class="ac-diff-pane-body' + rtlCls + '">' + renderTokenStream(pg.after_tokens, 'after') + '</div></div>' +
-            '</div></div>';
+            contentHtml + '</div>';
         }).join('') +
         '</div>';
     }
@@ -4367,7 +4508,7 @@
       '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="ac-cmp-run-btn">⚖️ Compare Uploaded Files</button></div>' +
       '</div>';
 
-    // 2. Interactive Image Comparator (Slider / Side-by-Side / Onion-Skin Blend)
+    // 2. Interactive Image Comparator (Split Slider | Side-by-Side)
     var imageStageHtml = '';
     if (hasImages) {
       var bUrl = apiUrl(d.before_image_url);
@@ -4379,14 +4520,6 @@
           '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">' + esc(d.before_label || 'BEFORE · ORIGINAL') + '</div><img class="ac-cmp-img" src="' + esc(bUrl) + '" alt="Before"/></div>' +
           '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">' + esc(d.after_label || 'AFTER · LATEST') + '</div><img class="ac-cmp-img" src="' + esc(aUrl) + '" alt="After"/></div>' +
           '</div>';
-      } else if (ac.compareView === 'blend') {
-        stageInner =
-          '<div class="ac-blend-stage">' +
-          '<img class="ac-blend-base" src="' + esc(bUrl) + '" alt="Before"/>' +
-          '<img class="ac-blend-top" id="ac-blend-top" src="' + esc(aUrl) + '" alt="After" style="opacity:' + (ac.compareBlendPct / 100) + '"/>' +
-          '<span class="ac-corner-tag ac-tag-l">BEFORE</span><span class="ac-corner-tag ac-tag-r">AFTER (' + ac.compareBlendPct + '%)</span>' +
-          '</div>' +
-          '<div class="ac-slider-bar"><span>Before 0%</span><input type="range" id="ac-blend-range" min="0" max="100" value="' + ac.compareBlendPct + '"/><span>After 100%</span></div>';
       } else {
         stageInner =
           '<div class="ac-curtain-stage" id="ac-curtain-stage">' +
@@ -4403,10 +4536,9 @@
       imageStageHtml =
         '<div class="ac-cmp-card">' +
         '<div class="ac-cmp-head"><strong>🖼️ Interactive Image Comparison</strong>' +
-        '<div style="display:flex;gap:4px">' +
-        '<button type="button" class="rf-btn rf-btn-sm' + (ac.compareView === 'slider' ? ' rf-btn-primary' : '') + '" data-ac-cv="slider">↔ Slider</button>' +
-        '<button type="button" class="rf-btn rf-btn-sm' + (ac.compareView === 'side' ? ' rf-btn-primary' : '') + '" data-ac-cv="side">◫ Side-by-Side</button>' +
-        '<button type="button" class="rf-btn rf-btn-sm' + (ac.compareView === 'blend' ? ' rf-btn-primary' : '') + '" data-ac-cv="blend">👁 Overlay</button>' +
+        '<div class="ac-seg-group">' +
+        '<button type="button" class="ac-seg-btn' + (ac.compareView !== 'side' ? ' active' : '') + '" data-ac-cv="slider">Split Slider</button>' +
+        '<button type="button" class="ac-seg-btn' + (ac.compareView === 'side' ? ' active' : '') + '" data-ac-cv="side">Side-by-Side</button>' +
         '</div></div>' + stageInner + '</div>';
     }
 
@@ -4500,10 +4632,16 @@
       };
     }
 
-    // View mode switches (Slider / Side-by-Side / Blend)
+    // View mode switches (Split Slider | Side-by-Side) & Diff mode switches (Side-by-Side Diff | Unified Diff)
     body.querySelectorAll('[data-ac-cv]').forEach(function (b) {
       b.onclick = function () {
         ac.compareView = b.getAttribute('data-ac-cv');
+        renderCompareCanvas(body, footer);
+      };
+    });
+    body.querySelectorAll('[data-ac-cdm]').forEach(function (b) {
+      b.onclick = function () {
+        ac.compareDiffMode = b.getAttribute('data-ac-cdm');
         renderCompareCanvas(body, footer);
       };
     });

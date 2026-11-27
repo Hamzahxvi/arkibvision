@@ -165,9 +165,16 @@ pub fn split_text_into_pages(text: &str) -> Vec<(usize, String)> {
         .collect()
 }
 
-/// Pure-Rust word-level LCS diff returning tokens tagged `eq` | `del` (before) and `eq` | `add` (after)
-/// so the UI can highlight changed words with crisp red/green inline pills.
-pub fn word_level_diff(before: &str, after: &str) -> (Vec<Value>, Vec<Value>, usize) {
+pub struct WordDiffResult {
+    pub before_tokens: Vec<Value>,
+    pub after_tokens: Vec<Value>,
+    pub unified_tokens: Vec<Value>,
+    pub changes: usize,
+}
+
+/// Pure-Rust word-level LCS diff returning side-by-side (`before_tokens`, `after_tokens`)
+/// and interleaved `unified_tokens` tagged `eq` | `del` | `add`.
+pub fn word_level_diff(before: &str, after: &str) -> WordDiffResult {
     let a: Vec<&str> = before.split_whitespace().collect();
     let b: Vec<&str> = after.split_whitespace().collect();
 
@@ -176,7 +183,17 @@ pub fn word_level_diff(before: &str, after: &str) -> (Vec<Value>, Vec<Value>, us
         let same = before.trim() == after.trim();
         let bt = vec![json!({ "text": before.trim(), "kind": if same { "eq" } else { "del" } })];
         let at = vec![json!({ "text": after.trim(), "kind": if same { "eq" } else { "add" } })];
-        return (bt, at, usize::from(!same));
+        let ut = if same {
+            bt.clone()
+        } else {
+            vec![bt[0].clone(), at[0].clone()]
+        };
+        return WordDiffResult {
+            before_tokens: bt,
+            after_tokens: at,
+            unified_tokens: ut,
+            changes: usize::from(!same),
+        };
     }
 
     let n = a.len();
@@ -194,37 +211,53 @@ pub fn word_level_diff(before: &str, after: &str) -> (Vec<Value>, Vec<Value>, us
 
     let mut before_tokens: Vec<Value> = Vec::new();
     let mut after_tokens: Vec<Value> = Vec::new();
+    let mut unified_tokens: Vec<Value> = Vec::new();
     let mut changes = 0usize;
     let (mut i, mut j) = (0usize, 0usize);
 
     while i < n && j < m {
         if a[i] == b[j] {
-            before_tokens.push(json!({ "text": a[i], "kind": "eq" }));
-            after_tokens.push(json!({ "text": b[j], "kind": "eq" }));
+            let tok = json!({ "text": a[i], "kind": "eq" });
+            before_tokens.push(tok.clone());
+            after_tokens.push(tok.clone());
+            unified_tokens.push(tok);
             i += 1;
             j += 1;
         } else if dp[i + 1][j] >= dp[i][j + 1] {
-            before_tokens.push(json!({ "text": a[i], "kind": "del" }));
+            let tok = json!({ "text": a[i], "kind": "del" });
+            before_tokens.push(tok.clone());
+            unified_tokens.push(tok);
             changes += 1;
             i += 1;
         } else {
-            after_tokens.push(json!({ "text": b[j], "kind": "add" }));
+            let tok = json!({ "text": b[j], "kind": "add" });
+            after_tokens.push(tok.clone());
+            unified_tokens.push(tok);
             changes += 1;
             j += 1;
         }
     }
     while i < n {
-        before_tokens.push(json!({ "text": a[i], "kind": "del" }));
+        let tok = json!({ "text": a[i], "kind": "del" });
+        before_tokens.push(tok.clone());
+        unified_tokens.push(tok);
         changes += 1;
         i += 1;
     }
     while j < m {
-        after_tokens.push(json!({ "text": b[j], "kind": "add" }));
+        let tok = json!({ "text": b[j], "kind": "add" });
+        after_tokens.push(tok.clone());
+        unified_tokens.push(tok);
         changes += 1;
         j += 1;
     }
 
-    (before_tokens, after_tokens, changes)
+    WordDiffResult {
+        before_tokens,
+        after_tokens,
+        unified_tokens,
+        changes,
+    }
 }
 
 /// Compare Original vs. Latest pages and return ONLY pages with actual changes.
@@ -252,7 +285,7 @@ pub fn compare_pages_only_changed(
             continue;
         }
 
-        let (before_tokens, after_tokens, word_changes) = word_level_diff(b_txt, a_txt);
+        let diff = word_level_diff(b_txt, a_txt);
         let status = if b_txt.trim().is_empty() {
             "Page Added"
         } else if a_txt.trim().is_empty() {
@@ -266,12 +299,13 @@ pub fn compare_pages_only_changed(
         changed_pages.push(json!({
             "page": page_num,
             "status": status,
-            "word_changes": word_changes,
+            "word_changes": diff.changes,
             "is_rtl": is_rtl,
             "before_text": b_txt,
             "after_text": a_txt,
-            "before_tokens": before_tokens,
-            "after_tokens": after_tokens,
+            "before_tokens": diff.before_tokens,
+            "after_tokens": diff.after_tokens,
+            "unified_tokens": diff.unified_tokens,
         }));
     }
 
@@ -778,6 +812,31 @@ pub fn build_archived_document_comparison(cfg: &AppConfig, slug: &str) -> Result
         });
     }
 
+    let dbp_cov_before = if !orig_jawi.trim().is_empty() {
+        crate::jawi::decode_jawi_text(orig_jawi.to_string())
+            .ok()
+            .and_then(|v| v["coverage_pct"].as_f64())
+    } else {
+        None
+    };
+    let dbp_cov_after = if !latest_jawi.trim().is_empty() {
+        crate::jawi::decode_jawi_text(latest_jawi.to_string())
+            .ok()
+            .and_then(|v| v["coverage_pct"].as_f64())
+    } else {
+        None
+    };
+    let hijri_date = latest_map
+        .get("hijri_date")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let gregorian_date_masihi = latest_map
+        .get("gregorian_date_masihi")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
     Ok(json!({
         "title": title,
         "document_slug": slug,
@@ -787,6 +846,10 @@ pub fn build_archived_document_comparison(cfg: &AppConfig, slug: &str) -> Result
         "after_label": "Latest Saved Version",
         "before_image_url": before_img_url,
         "after_image_url": after_img_url,
+        "dbp_coverage_before": dbp_cov_before,
+        "dbp_coverage_after": dbp_cov_after,
+        "hijri_date": hijri_date,
+        "gregorian_date_masihi": gregorian_date_masihi,
         "conservation_metrics": conservation_metrics,
         "document_pages": document_pages,
         "jawi_pages": jawi_pages,
@@ -821,6 +884,8 @@ mod tests {
         assert_eq!(pages[0]["page"], 2);
         assert!(pages[0]["before_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "farjanjin" && t["kind"] == "del"));
         assert!(pages[0]["after_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "perjanjian" && t["kind"] == "add"));
+        assert!(pages[0]["unified_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "farjanjin" && t["kind"] == "del"));
+        assert!(pages[0]["unified_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "perjanjian" && t["kind"] == "add"));
     }
 
     #[test]

@@ -2350,3 +2350,53 @@ a[href*="#arkib-canvas:"]:hover .ac-cc-open {
   text-transform: uppercase;
   color: rgb(var(--text-secondary, 148 163 184));
 }
+
+
+/* ─── Segmented Toggle Controls (Split Slider / Side-by-Side · Side-by-Side Diff / Unified Diff) ─── */
+.ac-diff-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ac-seg-group {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgb(var(--surface-primary, 15 23 42));
+  border: 1px solid rgb(var(--border-light, 51 65 85));
+  gap: 2px;
+}
+.ac-seg-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgb(var(--text-secondary, 148 163 184));
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.ac-seg-btn:hover {
+  color: rgb(var(--text-primary, 241 245 249));
+}
+.ac-seg-btn.active {
+  background: rgb(var(--surface-secondary, 30 41 59));
+  color: rgb(var(--text-primary, 248 250 252));
+  border-color: rgb(var(--border-light, 71 85 105));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+}
+.ac-diff-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.ac-pill-gold {
+  background: rgba(234, 179, 8, 0.14);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.42);
+}
