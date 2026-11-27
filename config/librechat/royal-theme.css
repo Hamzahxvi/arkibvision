@@ -1104,6 +1104,10 @@ body.ac-canvas-open #root {
   max-width: calc(100vw - var(--ac-width, 46vw)) !important;
   transition: width 0.16s ease;
 }
+body.ac-canvas-open #rf-admin-stage {
+  right: var(--ac-width, 46vw) !important;
+  transition: right 0.16s ease;
+}
 body.ac-canvas-resizing #root,
 body.ac-canvas-resizing #ac-drawer {
   transition: none !important;
@@ -1832,6 +1836,9 @@ a[href*="#arkib-canvas:"]:hover .ac-cc-open {
   margin-top: 4px;
 }
 .rf-audit-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid rgb(var(--border-light, 51 65 85));
   background: rgb(var(--surface-secondary, 23 32 51));
   border-radius: 12px;
@@ -1930,9 +1937,10 @@ a[href*="#arkib-canvas:"]:hover .ac-cc-open {
 }
 .rf-chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   gap: 14px;
   margin-bottom: 14px;
+  min-width: 0;
 }
 @media (max-width: 780px) {
   .rf-chart-grid { grid-template-columns: 1fr; }
@@ -2016,10 +2024,15 @@ a[href*="#arkib-canvas:"]:hover .ac-cc-open {
 /* ─── Scannable Insight Cards & Audit Summary Grid ─── */
 .rf-insight-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
 }
 .rf-insight-card {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   border-radius: 10px;
   padding: 12px 14px;
   border: 1px solid rgb(var(--border-light, 51 65 85));
@@ -2048,11 +2061,14 @@ a[href*="#arkib-canvas:"]:hover .ac-cc-open {
   font-size: 1.02rem;
   font-weight: 700;
   color: rgb(var(--text-primary, 241 245 249));
+  overflow-wrap: anywhere;
 }
 .rf-insight-desc {
   font-size: 0.81rem;
   line-height: 1.45;
   color: rgb(var(--text-secondary, 148 163 184));
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .rf-sum-grid {
   display: grid;
