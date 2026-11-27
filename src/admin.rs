@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use crate::analytics;
 use crate::archives;
 use crate::audit;
 use crate::categories;
@@ -173,6 +174,7 @@ async fn audit_middleware(State(state): State<AdminState>, req: Request, next: N
                     | "/admin/api/audit/dashboard"
                     | "/admin/api/system/health"
                     | "/admin/api/preferences"
+                    | "/admin/api/analytics/behavior"
             ));
     if skip_quiet || method == "OPTIONS" {
         return resp;
@@ -429,6 +431,15 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
         .route(
             "/admin/api/preferences/reset",
             post(admin_reset_preferences),
+        )
+        // User Behavior, Search History & Chatbot Hot-Topics Analytics
+        .route(
+            "/admin/api/analytics/behavior",
+            get(admin_api_behavior_analytics),
+        )
+        .route(
+            "/admin/api/analytics/track",
+            post(admin_track_behavior_analytics),
         )
         .layer(DefaultBodyLimit::max(32 * 1024 * 1024))
         .layer(middleware::from_fn_with_state(
@@ -868,8 +879,22 @@ async fn admin_create_profile(
                 return (StatusCode::BAD_REQUEST, meta_res);
             }
         }
+        let profile_rec = svc.admin_profile_record(&identity);
+        if let Some(am) = profile_rec.as_object() {
+            let slug = am["slug"].as_str().unwrap_or(&identity);
+            let _ = revisions::record_lifecycle_event(
+                &svc.cfg,
+                "profile",
+                slug,
+                &identity,
+                &svc.cfg.admin_user,
+                "created",
+                None,
+                Some(am),
+            );
+        }
         let mut out = res.as_object().cloned().unwrap_or_default();
-        out.insert("profile".to_string(), svc.admin_profile_record(&identity));
+        out.insert("profile".to_string(), profile_rec);
         (StatusCode::OK, Value::Object(out))
     })
     .await
@@ -997,8 +1022,25 @@ async fn admin_delete_profile(
             .into_response();
     };
     let svc = state.service.clone();
+    let slug_for_rev = slug.clone();
     let res = tokio::task::spawn_blocking(move || {
-        svc.tool_delete_identity(&identity, true, &svc.cfg.admin_key)
+        let before = svc.admin_profile_record(&identity);
+        let del = svc.tool_delete_identity(&identity, true, &svc.cfg.admin_key);
+        if del.get("status").and_then(Value::as_str) == Some("deleted")
+            && let Some(bm) = before.as_object()
+        {
+            let _ = revisions::record_lifecycle_event(
+                &svc.cfg,
+                "profile",
+                &slug_for_rev,
+                &identity,
+                &svc.cfg.admin_user,
+                "deleted",
+                Some(bm),
+                None,
+            );
+        }
+        del
     })
     .await
     .unwrap_or_else(|e| json!({ "status": "error", "reason": e.to_string() }));
@@ -1375,7 +1417,26 @@ async fn admin_create_location(
     Json(payload): Json<Map<String, Value>>,
 ) -> Response {
     let cfg = state.service.cfg.clone();
-    match tokio::task::spawn_blocking(move || archives::save_location(&cfg, None, &payload)).await {
+    match tokio::task::spawn_blocking(move || {
+        let loc = archives::save_location(&cfg, None, &payload)?;
+        if let Some(a) = loc.as_object() {
+            let slug = a["slug"].as_str().unwrap_or("location");
+            let title = a["name"].as_str().unwrap_or(slug);
+            let _ = revisions::record_lifecycle_event(
+                &cfg,
+                "location",
+                slug,
+                title,
+                &cfg.admin_user,
+                "created",
+                None,
+                Some(a),
+            );
+        }
+        Ok::<Value, String>(loc)
+    })
+    .await
+    {
         Ok(Ok(loc)) => (
             StatusCode::OK,
             Json(json!({ "status": "created", "location": loc })),
@@ -1462,7 +1523,22 @@ async fn admin_delete_location(
     };
     let svc = state.service.clone();
     match tokio::task::spawn_blocking(move || {
-        archives::delete_location(&svc.cfg, &svc.location_store, &clean_slug)
+        let before = archives::load_location(&svc.cfg, &clean_slug);
+        let res = archives::delete_location(&svc.cfg, &svc.location_store, &clean_slug)?;
+        if let Some(bm) = before.as_ref().and_then(Value::as_object) {
+            let title = bm["name"].as_str().unwrap_or(&clean_slug);
+            let _ = revisions::record_lifecycle_event(
+                &svc.cfg,
+                "location",
+                &clean_slug,
+                title,
+                &svc.cfg.admin_user,
+                "deleted",
+                Some(bm),
+                None,
+            );
+        }
+        Ok::<Value, String>(res)
     })
     .await
     {
@@ -1643,7 +1719,26 @@ async fn admin_create_document(
     Json(payload): Json<Map<String, Value>>,
 ) -> Response {
     let cfg = state.service.cfg.clone();
-    match tokio::task::spawn_blocking(move || archives::save_document(&cfg, None, &payload)).await {
+    match tokio::task::spawn_blocking(move || {
+        let doc = archives::save_document(&cfg, None, &payload)?;
+        if let Some(a) = doc.as_object() {
+            let slug = a["slug"].as_str().unwrap_or("doc");
+            let title = a["title"].as_str().unwrap_or(slug);
+            let _ = revisions::record_lifecycle_event(
+                &cfg,
+                "document",
+                slug,
+                title,
+                &cfg.admin_user,
+                "created",
+                None,
+                Some(a),
+            );
+        }
+        Ok::<Value, String>(doc)
+    })
+    .await
+    {
         Ok(Ok(doc)) => (
             StatusCode::OK,
             Json(json!({ "status": "created", "document": doc })),
@@ -1729,7 +1824,26 @@ async fn admin_delete_document(
             .into_response();
     };
     let cfg = state.service.cfg.clone();
-    match tokio::task::spawn_blocking(move || archives::delete_document(&cfg, &clean_slug)).await {
+    match tokio::task::spawn_blocking(move || {
+        let before = archives::load_document(&cfg, &clean_slug);
+        let res = archives::delete_document(&cfg, &clean_slug)?;
+        if let Some(b) = before.as_ref().and_then(Value::as_object) {
+            let title = b["title"].as_str().unwrap_or(&clean_slug);
+            let _ = revisions::record_lifecycle_event(
+                &cfg,
+                "document",
+                &clean_slug,
+                title,
+                &cfg.admin_user,
+                "deleted",
+                Some(b),
+                None,
+            );
+        }
+        Ok::<Value, String>(res)
+    })
+    .await
+    {
         Ok(Ok(res)) => (StatusCode::OK, Json(res)).into_response(),
         Ok(Err(reason)) => (
             StatusCode::NOT_FOUND,
@@ -2556,7 +2670,20 @@ async fn admin_create_category(
     let color = payload.color;
     let desc = payload.description;
     match tokio::task::spawn_blocking(move || {
-        categories::create_category(&cfg, &name, color.as_deref(), desc.as_deref())
+        let cat = categories::create_category(&cfg, &name, color.as_deref(), desc.as_deref())?;
+        if let Ok(Value::Object(am)) = serde_json::to_value(&cat) {
+            let _ = revisions::record_lifecycle_event(
+                &cfg,
+                "category",
+                &cat.slug,
+                &cat.name,
+                &cfg.admin_user,
+                "created",
+                None,
+                Some(&am),
+            );
+        }
+        Ok::<categories::CategoryItem, String>(cat)
     })
     .await
     {
@@ -2642,7 +2769,21 @@ async fn admin_delete_category(
     let cfg = state.service.cfg.clone();
     let reassign = q.reassign_to;
     match tokio::task::spawn_blocking(move || {
-        categories::delete_category(&cfg, &clean_slug, reassign.as_deref())
+        let res = categories::delete_category(&cfg, &clean_slug, reassign.as_deref())?;
+        let dname = res["deleted_name"].as_str().unwrap_or(&clean_slug);
+        if let Some(bm) = res.as_object() {
+            let _ = revisions::record_lifecycle_event(
+                &cfg,
+                "category",
+                &clean_slug,
+                dname,
+                &cfg.admin_user,
+                "deleted",
+                Some(bm),
+                None,
+            );
+        }
+        Ok::<Value, String>(res)
     })
     .await
     {
@@ -2979,8 +3120,30 @@ async fn admin_track_preference(
 ) -> Response {
     let cfg = state.service.cfg.clone();
     let user = cfg.admin_user.clone();
-    match tokio::task::spawn_blocking(move || preferences::track_interaction(&cfg, &user, event))
-        .await
+    match tokio::task::spawn_blocking(move || {
+        if !event.item_slug.trim().is_empty() || !event.item_title.trim().is_empty() {
+            let etype = if event.event_type.contains("person") {
+                "profile"
+            } else if event.event_type.contains("location") {
+                "location"
+            } else {
+                "document"
+            };
+            analytics::record_admin_activity(
+                &cfg,
+                "item_check",
+                &user,
+                "",
+                etype,
+                &event.item_slug,
+                &event.item_title,
+                &event.category,
+                event.tags.clone(),
+            );
+        }
+        preferences::track_interaction(&cfg, &user, event)
+    })
+    .await
     {
         Ok(Ok(summary)) => (
             StatusCode::OK,
@@ -3052,4 +3215,61 @@ async fn admin_reset_preferences(State(state): State<AdminState>) -> Response {
         )
             .into_response(),
     }
+}
+
+
+// ─── User Behavior, Search History & Chatbot Hot-Topics Analytics ────────────
+
+#[derive(Deserialize)]
+struct TrackBehaviorPayload {
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    query_text: String,
+    #[serde(default)]
+    entity_type: String,
+    #[serde(default)]
+    item_slug: String,
+    #[serde(default)]
+    item_title: String,
+    #[serde(default)]
+    category: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+async fn admin_api_behavior_analytics(State(state): State<AdminState>) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let res = tokio::task::spawn_blocking(move || analytics::build_behavior_analytics(&cfg))
+        .await
+        .unwrap_or_else(|_| json!({ "status": "error" }));
+    Json(res)
+}
+
+async fn admin_track_behavior_analytics(
+    State(state): State<AdminState>,
+    Json(payload): Json<TrackBehaviorPayload>,
+) -> Json<Value> {
+    let cfg = state.service.cfg.clone();
+    let actor = cfg.admin_user.clone();
+    let source = if payload.source.trim().is_empty() {
+        "admin_search".to_string()
+    } else {
+        payload.source.trim().to_string()
+    };
+    let _ = tokio::task::spawn_blocking(move || {
+        analytics::record_admin_activity(
+            &cfg,
+            &source,
+            &actor,
+            &payload.query_text,
+            &payload.entity_type,
+            &payload.item_slug,
+            &payload.item_title,
+            &payload.category,
+            payload.tags,
+        );
+    })
+    .await;
+    Json(json!({ "status": "ok" }))
 }

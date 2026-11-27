@@ -130,6 +130,7 @@ pub fn canvas_router(state: AdminState) -> Router {
             "/canvas/api/submit-enrollment",
             post(canvas_submit_enrollment),
         )
+        .route("/canvas/api/track-chat-query", post(canvas_track_chat_query))
         .layer(DefaultBodyLimit::max(14 * 1024 * 1024))
         .layer(middleware::from_fn(host_guard_middleware))
         .layer(middleware::from_fn_with_state(
@@ -584,11 +585,11 @@ pub fn apply_ocr_edit_to_archive(
     fs::write(&tmp, pretty).map_err(|e| format!("Write document tmp failed: {e}"))?;
     fs::rename(&tmp, &meta_path).map_err(|e| format!("Rename document failed: {e}"))?;
 
+    let title_str = meta
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or(&target_slug);
     if had_existing {
-        let title_str = meta
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or(&target_slug);
         let _ = crate::revisions::record_metadata_change(
             cfg,
             "document",
@@ -598,6 +599,17 @@ pub fn apply_ocr_edit_to_archive(
             "canvas_ocr_edit",
             &before_meta,
             &meta,
+        );
+    } else {
+        let _ = crate::revisions::record_lifecycle_event(
+            cfg,
+            "document",
+            &target_slug,
+            title_str,
+            &cfg.admin_user,
+            "created",
+            None,
+            Some(&meta),
         );
     }
 
@@ -1034,6 +1046,37 @@ async fn canvas_submit_enrollment(
     });
 
     (code, Json(body)).into_response()
+}
+
+#[derive(Deserialize)]
+struct TrackChatQueryReq {
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    actor: String,
+}
+
+async fn canvas_track_chat_query(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Json(payload): Json<TrackChatQueryReq>,
+) -> Json<Value> {
+    let prompt = payload.prompt.trim().to_string();
+    if prompt.len() >= 2 {
+        let actor = if !payload.actor.trim().is_empty() {
+            payload.actor.trim().to_string()
+        } else if is_admin_request(&headers, &state.sessions) {
+            state.service.cfg.admin_user.clone()
+        } else {
+            "chatbot_user".to_string()
+        };
+        let cfg = state.service.cfg.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::analytics::record_chat_prompt(&cfg, &prompt, &actor);
+        })
+        .await;
+    }
+    Json(json!({ "status": "ok" }))
 }
 
 #[cfg(test)]

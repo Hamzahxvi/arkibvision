@@ -277,6 +277,56 @@ pub fn compute_json_diffs(before: &Map<String, Value>, after: &Map<String, Value
     diffs
 }
 
+/// Record a full lifecycle event (`created` or `deleted`) for any entity (Document, Person,
+/// Location, Category, or Group Folder) so admins can always inspect added and deleted items.
+#[allow(clippy::too_many_arguments)]
+pub fn record_lifecycle_event(
+    cfg: &AppConfig,
+    entity_type: &str,
+    slug: &str,
+    title: &str,
+    actor: &str,
+    action: &str, // "created" | "deleted"
+    before: Option<&Map<String, Value>>,
+    after: Option<&Map<String, Value>>,
+) -> Option<RevisionEntry> {
+    let empty = Map::new();
+    let diffs = compute_json_diffs(before.unwrap_or(&empty), after.unwrap_or(&empty));
+    let label_type = match entity_type {
+        "document" => "document",
+        "profile" => "person profile",
+        "location" => "location",
+        "category" => "category",
+        "group" => "group folder",
+        other => other,
+    };
+    let summary = match action {
+        "created" => format!("Created {label_type} \"{title}\""),
+        "deleted" => format!("Deleted {label_type} \"{title}\""),
+        _ => format!("Changed {label_type} \"{title}\""),
+    };
+    let entry = RevisionEntry {
+        id: format!("rev_{}", &Uuid::new_v4().simple().to_string()[..10]),
+        entity_type: entity_type.to_string(),
+        slug: slug.to_string(),
+        title: title.to_string(),
+        timestamp: Utc::now().to_rfc3339(),
+        actor: actor.to_string(),
+        action: action.to_string(),
+        summary,
+        field_diffs: diffs,
+        file_diff: None,
+    };
+    let mut history = load_history(cfg, entity_type, slug);
+    history.push(entry.clone());
+    if history.len() > 50 {
+        let drop_n = history.len() - 50;
+        history.drain(0..drop_n);
+    }
+    let _ = save_history(cfg, entity_type, slug, &history);
+    Some(entry)
+}
+
 /// Record a metadata/text revision if any fields actually changed.
 #[allow(clippy::too_many_arguments)]
 pub fn record_metadata_change(
@@ -490,7 +540,7 @@ pub fn list_recent_revisions(
     let mut all = Vec::new();
     let types: Vec<&str> = match entity_type_filter.map(str::trim).filter(|s| !s.is_empty()) {
         Some(t) => vec![t],
-        None => vec!["document", "profile", "location"],
+        None => vec!["document", "profile", "location", "category", "group"],
     };
     for et in types {
         let root = cfg.revisions_dir.join(et);

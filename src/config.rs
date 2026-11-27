@@ -42,6 +42,7 @@ pub struct AppConfig {
     pub revisions_dir: PathBuf,
     pub audit_log_file: PathBuf,
     pub preferences_file: PathBuf,
+    pub analytics_log_file: PathBuf,
     pub librechat_dir: PathBuf,
     pub profile_web_dir: PathBuf,
     pub location_web_dir: PathBuf,
@@ -283,6 +284,7 @@ impl AppConfig {
         let revisions_dir = interim_dir.join("revisions");
         let audit_log_file = interim_dir.join("audit_log.jsonl");
         let preferences_file = interim_dir.join("user_preferences.json");
+        let analytics_log_file = interim_dir.join("behavior_analytics.jsonl");
 
         let default_lc = project_root
             .parent()
@@ -354,6 +356,7 @@ impl AppConfig {
             revisions_dir,
             audit_log_file,
             preferences_file,
+            analytics_log_file,
             librechat_dir,
             profile_web_dir,
             location_web_dir,

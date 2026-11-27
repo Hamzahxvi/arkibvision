@@ -194,6 +194,7 @@ async fn handle_jsonrpc(service: &Arc<ArkibService>, req: Value) -> Option<Value
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
+            crate::analytics::record_mcp_tool_usage(&service.cfg, &tool_name, &args);
             match dispatch_tool(service, &tool_name, args).await {
                 Ok(val) => {
                     let text = serde_json::to_string_pretty(&val).unwrap_or_else(|_| "{}".into());

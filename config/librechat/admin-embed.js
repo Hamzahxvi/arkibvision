@@ -36,8 +36,10 @@
     docSourceFilter: 'all',
     preferencesData: null,
     auditData: null,
+    auditChangeFilter: 'all',
     auditAiExplanation: '',
     auditAiSource: '',
+    behaviorData: null,
     diskScanResult: null,
     sqlInspectResult: null,
     health: null,
@@ -212,6 +214,47 @@
     btn.setAttribute('aria-pressed', active ? 'true' : 'false');
   }
 
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso).replace('T', ' ').slice(0, 19);
+      var diffSec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+      var rel = diffSec < 60 ? 'just now'
+        : diffSec < 3600 ? Math.floor(diffSec / 60) + 'm ago'
+        : diffSec < 86400 ? Math.floor(diffSec / 3600) + 'h ago'
+        : Math.floor(diffSec / 86400) + 'd ago';
+      var formatted = d.toLocaleString(undefined, {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      return formatted + ' · ' + rel;
+    } catch (e) {
+      return String(iso).replace('T', ' ').slice(0, 19);
+    }
+  }
+
+  var _searchTrackTimer = null;
+  function trackSearchDebounced(entityType, queryText) {
+    clearTimeout(_searchTrackTimer);
+    var q = String(queryText || '').trim();
+    if (!state.authed || q.length < 3) return;
+    _searchTrackTimer = setTimeout(function () {
+      api('/admin/api/analytics/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'admin_search',
+          query_text: q,
+          entity_type: entityType || ''
+        })
+      }).catch(function () {});
+    }, 1100);
+  }
+
   function trackUserPref(evt) {
     if (!state.authed || !evt) return;
     try {
@@ -252,7 +295,8 @@
         api('/admin/api/system/health?ts=' + Date.now()),
         api('/admin/api/categories?ts=' + Date.now()),
         api('/admin/api/preferences?ts=' + Date.now()),
-        api('/admin/api/audit/dashboard?ts=' + Date.now())
+        api('/admin/api/audit/dashboard?ts=' + Date.now()),
+        api('/admin/api/analytics/behavior?ts=' + Date.now())
       ]);
       if (res[0].ok && Array.isArray(res[0].data)) state.requests = res[0].data;
       if (res[1].ok && Array.isArray(res[1].data)) state.profiles = res[1].data;
@@ -265,6 +309,7 @@
       if (res[8].ok && Array.isArray(res[8].data)) state.categories = res[8].data;
       if (res[9].ok && res[9].data) state.preferencesData = res[9].data;
       if (res[10].ok && res[10].data) state.auditData = res[10].data;
+      if (res[11].ok && res[11].data) state.behaviorData = res[11].data;
       render();
       if (manual) toast('Admin data refreshed');
     } catch (e) {}
@@ -381,6 +426,7 @@
       { id: 'people', label: '👥 People', count: state.profiles.length },
       { id: 'locations', label: '📍 Locations', count: state.locations.length },
       { id: 'documents', label: '📁 Documents', count: state.documents.length },
+      { id: 'insights', label: '📈 User Insights' },
       { id: 'audit', label: '🛡️ Audit & Changes', count: auditAlertsCnt > 0 ? auditAlertsCnt : undefined },
       { id: 'system', label: '📊 System & Lab' },
       { id: 'test', label: '🔍 Test Face' }
@@ -430,6 +476,7 @@
     else if (state.tab === 'people') renderPeople(body);
     else if (state.tab === 'locations') renderLocations(body);
     else if (state.tab === 'documents') renderDocuments(body);
+    else if (state.tab === 'insights') renderInsights(body);
     else if (state.tab === 'audit') renderAudit(body);
     else if (state.tab === 'system') renderSystem(body);
     else if (state.tab === 'test') renderTestFace(body);
@@ -680,6 +727,7 @@
     document.getElementById('rf-ppl-search').oninput = function (e) {
       var pos = e.target.selectionStart;
       state.search = e.target.value;
+      trackSearchDebounced('profile', state.search);
       renderPeople(body);
       restoreFocus('rf-ppl-search', pos);
     };
@@ -1121,6 +1169,7 @@
     document.getElementById('rf-loc-search').oninput = function (e) {
       var pos = e.target.selectionStart;
       state.search = e.target.value;
+      trackSearchDebounced('location', state.search);
       renderLocations(body);
       restoreFocus('rf-loc-search', pos);
     };
@@ -1536,6 +1585,7 @@
     document.getElementById('rf-doc-search').oninput = function (e) {
       var pos = e.target.selectionStart;
       state.search = e.target.value;
+      trackSearchDebounced('document', state.search);
       renderDocuments(body);
       restoreFocus('rf-doc-search', pos);
     };
@@ -2222,7 +2272,197 @@
     };
   }
 
-  // ─── Tab 5: Audit Management, Anomaly Detection & Change Log ──────────────
+  function humanAuditDescription(ev) {
+    var p = String(ev.path || '');
+    var a = String(ev.action || '');
+    if (a === 'LOGIN_OK') return 'Signed in to Admin Portal';
+    if (a === 'LOGIN_FAIL') return 'Failed Admin sign-in attempt';
+    if (p.indexOf('/audit/report/') !== -1) return 'Downloaded Audit Report (' + p.split('/').pop().toUpperCase() + ')';
+    if (p.indexOf('/audit/inspect-sql') !== -1) return 'Ran SQL Audit Log Inspection';
+    if (p.indexOf('/audit/explain') !== -1) return 'Generated AI Anomaly Explanation';
+    if (p.indexOf('/revisions/scan-disk') !== -1) return 'Ran External On-Disk File Change Scan';
+    if (p.indexOf('/analyze-upload') !== -1) return 'Analyzed uploaded file with AI Auto-Fill';
+    if (p.indexOf('/export/') !== -1) return 'Exported document (' + p.split('/').pop().toUpperCase() + ')';
+    if (p.indexOf('/categories') !== -1) {
+      return a === 'CREATE' ? 'Added a new category' : a === 'DELETE' ? 'Deleted a category' : a === 'UPDATE' ? 'Updated category' : 'Viewed categories';
+    }
+    if (p.indexOf('/documents') !== -1) {
+      if (p.indexOf('/files') !== -1) return a === 'DELETE' ? 'Removed file from document' : 'Uploaded file to document';
+      return a === 'CREATE' ? 'Created archival document' : a === 'DELETE' ? 'Deleted archival document' : a === 'UPDATE' ? 'Edited archival document' : 'Browsed archival documents';
+    }
+    if (p.indexOf('/profiles') !== -1) {
+      if (p.indexOf('/images') !== -1) return a === 'DELETE' ? 'Removed person photo' : 'Added/updated person photo';
+      return a === 'CREATE' ? 'Enrolled new person' : a === 'DELETE' ? 'Deleted person profile' : a === 'UPDATE' ? 'Edited person profile' : 'Browsed enrolled people';
+    }
+    if (p.indexOf('/locations') !== -1) {
+      return a === 'CREATE' ? 'Created archival location' : a === 'DELETE' ? 'Deleted archival location' : a === 'UPDATE' ? 'Edited archival location' : 'Browsed archival locations';
+    }
+    return ev.method + ' ' + p;
+  }
+
+  function changeActionBadge(action) {
+    var a = String(action || '').toLowerCase();
+    if (a === 'created') return '<span class="rf-badge rf-badge-ok">＋ CREATED</span>';
+    if (a === 'file_added') return '<span class="rf-badge rf-badge-ok">＋ FILE ADDED</span>';
+    if (a === 'deleted' || a === 'file_deleted') return '<span class="rf-badge rf-badge-crit">✕ DELETED</span>';
+    if (a === 'external_modified') return '<span class="rf-badge rf-badge-crit">⚠ DISK CHANGED</span>';
+    if (a === 'image_edited' || a === 'file_replaced') return '<span class="rf-badge rf-badge-warn">✎ FILE REPLACED</span>';
+    return '<span class="rf-badge rf-badge-warn">✎ UPDATED</span>';
+  }
+
+  // ─── Tab 5: User Behavior Insights, Search History & Hot-Topics Graphs ────
+  function renderInsights(body) {
+    var bd = state.behaviorData || {};
+    var sum = bd.summary || { total_events: 0, chatbot_questions: 0, search_queries: 0, item_checks: 0, hot_topic_count: 0 };
+    var topics = Array.isArray(bd.hot_topics) ? bd.hot_topics : [];
+    var questions = Array.isArray(bd.top_chatbot_questions) ? bd.top_chatbot_questions : [];
+    var searches = Array.isArray(bd.top_searches) ? bd.top_searches : [];
+    var checked = Array.isArray(bd.top_checked_items) ? bd.top_checked_items : [];
+    var tools = Array.isArray(bd.tool_usage) ? bd.tool_usage : [];
+    var cats = Array.isArray(bd.category_interest) ? bd.category_interest : [];
+    var trend = Array.isArray(bd.daily_trend) ? bd.daily_trend : [];
+    var insights = Array.isArray(bd.admin_insights) ? bd.admin_insights : [];
+    var history = Array.isArray(bd.recent_history) ? bd.recent_history : [];
+
+    // 1. Pure-SVG 7-Day Multi-Series Activity Trend Chart
+    var trendSvg = (function () {
+      var W = 580, H = 200, padL = 34, padR = 16, padT = 18, padB = 30;
+      var plotW = W - padL - padR, plotH = H - padT - padB;
+      var maxY = 4;
+      trend.forEach(function (d) {
+        maxY = Math.max(maxY, Number(d.chatbot || 0), Number(d.searches || 0), Number(d.item_views || 0));
+      });
+      var n = Math.max(trend.length, 2);
+      var xPos = function (i) { return padL + (plotW * i) / (n - 1); };
+      var yPos = function (v) { return padT + plotH - (plotH * v) / maxY; };
+      var linePath = function (key) {
+        return trend.map(function (d, i) {
+          return (i === 0 ? 'M' : 'L') + xPos(i).toFixed(1) + ',' + yPos(Number(d[key] || 0)).toFixed(1);
+        }).join(' ');
+      };
+      var areaPath = function (key) {
+        if (!trend.length) return '';
+        return linePath(key) + ' L' + xPos(trend.length - 1).toFixed(1) + ',' + (padT + plotH) + ' L' + xPos(0).toFixed(1) + ',' + (padT + plotH) + ' Z';
+      };
+      var grid = [0, 0.25, 0.5, 0.75, 1].map(function (f) {
+        var y = padT + plotH * (1 - f);
+        var val = Math.round(maxY * f);
+        return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="rgba(148,163,184,0.18)" stroke-dasharray="3,3"/>' +
+          '<text x="' + (padL - 6) + '" y="' + (y + 3).toFixed(1) + '" text-anchor="end" fill="#94a3b8" font-size="10">' + val + '</text>';
+      }).join('');
+      var xLabels = trend.map(function (d, i) {
+        return '<text x="' + xPos(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle" fill="#94a3b8" font-size="10">' + esc(d.label || d.date) + '</text>';
+      }).join('');
+      var dots = function (key, color) {
+        return trend.map(function (d, i) {
+          var v = Number(d[key] || 0);
+          return '<circle cx="' + xPos(i).toFixed(1) + '" cy="' + yPos(v).toFixed(1) + '" r="3.5" fill="' + color + '"><title>' + esc(d.label) + ': ' + v + '</title></circle>';
+        }).join('');
+      };
+      return '<svg viewBox="0 0 ' + W + ' ' + H + '" class="rf-svg-chart" role="img" aria-label="7-day user activity trend">' +
+        grid + xLabels +
+        (trend.length ? '<path d="' + areaPath('chatbot') + '" fill="rgba(59,130,246,0.16)"/>' : '') +
+        (trend.length ? '<path d="' + linePath('chatbot') + '" fill="none" stroke="#3b82f6" stroke-width="2.4"/>' : '') +
+        (trend.length ? '<path d="' + linePath('searches') + '" fill="none" stroke="#f59e0b" stroke-width="2.2"/>' : '') +
+        (trend.length ? '<path d="' + linePath('item_views') + '" fill="none" stroke="#10b981" stroke-width="2.2"/>' : '') +
+        dots('chatbot', '#3b82f6') + dots('searches', '#f59e0b') + dots('item_views', '#10b981') +
+        '</svg>';
+    })();
+
+    // 2. Pure-SVG Capability Donut Chart
+    var palette = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#64748b'];
+    var donutHtml = (function () {
+      var list = tools.length ? tools.slice(0, 7) : cats.slice(0, 7);
+      var total = list.reduce(function (acc, x) { return acc + Number(x.count || 0); }, 0);
+      if (!total) return '<div class="rf-empty" style="padding:28px 12px">Ask the chatbot or browse records to see interest distribution.</div>';
+      var r = 56, cx = 74, cy = 74, circ = 2 * Math.PI * r, offset = 0;
+      var slices = list.map(function (item, idx) {
+        var frac = Number(item.count || 0) / total;
+        var len = frac * circ;
+        var color = palette[idx % palette.length];
+        var seg = '<circle r="' + r + '" cx="' + cx + '" cy="' + cy + '" fill="transparent" stroke="' + color + '" stroke-width="20" stroke-dasharray="' + len.toFixed(2) + ' ' + (circ - len).toFixed(2) + '" stroke-dashoffset="' + (-offset).toFixed(2) + '" transform="rotate(-90 ' + cx + ' ' + cy + ')"><title>' + esc(item.name) + ': ' + item.count + '</title></circle>';
+        offset += len;
+        return seg;
+      }).join('');
+      var legend = list.map(function (item, idx) {
+        var pct = Math.round((Number(item.count || 0) * 100) / total);
+        return '<div class="rf-donut-leg-row"><span class="rf-cat-dot" style="background:' + palette[idx % palette.length] + '"></span><span style="flex:1">' + esc(item.name) + '</span><b>' + item.count + '</b> <span style="opacity:.7">(' + pct + '%)</span></div>';
+      }).join('');
+      return '<div class="rf-donut-wrap">' +
+        '<svg viewBox="0 0 148 148" width="148" height="148">' + slices +
+        '<text x="74" y="71" text-anchor="middle" fill="currentColor" font-size="18" font-weight="700">' + total + '</text>' +
+        '<text x="74" y="87" text-anchor="middle" fill="#94a3b8" font-size="9">INTERACTIONS</text></svg>' +
+        '<div class="rf-donut-legend">' + legend + '</div></div>';
+    })();
+
+    // 3. Hot Topics Horizontal Bar Chart
+    var maxTopicScore = topics.length ? Math.max.apply(null, topics.map(function (t) { return Number(t.score || t.count || 1); })) : 1;
+    var hotTopicsHtml = topics.length ? topics.slice(0, 10).map(function (t, idx) {
+      var pct = Math.max(8, Math.round((Number(t.score || t.count || 0) / maxTopicScore) * 100));
+      var barColor = palette[idx % palette.length];
+      return '<div class="rf-bar-row">' +
+        '<div class="rf-bar-lbl"><strong>' + esc(t.topic) + '</strong>' +
+        (Number(t.recent_24h || 0) > 0 ? ' <span class="rf-badge rf-badge-warn">🔥 ' + t.recent_24h + ' today</span>' : '') + '</div>' +
+        '<div class="rf-bar-track"><div class="rf-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>' +
+        '<div class="rf-bar-val">' + Number(t.count || 0) + '×</div>' +
+        '</div>';
+    }).join('') : '<div class="rf-empty" style="padding:28px 12px">No hot topics captured yet. Try asking questions in the chatbot or searching in Documents/People.</div>';
+
+    body.innerHTML =
+      '<div class="rf-section-head"><div><h2>📈 User Behavior, Search History &amp; Hot Topics</h2>' +
+      '<p>Automatically analyzes what users ask in the chatbot, what they search, and which records they check most frequently — ranked with recency-weighted scoring.</p></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button type="button" class="rf-btn rf-btn-primary" id="rf-ins-refresh">↻ Refresh Analytics</button>' +
+      '</div></div>' +
+      '<div class="rf-kpi-grid">' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Total User Signals</div><div class="rf-kpi-val">' + Number(sum.total_events || 0) + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Chatbot Questions</div><div class="rf-kpi-val" style="color:#60a5fa">' + Number(sum.chatbot_questions || 0) + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Admin Searches</div><div class="rf-kpi-val" style="color:#fbbf24">' + Number(sum.search_queries || 0) + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Records Checked</div><div class="rf-kpi-val" style="color:#34d399">' + Number(sum.item_checks || 0) + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Hot Topics Detected</div><div class="rf-kpi-val">' + Number(sum.hot_topic_count || 0) + '</div></div>' +
+      '</div>' +
+      '<div class="rf-callout rf-callout-info"><div class="rf-callout-title">💡 Actionable Admin Insights</div><ul class="rf-callout-list">' +
+      insights.map(function (ins) { return '<li>' + esc(ins) + '</li>'; }).join('') +
+      '</ul></div>' +
+      '<div class="rf-chart-grid">' +
+      '<div class="rf-audit-panel"><h3>🔥 Hot Topics &amp; Trending Keywords</h3><div class="rf-bar-chart">' + hotTopicsHtml + '</div></div>' +
+      '<div class="rf-audit-panel"><h3>📈 7-Day User Activity Trend</h3>' +
+      '<div class="rf-chart-legend"><span><i style="background:#3b82f6"></i> Chatbot Questions</span><span><i style="background:#f59e0b"></i> Searches</span><span><i style="background:#10b981"></i> Records Checked</span></div>' +
+      trendSvg + '</div>' +
+      '<div class="rf-audit-panel"><h3>🍩 Most Used AI Features &amp; Interests</h3>' + donutHtml + '</div>' +
+      '<div class="rf-audit-panel"><h3>💬 Frequently Asked in Chatbot</h3>' +
+      (questions.length ? questions.slice(0, 8).map(function (q) {
+        return '<div class="rf-alert-row"><div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><strong>“' + esc(q.question) + '”</strong><span class="rf-badge rf-badge-info">' + Number(q.count || 1) + '×</span></div>' +
+          '<div style="font-size:.75rem;color:rgb(var(--text-secondary));margin-top:4px">' + esc(q.feature || 'Chatbot') + ' · ' + esc(fmtTime(q.last_seen)) + '</div></div>';
+      }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No chatbot questions logged yet. Send any question in the LibreChat chatbox to track it here.</div>') +
+      '</div></div>' +
+      '<div class="rf-chart-grid">' +
+      '<div class="rf-audit-panel"><h3>🔍 Top &amp; Recent Search Queries</h3>' +
+      (searches.length ? searches.slice(0, 10).map(function (s) {
+        return '<div class="rf-alert-row" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><strong>' + esc(s.query) + '</strong> <span class="rf-badge">' + esc(s.channel) + '</span><div style="font-size:.74rem;color:rgb(var(--text-secondary))">' + esc(fmtTime(s.last_seen)) + '</div></div><span class="rf-badge rf-badge-warn">' + Number(s.count || 1) + '×</span></div>';
+      }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No search history recorded yet.</div>') +
+      '</div>' +
+      '<div class="rf-audit-panel"><h3>⭐ Most Frequently Checked Records</h3>' +
+      (checked.length ? checked.slice(0, 10).map(function (it) {
+        return '<div class="rf-alert-row" style="display:flex;justify-content:space-between;align-items:center;gap:8px"><div><span class="rf-badge rf-badge-info">' + esc(it.entity_type) + '</span> <strong>' + esc(it.title) + '</strong>' + (it.category ? ' <span class="rf-badge">' + esc(it.category) + '</span>' : '') + '<div style="font-size:.74rem;color:rgb(var(--text-secondary))">Last checked ' + esc(fmtTime(it.last_seen)) + '</div></div><span class="rf-badge rf-badge-ok">' + Number(it.count || 1) + ' views</span></div>';
+      }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No frequently checked records yet.</div>') +
+      '</div></div>' +
+      '<div class="rf-audit-panel"><h3>🕒 Recent User Search &amp; Chatbot History (' + history.length + ')</h3>' +
+      '<div style="overflow-x:auto"><table class="rf-audit-table"><thead><tr><th>When</th><th>Channel</th><th>Topic / Query / Item</th><th>Feature</th></tr></thead><tbody>' +
+      (history.length ? history.slice(0, 20).map(function (h) {
+        var chLbl = h.source === 'chatbot_prompt' ? '💬 Chatbot Question'
+          : h.source === 'chatbot_tool' ? '🤖 Chatbot Tool (' + (h.tool_name || 'AI') + ')'
+          : h.source === 'admin_search' ? '🔍 Admin Search'
+          : '👁️ Record Check';
+        var text = h.query_text || h.item_title || h.item_slug || '—';
+        return '<tr><td style="white-space:nowrap">' + esc(fmtTime(h.timestamp)) + '</td><td><span class="rf-badge">' + esc(chLbl) + '</span></td><td>' + esc(text) + '</td><td>' + esc(h.feature_group || '—') + '</td></tr>';
+      }).join('') : '<tr><td colspan="4" style="text-align:center;color:rgb(var(--text-secondary))">No user search or chatbot history recorded yet.</td></tr>') +
+      '</tbody></table></div></div>';
+
+    document.getElementById('rf-ins-refresh').onclick = function () { refreshAll(true); };
+  }
+
+  // ─── Tab 6: Audit Management, Anomaly Detection & Change Log ──────────────
   function renderAudit(body) {
     var data = state.auditData || {};
     var snap = data.snapshot || {
@@ -2234,12 +2474,38 @@
       statistical_outliers: [],
       recent_events: []
     };
-    var revs = data.recent_revisions || [];
+    var allRevs = data.recent_revisions || [];
+    var filteredRevs = allRevs.filter(function (rv) {
+      var act = String(rv.action || '').toLowerCase();
+      if (state.auditChangeFilter === 'created') return act === 'created' || act === 'file_added';
+      if (state.auditChangeFilter === 'updated') return act === 'metadata_edit' || act === 'canvas_ocr_edit' || act === 'image_edited' || act === 'file_replaced';
+      if (state.auditChangeFilter === 'deleted') return act === 'deleted' || act === 'file_deleted';
+      return true;
+    });
     var sevCls = function (s) {
       return s === 'CRITICAL' || s === 'HIGH' ? 'rf-badge-crit' : s === 'MEDIUM' ? 'rf-badge-warn' : 'rf-badge-ok';
     };
 
-    var explanationText = state.auditAiExplanation || data.deterministic_summary || 'No anomalies detected.';
+    var alertCount = (snap.rule_alerts ? snap.rule_alerts.length : 0);
+    var outlierCount = (snap.statistical_outliers ? snap.statistical_outliers.length : 0);
+    var calloutTone = snap.risk_level === 'CRITICAL' || snap.risk_level === 'HIGH'
+      ? 'rf-callout-crit'
+      : snap.risk_level === 'MEDIUM'
+        ? 'rf-callout-warn'
+        : 'rf-callout-ok';
+    var statusHeadline = (alertCount === 0 && outlierCount === 0)
+      ? '✅ All Clear — No Security or Access Anomalies Detected'
+      : '⚠️ ' + (alertCount + outlierCount) + ' Anomaly Finding(s) Require Admin Review';
+
+    var summaryBodyHtml = state.auditAiExplanation
+      ? '<div class="rf-explain-rich">' + esc(state.auditAiExplanation).replace(/\n/g, '<br/>') + '</div>'
+      : '<ul class="rf-callout-list">' +
+        '<li><b>Last Checked:</b> ' + esc(fmtTime(snap.generated_at)) + '</li>' +
+        '<li><b>Activity Monitored:</b> ' + Number(snap.total_events_analyzed || 0) + ' recent access, CRUD, login, and export event(s)</li>' +
+        '<li><b>Security Posture:</b> <span class="rf-badge ' + sevCls(snap.risk_level) + '">' + esc(snap.risk_level) + '</span> (Risk Score: ' + Number(snap.risk_score || 0) + '/100)</li>' +
+        '<li><b>Checks Performed:</b> Suspicious bulk deletes/writes, login brute-force, off-hours mutations, SQL/NoSQL injection probes, and Z-score/IQR behavioral outliers.</li>' +
+        '</ul>';
+
     var diskHtml = '';
     if (state.diskScanResult) {
       var ds = state.diskScanResult;
@@ -2253,9 +2519,13 @@
         '</div>';
     }
 
+    var cntCreated = allRevs.filter(function (rv) { return rv.action === 'created' || rv.action === 'file_added'; }).length;
+    var cntUpdated = allRevs.filter(function (rv) { return rv.action === 'metadata_edit' || rv.action === 'canvas_ocr_edit' || rv.action === 'image_edited' || rv.action === 'file_replaced'; }).length;
+    var cntDeleted = allRevs.filter(function (rv) { return rv.action === 'deleted' || rv.action === 'file_deleted'; }).length;
+
     body.innerHTML =
       '<div class="rf-section-head"><div><h2>🛡️ Audit Management, Anomaly Inspection &amp; Change Log</h2>' +
-      '<p>Hybrid Deterministic Rules Engine (suspicious CRUD, auth brute-force, SQL/NoSQL injection), Statistical Outlier Detection (Z-score/IQR), AI Anomaly Explainer, and Before/After Change Tracking.</p></div>' +
+      '<p>Tracks created, added, updated, and deleted items with Before/After diffs, plus Rules Engine anomaly detection, statistical outliers, and formal DOCX/PDF audit reports.</p></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="rf-btn rf-btn-primary" id="rf-aud-explain-btn">✨ AI Explain Anomalies</button>' +
       '<button type="button" class="rf-btn" id="rf-aud-sql-btn">🗄️ Inspect SQL Logs</button>' +
@@ -2266,43 +2536,63 @@
       '<div class="rf-kpi-grid">' +
       '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Overall Risk</div><div class="rf-kpi-val"><span class="rf-badge ' + sevCls(snap.risk_level) + '" style="font-size:.95rem;padding:4px 10px">' + esc(snap.risk_level) + '</span> <span style="font-size:.9rem">' + Number(snap.risk_score || 0) + '/100</span></div></div>' +
       '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Events Analyzed</div><div class="rf-kpi-val">' + Number(snap.total_events_analyzed || 0) + '</div></div>' +
-      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Rules Engine Alerts</div><div class="rf-kpi-val">' + (snap.rule_alerts ? snap.rule_alerts.length : 0) + '</div></div>' +
-      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Statistical Outliers</div><div class="rf-kpi-val">' + (snap.statistical_outliers ? snap.statistical_outliers.length : 0) + '</div></div>' +
-      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Tracked Revisions</div><div class="rf-kpi-val">' + revs.length + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Rules Engine Alerts</div><div class="rf-kpi-val">' + alertCount + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Statistical Outliers</div><div class="rf-kpi-val">' + outlierCount + '</div></div>' +
+      '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Tracked Changes</div><div class="rf-kpi-val">' + allRevs.length + '</div></div>' +
       '</div>' +
-      '<div class="rf-audit-panel"><h3>✨ Anomaly Explanation &amp; Executive Summary' + (state.auditAiSource ? ' <span class="rf-badge rf-badge-info">' + esc(state.auditAiSource) + '</span>' : '') + '</h3>' +
-      '<pre class="rf-audit-explain-pre">' + esc(explanationText) + '</pre></div>' +
+      '<div class="rf-callout ' + calloutTone + '">' +
+      '<div class="rf-callout-title">' + statusHeadline + (state.auditAiSource ? ' <span class="rf-badge rf-badge-info">' + esc(state.auditAiSource) + '</span>' : '') + '</div>' +
+      summaryBodyHtml +
+      '</div>' +
       diskHtml +
-      '<div class="rf-audit-panel"><h3>🚨 Rules Engine Alerts (' + (snap.rule_alerts ? snap.rule_alerts.length : 0) + ')</h3>' +
-      (snap.rule_alerts && snap.rule_alerts.length ? snap.rule_alerts.map(function (a) {
+      '<div class="rf-audit-panel">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
+      '<h3 style="margin:0">🕒 Data &amp; File Changes (Created · Added · Updated · Deleted)</h3>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      '<button type="button" class="rf-btn rf-btn-sm' + (state.auditChangeFilter === 'all' ? ' rf-btn-primary' : '') + '" data-rf-ch-flt="all">All (' + allRevs.length + ')</button>' +
+      '<button type="button" class="rf-btn rf-btn-sm' + (state.auditChangeFilter === 'created' ? ' rf-btn-primary' : '') + '" data-rf-ch-flt="created">＋ Created / Added (' + cntCreated + ')</button>' +
+      '<button type="button" class="rf-btn rf-btn-sm' + (state.auditChangeFilter === 'updated' ? ' rf-btn-primary' : '') + '" data-rf-ch-flt="updated">✎ Updated (' + cntUpdated + ')</button>' +
+      '<button type="button" class="rf-btn rf-btn-sm' + (state.auditChangeFilter === 'deleted' ? ' rf-btn-primary' : '') + '" data-rf-ch-flt="deleted">✕ Deleted (' + cntDeleted + ')</button>' +
+      '</div></div>' +
+      (filteredRevs.length ? filteredRevs.map(function (rv) {
+        return '<div class="rf-alert-row" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+          '<div>' + changeActionBadge(rv.action) + ' <span class="rf-badge rf-badge-info">' + esc(rv.entity_type) + '</span> <strong>' + esc(rv.title || rv.slug) + '</strong>' +
+          '<div style="font-size:.82rem;margin-top:4px">' + esc(rv.summary) + '</div>' +
+          '<div style="font-size:.75rem;color:rgb(var(--text-secondary));margin-top:2px">By <b>' + esc(rv.actor) + '</b> · ' + esc(fmtTime(rv.timestamp)) + '</div></div>' +
+          '<button type="button" class="rf-btn rf-btn-sm" data-rf-aud-cmp="' + esc(rv.entity_type + '::' + rv.slug + '::' + (rv.title || rv.slug)) + '">🔍 Inspect / Compare</button>' +
+          '</div>';
+      }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No changes in this filter yet. Creating, adding, editing, or deleting any document, person, location, or category will appear here immediately.</div>') +
+      '</div>' +
+      '<div class="rf-audit-panel"><h3>🚨 Rules Engine Alerts (' + alertCount + ')</h3>' +
+      (alertCount ? snap.rule_alerts.map(function (a) {
         return '<div class="rf-alert-row">' +
-          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="rf-badge ' + sevCls(a.severity) + '">' + esc(a.severity) + '</span><span class="rf-badge">' + esc(a.rule_id) + '</span><strong>' + esc(a.title) + '</strong><span style="margin-left:auto;font-size:.76rem;color:rgb(var(--text-secondary))">' + esc(a.actor) + ' · ' + esc((a.timestamp || '').replace('T', ' ').slice(0, 19)) + '</span></div>' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="rf-badge ' + sevCls(a.severity) + '">' + esc(a.severity) + '</span><span class="rf-badge">' + esc(a.rule_id) + '</span><strong>' + esc(a.title) + '</strong><span style="margin-left:auto;font-size:.76rem;color:rgb(var(--text-secondary))">' + esc(a.actor) + ' · ' + esc(fmtTime(a.timestamp)) + '</span></div>' +
           '<div style="font-size:.83rem;margin-top:4px">' + esc(a.description) + '</div>' +
           '<div style="font-size:.78rem;margin-top:4px;color:rgb(var(--text-secondary))"><b>Recommended Action:</b> ' + esc(a.recommended_action) + '</div>' +
           '</div>';
-      }).join('') : '<div style="font-size:.84rem;color:#10b981">✓ No suspicious CRUD bursts, auth brute-force attempts, or injection probes detected.</div>') +
+      }).join('') : '<div style="font-size:.84rem;color:#10b981">✓ No suspicious CRUD bursts, login brute-force attempts, or SQL/NoSQL injection probes detected.</div>') +
       '</div>' +
-      '<div class="rf-audit-panel"><h3>📈 Statistical Outlier Findings (' + (snap.statistical_outliers ? snap.statistical_outliers.length : 0) + ')</h3>' +
-      (snap.statistical_outliers && snap.statistical_outliers.length ? snap.statistical_outliers.map(function (o) {
+      '<div class="rf-audit-panel"><h3>📈 Statistical Outlier Findings (' + outlierCount + ')</h3>' +
+      (outlierCount ? snap.statistical_outliers.map(function (o) {
         return '<div class="rf-alert-row"><span class="rf-badge ' + sevCls(o.severity) + '">' + esc(o.severity) + '</span> <b>' + esc(o.metric) + '</b> (Z=' + o.z_score + ') — ' + esc(o.explanation) + '</div>';
       }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No behavioral outliers detected against current rolling baselines.</div>') +
       '</div>' +
-      '<div class="rf-audit-panel"><h3>🕒 Recent File &amp; Data Changes (Before vs. After)</h3>' +
-      (revs.length ? revs.map(function (rv) {
-        return '<div class="rf-alert-row" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
-          '<div><span class="rf-badge rf-badge-info">' + esc(rv.entity_type) + '</span> <strong>' + esc(rv.title || rv.slug) + '</strong> — ' + esc(rv.summary) +
-          '<div style="font-size:.76rem;color:rgb(var(--text-secondary))">' + esc(rv.actor) + ' · ' + esc((rv.timestamp || '').replace('T', ' ').slice(0, 19)) + '</div></div>' +
-          '<button type="button" class="rf-btn rf-btn-sm" data-rf-aud-cmp="' + esc(rv.entity_type + '::' + rv.slug + '::' + (rv.title || rv.slug)) + '">🔍 Compare Before/After</button>' +
-          '</div>';
-      }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No record modifications logged yet. Edit any document, photo, or profile to compare Before vs. After.</div>') +
-      '</div>' +
       '<div class="rf-audit-panel"><h3>📜 Recent Access &amp; CRUD Activity (' + (snap.recent_events ? snap.recent_events.length : 0) + ')</h3>' +
-      '<div style="overflow-x:auto"><table class="rf-audit-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Endpoint</th><th>Status</th><th>Latency</th></tr></thead><tbody>' +
+      '<div style="overflow-x:auto"><table class="rf-audit-table"><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Activity Summary</th><th>Status</th><th>Speed</th></tr></thead><tbody>' +
       (snap.recent_events && snap.recent_events.length ? snap.recent_events.slice(0, 25).map(function (ev) {
-        return '<tr><td>' + esc((ev.timestamp || '').replace('T', ' ').slice(0, 19)) + '</td><td>' + esc(ev.actor) + '</td><td><span class="rf-badge">' + esc(ev.action) + '</span></td><td><code>' + esc(ev.method + ' ' + ev.path + (ev.query ? '?' + ev.query : '')) + '</code></td><td>' + Number(ev.status_code || 0) + '</td><td>' + Number(ev.duration_ms || 0) + ' ms</td></tr>';
+        var actCls = ev.action === 'DELETE' || ev.action === 'LOGIN_FAIL' ? 'rf-badge-crit'
+          : ev.action === 'CREATE' || ev.action === 'LOGIN_OK' ? 'rf-badge-ok'
+          : ev.action === 'UPDATE' ? 'rf-badge-warn' : '';
+        return '<tr><td style="white-space:nowrap">' + esc(fmtTime(ev.timestamp)) + '</td><td><b>' + esc(ev.actor) + '</b></td><td><span class="rf-badge ' + actCls + '">' + esc(ev.action) + '</span></td><td>' + esc(humanAuditDescription(ev)) + '</td><td>' + Number(ev.status_code || 0) + '</td><td>' + Number(ev.duration_ms || 0) + ' ms</td></tr>';
       }).join('') : '<tr><td colspan="6" style="text-align:center;color:rgb(var(--text-secondary))">No audit events recorded yet.</td></tr>') +
       '</tbody></table></div></div>';
 
+    body.querySelectorAll('[data-rf-ch-flt]').forEach(function (b) {
+      b.onclick = function () {
+        state.auditChangeFilter = b.getAttribute('data-rf-ch-flt');
+        renderAudit(body);
+      };
+    });
     document.getElementById('rf-aud-explain-btn').onclick = async function (ev) {
       var btn = ev.target;
       btn.disabled = true;
@@ -3940,6 +4230,44 @@
     mountCanvasButton();
     upgradeCanvasLinks();
   }
+
+  // Passive chatbot prompt tracker for User Insights & Hot Topics (never blocks or alters chat)
+  var _lastTrackedPrompt = '';
+  var _lastTrackedAt = 0;
+  function sendChatPromptAnalytics(rawText) {
+    var txt = String(rawText || '').trim();
+    var now = Date.now();
+    if (txt.length < 2) return;
+    if (txt === _lastTrackedPrompt && (now - _lastTrackedAt) < 4000) return;
+    _lastTrackedPrompt = txt;
+    _lastTrackedAt = now;
+    try {
+      fetch(API_BASE + '/canvas/api/track-chat-query', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: txt.slice(0, 280) })
+      }).catch(function () {});
+    } catch (_) {}
+  }
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
+      var t = ev.target;
+      if (t && (t.id === 'prompt-textarea' || (t.tagName === 'TEXTAREA' && t.closest && t.closest('form')))) {
+        if (!t.closest('#rf-admin-stage') && !t.closest('#ac-drawer')) {
+          sendChatPromptAnalytics(t.value || t.textContent || '');
+        }
+      }
+    }
+  }, true);
+  document.addEventListener('click', function (ev) {
+    var btn = ev.target && ev.target.closest && ev.target.closest('button[data-testid="send-button"], button[type="submit"]');
+    if (!btn || btn.closest('#rf-admin-stage') || btn.closest('#ac-drawer')) return;
+    var form = btn.closest('form');
+    if (!form) return;
+    var ta = form.querySelector('#prompt-textarea, textarea');
+    if (ta) sendChatPromptAnalytics(ta.value || ta.textContent || '');
+  }, true);
 
   // Do NOT auto-reopen stale session text on a fresh /c/new page reload; clear stale hash if on /c/new
   var initParsed = parseCanvasHash(window.location.hash || '');

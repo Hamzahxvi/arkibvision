@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod admin;
+mod analytics;
 mod ancient_scripts;
 mod archives;
 mod audit;
