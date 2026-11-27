@@ -9,10 +9,15 @@
 use crate::config::AppConfig;
 use crate::metadata::profile_slug;
 use crate::vision_ops::{encode_jpeg, load_rgb_image};
+use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb, RgbImage};
+use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
+use ort::value::Tensor;
 use serde_json::{Value, json};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -456,65 +461,394 @@ pub fn analyze_image_quality_and_conservation(path: &Path) -> Result<Value, Stri
     }))
 }
 
-/// Pure-Rust archival image enhancement pipeline (white balance de-yellowing, gamma exposure fix, autocontrast, unsharp mask).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct UpscaleSpec {
+    scale: u32,
+    anime_model: bool,
+}
+
+fn parse_upscale_mode(mode_clean: &str) -> Option<UpscaleSpec> {
+    match mode_clean {
+        "ai_upscale_2x" | "upscale_2x" | "upscale" | "ai_upscale" => Some(UpscaleSpec {
+            scale: 2,
+            anime_model: false,
+        }),
+        "ai_upscale_4x" | "upscale_4x" | "4x" => Some(UpscaleSpec {
+            scale: 4,
+            anime_model: false,
+        }),
+        "ai_upscale_anime" | "upscale_anime" | "ai_upscale_graphic" => Some(UpscaleSpec {
+            scale: 4,
+            anime_model: true,
+        }),
+        _ => None,
+    }
+}
+
+/// Discover local Vulkan Real-ESRGAN / Upscayl binary + models directory.
+fn find_vulkan_upscaler(cfg: &AppConfig) -> Option<(PathBuf, PathBuf)> {
+    let mut candidates: Vec<(PathBuf, PathBuf)> = vec![
+        (
+            cfg.project_root
+                .join("tools")
+                .join("upscaler")
+                .join("realesrgan-ncnn-vulkan.exe"),
+            cfg.project_root
+                .join("tools")
+                .join("upscaler")
+                .join("models"),
+        ),
+        (
+            cfg.project_root
+                .join("tools")
+                .join("upscaler")
+                .join("upscayl-bin.exe"),
+            cfg.project_root
+                .join("tools")
+                .join("upscaler")
+                .join("models"),
+        ),
+    ];
+    for env_key in ["ProgramFiles", "LOCALAPPDATA"] {
+        if let Ok(base) = std::env::var(env_key) {
+            let root = PathBuf::from(base).join("Upscayl").join("resources");
+            candidates.push((
+                root.join("bin").join("upscayl-bin.exe"),
+                root.join("models"),
+            ));
+            let prog = PathBuf::from(std::env::var(env_key).unwrap_or_default())
+                .join("Programs")
+                .join("Upscayl")
+                .join("resources");
+            candidates.push((
+                prog.join("bin").join("upscayl-bin.exe"),
+                prog.join("models"),
+            ));
+        }
+    }
+    for (bin, models_dir) in candidates {
+        if bin.is_file() && models_dir.is_dir() {
+            return Some((bin, models_dir));
+        }
+    }
+    None
+}
+
+/// Discover an optional in-process ONNX Super-Resolution model in `models/`.
+fn find_onnx_sr_model(cfg: &AppConfig) -> Option<PathBuf> {
+    let models_dir = cfg.project_root.join("models");
+    for name in [
+        "realesr_general_x4v3.onnx",
+        "realesr-general-x4v3.onnx",
+        "realesrgan_x4plus.onnx",
+        "span_x4.onnx",
+        "upscaler.onnx",
+    ] {
+        let p = models_dir.join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn run_vulkan_upscale(
+    bin: &Path,
+    models_dir: &Path,
+    orig: &DynamicImage,
+    spec: UpscaleSpec,
+) -> Result<(DynamicImage, String), String> {
+    let (ow, oh) = orig.dimensions();
+    // Guard against excessive output memory on huge scans: cap input to 1024px for 4x (max 4096px out)
+    let max_in = if spec.scale >= 4 { 1024 } else { 1536 };
+    let prep = if ow > max_in || oh > max_in {
+        orig.resize(max_in, max_in, FilterType::Lanczos3)
+    } else {
+        orig.clone()
+    };
+
+    let tmp_dir = std::env::temp_dir().join(format!("arkib_sr_{}", Uuid::new_v4().simple()));
+    fs::create_dir_all(&tmp_dir).map_err(|e| format!("Create temp SR dir failed: {e}"))?;
+    let in_file = tmp_dir.join("in.png");
+    let out_file = tmp_dir.join("out.png");
+    prep.save(&in_file)
+        .map_err(|e| format!("Write temp SR input failed: {e}"))?;
+
+    let model_name = if spec.anime_model && models_dir.join("realesrgan-x4plus-anime.bin").is_file()
+    {
+        "realesrgan-x4plus-anime"
+    } else if models_dir.join("realesrgan-x4plus.bin").is_file() {
+        "realesrgan-x4plus"
+    } else if models_dir.join("ultrasharp-4x.bin").is_file() {
+        "ultrasharp-4x"
+    } else {
+        "realesrgan-x4plus"
+    };
+
+    let status = Command::new(bin)
+        .arg("-i")
+        .arg(&in_file)
+        .arg("-o")
+        .arg(&out_file)
+        .arg("-n")
+        .arg(model_name)
+        .arg("-m")
+        .arg(models_dir)
+        .arg("-s")
+        .arg("4")
+        .arg("-t")
+        .arg("200")
+        .arg("-g")
+        .arg("0")
+        .output()
+        .map_err(|e| format!("Failed launching Vulkan upscaler: {e}"))?;
+
+    if !status.status.success() || !out_file.is_file() {
+        let stderr = String::from_utf8_lossy(&status.stderr);
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return Err(format!("Vulkan upscaler failed: {}", stderr.trim()));
+    }
+
+    let mut upscaled = image::open(&out_file)
+        .map_err(|e| format!("Failed reading Vulkan upscaled output: {e}"))?
+        .to_rgb8();
+    let _ = fs::remove_dir_all(&tmp_dir);
+
+    let mut dyn_img = DynamicImage::ImageRgb8(upscaled);
+    if spec.scale == 2 {
+        let target_w = (prep.width() * 2).max(1);
+        let target_h = (prep.height() * 2).max(1);
+        dyn_img = dyn_img.resize_exact(target_w, target_h, FilterType::Lanczos3);
+    } else {
+        // Rebind to satisfy borrow checker cleanly
+        upscaled = dyn_img.to_rgb8();
+        dyn_img = DynamicImage::ImageRgb8(upscaled);
+    }
+
+    Ok((dyn_img, format!("Real-ESRGAN Vulkan GPU ({model_name})")))
+}
+
+fn run_onnx_sr_upscale(
+    cfg: &AppConfig,
+    model_path: &Path,
+    orig: &DynamicImage,
+    spec: UpscaleSpec,
+) -> Result<(DynamicImage, String), String> {
+    let env = ort::init_from(&cfg.ort_dylib_path)
+        .map_err(|e| format!("ORT init error: {e}"))?
+        .build()
+        .map_err(|e| format!("ORT env build error: {e}"))?;
+    let mut sess = Session::builder(&env)
+        .map_err(|e| format!("ORT SR builder error: {e}"))?
+        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .map_err(|e| format!("ORT SR opt error: {e}"))?
+        .with_intra_threads(4)
+        .map_err(|e| format!("ORT SR threads error: {e}"))?
+        .commit_from_file(model_path)
+        .map_err(|e| format!("ORT SR load error: {e}"))?;
+
+    let input_name = sess
+        .inputs()
+        .first()
+        .map(|i| i.name().to_string())
+        .unwrap_or_else(|| "input".to_string());
+
+    let max_in = 768u32;
+    let prep = if orig.width() > max_in || orig.height() > max_in {
+        orig.resize(max_in, max_in, FilterType::Lanczos3)
+    } else {
+        orig.clone()
+    };
+    let rgb = prep.to_rgb8();
+    let (w, h) = rgb.dimensions();
+
+    // Tiled 128x128 inference with 8px overlap to keep RAM low and avoid seams
+    let tile = 128u32;
+    let pad = 8u32;
+    let mut out_img: Option<RgbImage> = None;
+    let mut detected_scale = 4u32;
+
+    let mut y0 = 0u32;
+    while y0 < h {
+        let mut x0 = 0u32;
+        while x0 < w {
+            let x1 = (x0 + tile).min(w);
+            let y1 = (y0 + tile).min(h);
+            let px0 = x0.saturating_sub(pad);
+            let py0 = y0.saturating_sub(pad);
+            let px1 = (x1 + pad).min(w);
+            let py1 = (y1 + pad).min(h);
+            let tw = (px1 - px0) as usize;
+            let th = (py1 - py0) as usize;
+
+            let mut data = vec![0.0f32; 3 * th * tw];
+            for ty in 0..th {
+                for tx in 0..tw {
+                    let p = rgb.get_pixel(px0 + tx as u32, py0 + ty as u32).0;
+                    let idx = ty * tw + tx;
+                    data[idx] = f32::from(p[0]) / 255.0;
+                    data[th * tw + idx] = f32::from(p[1]) / 255.0;
+                    data[2 * th * tw + idx] = f32::from(p[2]) / 255.0;
+                }
+            }
+            let tensor = Tensor::from_array(([1usize, 3, th, tw], data))
+                .map_err(|e| format!("ORT SR tensor error: {e}"))?;
+            let outputs = sess
+                .run(ort::inputs![input_name.as_str() => tensor])
+                .map_err(|e| format!("ORT SR run error: {e}"))?;
+            let (shape, out_slice) = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("ORT SR extract error: {e}"))?;
+            if shape.len() != 4 {
+                return Err("Unexpected ONNX SR output shape".to_string());
+            }
+            let oh = shape[2] as usize;
+            let ow = shape[3] as usize;
+            let sc = ((ow / tw.max(1)) as u32).max(1);
+            detected_scale = sc;
+            let canvas = out_img.get_or_insert_with(|| RgbImage::new(w * sc, h * sc));
+
+            let crop_x = ((x0 - px0) * sc) as usize;
+            let crop_y = ((y0 - py0) * sc) as usize;
+            let copy_w = ((x1 - x0) * sc) as usize;
+            let copy_h = ((y1 - y0) * sc) as usize;
+            let plane = oh * ow;
+            for cy in 0..copy_h {
+                for cx in 0..copy_w {
+                    let sy = (crop_y + cy).min(oh - 1);
+                    let sx = (crop_x + cx).min(ow - 1);
+                    let idx = sy * ow + sx;
+                    let r = (out_slice[idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+                    let g = (out_slice[plane + idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+                    let b = (out_slice[2 * plane + idx].clamp(0.0, 1.0) * 255.0).round() as u8;
+                    canvas.put_pixel(x0 * sc + cx as u32, y0 * sc + cy as u32, Rgb([r, g, b]));
+                }
+            }
+            x0 += tile;
+        }
+        y0 += tile;
+    }
+
+    let mut dyn_img = DynamicImage::ImageRgb8(out_img.unwrap_or(rgb));
+    if spec.scale != detected_scale {
+        let tw = (w * spec.scale).max(1);
+        let th = (h * spec.scale).max(1);
+        dyn_img = dyn_img.resize_exact(tw, th, FilterType::Lanczos3);
+    }
+    let mname = model_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("onnx-sr");
+    Ok((dyn_img, format!("Pure-Rust ONNX Runtime ({mname})")))
+}
+
+/// Hybrid 3-Tier Neural Super-Resolution:
+/// 1) Real-ESRGAN / Upscayl Vulkan GPU (`tools/upscaler/realesrgan-ncnn-vulkan.exe` or installed Upscayl)
+/// 2) In-process Pure-Rust ONNX Super-Resolution (`models/realesr*.onnx` via `ort`)
+/// 3) Clean Pure-Rust Lanczos3 + Unsharp detail fallback
+fn run_hybrid_upscale(
+    cfg: &AppConfig,
+    orig: &DynamicImage,
+    spec: UpscaleSpec,
+) -> (DynamicImage, String, Vec<&'static str>) {
+    if let Some((bin, models_dir)) = find_vulkan_upscaler(cfg)
+        && let Ok((img, engine_label)) = run_vulkan_upscale(&bin, &models_dir, orig, spec)
+    {
+        return (
+            img,
+            engine_label,
+            vec!["realesrgan_vulkan_gpu_super_resolution"],
+        );
+    }
+    if let Some(onnx_path) = find_onnx_sr_model(cfg)
+        && let Ok((img, engine_label)) = run_onnx_sr_upscale(cfg, &onnx_path, orig, spec)
+    {
+        return (img, engine_label, vec!["ort_onnx_neural_super_resolution"]);
+    }
+    let tw = (orig.width() * spec.scale).clamp(1, 4096);
+    let th = (orig.height() * spec.scale).clamp(1, 4096);
+    let resized = orig.resize_exact(tw, th, FilterType::Lanczos3).to_rgb8();
+    let sharpened = unsharp_mask_rgb(&resized, 1.55);
+    (
+        DynamicImage::ImageRgb8(sharpened),
+        "Pure-Rust Lanczos3 Fallback".to_string(),
+        vec!["lanczos3_upscale", "unsharp_mask_detail_boost"],
+    )
+}
+
+/// Pure-Rust archival image enhancement & hybrid neural AI super-resolution pipeline.
 pub fn enhance_archival_image(
     cfg: &AppConfig,
     image_path: &Path,
     mode: &str,
 ) -> Result<Value, String> {
     let orig = load_rgb_image(image_path)?;
+    let (before_w, before_h) = orig.dimensions();
     let before_stats = compute_pixel_stats(&orig);
     let before_quality = quality_scores_from_stats(&before_stats);
 
     let mode_clean = mode.trim().to_ascii_lowercase();
-    let mut rgb = orig.to_rgb8();
-    let mut steps_applied: Vec<&str> = Vec::new();
+    let (enhanced_dyn, upscale_engine, steps_applied, scale_factor) =
+        if let Some(spec) = parse_upscale_mode(&mode_clean) {
+            let (up_img, engine_label, steps) = run_hybrid_upscale(cfg, &orig, spec);
+            (up_img, engine_label, steps, spec.scale)
+        } else {
+            let mut rgb = orig.to_rgb8();
+            let mut steps: Vec<&str> = Vec::new();
 
-    // 1. De-yellowing / Gray-World White Balance (when aging/yellowing detected or requested)
-    if mode_clean == "deyellow_restore"
-        || (matches!(mode_clean.as_str(), "" | "auto" | "manuscript_ocr")
-            && before_stats.aging_score >= 0.22)
-    {
-        rgb = white_balance_deyellow(&rgb, 0.72);
-        steps_applied.push("gray_world_deyellow_white_balance");
-    }
+            // 1. De-yellowing / Gray-World White Balance (when aging/yellowing detected or requested)
+            if mode_clean == "deyellow_restore"
+                || (matches!(mode_clean.as_str(), "" | "auto" | "manuscript_ocr")
+                    && before_stats.aging_score >= 0.22)
+            {
+                rgb = white_balance_deyellow(&rgb, 0.72);
+                steps.push("gray_world_deyellow_white_balance");
+            }
 
-    // 2. Adaptive Gamma / Lighting Exposure Correction
-    let gamma = if before_stats.mean_luma < 85.0 {
-        0.72
-    } else if before_stats.mean_luma > 205.0 {
-        1.32
-    } else if mode_clean == "contrast_lighting" {
-        0.88
-    } else {
-        1.0
-    };
-    if (gamma - 1.0_f64).abs() > 0.01 {
-        rgb = apply_gamma(&rgb, gamma);
-        steps_applied.push("adaptive_gamma_lighting_correction");
-    }
+            // 2. Adaptive Gamma / Lighting Exposure Correction
+            let gamma = if before_stats.mean_luma < 85.0 {
+                0.72
+            } else if before_stats.mean_luma > 205.0 {
+                1.32
+            } else if mode_clean == "contrast_lighting" {
+                0.88
+            } else {
+                1.0
+            };
+            if (gamma - 1.0_f64).abs() > 0.01 {
+                rgb = apply_gamma(&rgb, gamma);
+                steps.push("adaptive_gamma_lighting_correction");
+            }
 
-    // 3. Percentile Autocontrast Stretch (1.5% cutoff)
-    let cutoff = if mode_clean == "manuscript_ocr" {
-        2.0
-    } else {
-        1.2
-    };
-    rgb = autocontrast_rgb(&rgb, cutoff);
-    steps_applied.push("percentile_autocontrast_stretch");
+            // 3. Percentile Autocontrast Stretch (1.5% cutoff)
+            let cutoff = if mode_clean == "manuscript_ocr" {
+                2.0
+            } else {
+                1.2
+            };
+            rgb = autocontrast_rgb(&rgb, cutoff);
+            steps.push("percentile_autocontrast_stretch");
 
-    // 4. Unsharp Masking (sharpens faded text strokes & fine architectural detail)
-    let sharpen_amt = if mode_clean == "manuscript_ocr" {
-        1.75
-    } else if mode_clean == "denoise_sharpen" {
-        1.60
-    } else {
-        1.45
-    };
-    rgb = unsharp_mask_rgb(&rgb, sharpen_amt);
-    steps_applied.push("unsharp_mask_readability_boost");
+            // 4. Unsharp Masking (sharpens faded text strokes & fine architectural detail)
+            let sharpen_amt = if mode_clean == "manuscript_ocr" {
+                1.75
+            } else if mode_clean == "denoise_sharpen" {
+                1.60
+            } else {
+                1.45
+            };
+            rgb = unsharp_mask_rgb(&rgb, sharpen_amt);
+            steps.push("unsharp_mask_readability_boost");
 
-    let enhanced_dyn = DynamicImage::ImageRgb8(rgb);
+            (
+                DynamicImage::ImageRgb8(rgb),
+                "Pure-Rust Archival Pipeline".to_string(),
+                steps,
+                1u32,
+            )
+        };
+
+    let (after_w, after_h) = enhanced_dyn.dimensions();
     let after_stats = compute_pixel_stats(&enhanced_dyn);
     let after_quality = quality_scores_from_stats(&after_stats);
 
@@ -538,12 +872,16 @@ pub fn enhance_archival_image(
     Ok(json!({
         "status": "enhanced",
         "mode": if mode_clean.is_empty() { "auto" } else { &mode_clean },
+        "upscale_engine": upscale_engine,
+        "scale_factor": scale_factor,
+        "before_dimensions": format!("{before_w}x{before_h}"),
+        "after_dimensions": format!("{after_w}x{after_h}"),
         "steps_applied": steps_applied,
         "enhanced_filename": out_name,
         "enhanced_image_url": format!("{}/images/enhanced/{out_name}", cfg.librechat_url),
         "before_quality": before_quality,
         "after_quality": after_quality,
-        "display_instruction": "Display the enhanced image using ![Enhanced archival image](enhanced_image_url) and summarize the Before vs After lighting, contrast, and readability improvements.",
+        "display_instruction": "Display the enhanced image using ![Enhanced archival image](enhanced_image_url) and summarize the Before vs After resolution, engine, lighting, contrast, and readability improvements.",
     }))
 }
 
@@ -681,5 +1019,31 @@ mod tests {
             DamageLevel::from_score(s.faded_score, 0.28, 0.48, 0.68),
             DamageLevel::Heavy
         );
+    }
+
+    #[test]
+    fn test_upscale_mode_parsing() {
+        assert_eq!(
+            parse_upscale_mode("ai_upscale_2x"),
+            Some(UpscaleSpec {
+                scale: 2,
+                anime_model: false
+            })
+        );
+        assert_eq!(
+            parse_upscale_mode("ai_upscale_4x"),
+            Some(UpscaleSpec {
+                scale: 4,
+                anime_model: false
+            })
+        );
+        assert_eq!(
+            parse_upscale_mode("ai_upscale_anime"),
+            Some(UpscaleSpec {
+                scale: 4,
+                anime_model: true
+            })
+        );
+        assert_eq!(parse_upscale_mode("auto"), None);
     }
 }

@@ -642,7 +642,7 @@ pub fn tool_definitions() -> Vec<Value> {
                 }),
                 json!({
                     "name": "arkib_enhance_image",
-                    "description": "Enhance dark/blurry/faded/yellowed image (auto|manuscript_ocr|deyellow_restore|contrast_lighting|denoise_sharpen). Pass image_path=\"\" for uploads.",
+                    "description": "Enhance or AI-upscale blurry/low-res/faded image (auto|ai_upscale_2x|ai_upscale_4x|ai_upscale_anime|manuscript_ocr|deyellow_restore|contrast_lighting|denoise_sharpen). Pass image_path=\"\" for uploads.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

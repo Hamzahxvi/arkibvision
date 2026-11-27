@@ -3678,6 +3678,9 @@
       '<div class="rf-toolbar" style="margin-bottom:10px">' +
       '<input class="rf-input" id="rf-lab-file" type="file" accept=".jpg,.jpeg,.png,.webp,.bmp"/>' +
       '<select class="rf-select" id="rf-lab-mode">' +
+      '<option value="ai_upscale_4x"' + (state.labMode === 'ai_upscale_4x' ? ' selected' : '') + '>🚀 AI Upscale 4× (Real-ESRGAN Neural SR)</option>' +
+      '<option value="ai_upscale_2x"' + (state.labMode === 'ai_upscale_2x' ? ' selected' : '') + '>🚀 AI Upscale 2× (Real-ESRGAN Fast SR)</option>' +
+      '<option value="ai_upscale_anime"' + (state.labMode === 'ai_upscale_anime' ? ' selected' : '') + '>🎨 AI Upscale 4× (Illustrations / Logos / Graphics)</option>' +
       '<option value="auto"' + (state.labMode === 'auto' ? ' selected' : '') + '>Mode: Auto Archival Restore</option>' +
       '<option value="manuscript_ocr"' + (state.labMode === 'manuscript_ocr' ? ' selected' : '') + '>Mode: Manuscript OCR Boost</option>' +
       '<option value="deyellow_restore"' + (state.labMode === 'deyellow_restore' ? ' selected' : '') + '>Mode: De-Yellow &amp; Paper Restore</option>' +
@@ -3708,6 +3711,10 @@
           '<div class="rf-lab-compare-head">' +
           '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
           '<span class="rf-badge rf-badge-ok">✨ Enhanced (' + esc(meta.mode || state.labMode || 'auto') + ')</span>' +
+          (meta.upscale_engine ? '<span class="rf-badge rf-badge-info">⚡ ' + esc(meta.upscale_engine) + '</span>' : '') +
+          (meta.before_dimensions && meta.after_dimensions
+            ? '<span class="rf-badge rf-badge-ok">📐 ' + esc(meta.before_dimensions) + ' → ' + esc(meta.after_dimensions) + '</span>'
+            : '') +
           (bq.overall_score != null && aq.overall_score != null
             ? '<span class="rf-badge rf-badge-info">Quality: ' + esc(bq.overall_score) + ' → ' + esc(aq.overall_score) + '/100</span>'
             : '') +
@@ -3719,11 +3726,11 @@
           '</div>' +
           '<div class="rf-lab-compare-grid">' +
           '<div class="rf-lab-img-card">' +
-          '<div class="rf-lab-img-head"><span class="rf-badge rf-badge-warn">BEFORE · ORIGINAL</span><span class="rf-lab-img-name">' + esc(state.labFileName) + esc(sizeKb) + '</span></div>' +
+          '<div class="rf-lab-img-head"><span class="rf-badge rf-badge-warn">BEFORE · ORIGINAL</span><span class="rf-lab-img-name">' + esc(state.labFileName) + (meta.before_dimensions ? ' · ' + esc(meta.before_dimensions) : '') + esc(sizeKb) + '</span></div>' +
           '<div class="rf-lab-img-frame"><img src="' + esc(state.labPreviewUrl) + '" id="rf-lab-before-img" alt="Original uploaded image"/></div>' +
           '</div>' +
           '<div class="rf-lab-img-card rf-lab-img-card-after">' +
-          '<div class="rf-lab-img-head"><span class="rf-badge rf-badge-ok">AFTER · ENHANCED</span><span class="rf-lab-img-name">' + esc(meta.mode || state.labMode || 'auto') + '</span></div>' +
+          '<div class="rf-lab-img-head"><span class="rf-badge rf-badge-ok">AFTER · ENHANCED</span><span class="rf-lab-img-name">' + esc(meta.mode || state.labMode || 'auto') + (meta.after_dimensions ? ' · ' + esc(meta.after_dimensions) : '') + '</span></div>' +
           '<div class="rf-lab-img-frame"><img src="' + esc(state.labEnhancedUrl) + '" id="rf-lab-after-img" alt="Enhanced image"/></div>' +
           '</div>' +
           '</div></div>';

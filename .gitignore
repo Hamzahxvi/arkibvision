@@ -11,3 +11,4 @@ data/interim/
 data/processed/
 models/runtime/
 models/*.onnx
+tools/upscaler/
