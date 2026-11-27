@@ -853,30 +853,29 @@ pub async fn explain_anomalies_with_ai(cfg: &AppConfig, snapshot: &AuditReportSn
     });
 
     let prompt = format!(
-        "You are an archival security auditor for Arkib Negara Malaysia (ArkibVision). \
-Explain the following audit anomalies clearly in plain English (with concise Bahasa Malaysia terms where helpful) in under 220 words. \
-Structure your response into: 1) Executive Risk Summary, 2) Key Anomalies Explained, 3) Recommended Admin Actions. \
-Do not invent events not present in the JSON:\n\n{}",
-        serde_json::to_string_pretty(&compact_summary).unwrap_or_default()
+        "Archival security auditor (ArkibVision). Explain these anomalies in plain English (concise BM terms optional) in <200 words: 1) Risk Summary, 2) Key Anomalies, 3) Admin Actions. Stick strictly to JSON:\n{}",
+        serde_json::to_string(&compact_summary).unwrap_or_default()
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(45))
-        .build();
-    let Ok(client) = client else {
-        return json!({
-            "status": "ok",
-            "source": "deterministic_fallback",
-            "explanation": deterministic,
-            "risk_level": snapshot.risk_level,
-            "risk_score": snapshot.risk_score,
-        });
-    };
+    static AUDIT_HTTP: OnceLock<reqwest::Client> = OnceLock::new();
+    let client = AUDIT_HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(40))
+            .pool_max_idle_per_host(2)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    });
 
     let body = json!({
         "model": cfg.vision_model,
         "stream": false,
-        "options": { "num_ctx": OLLAMA_UNIFORM_NUM_CTX, "temperature": 0.2 },
+        "think": false,
+        "keep_alive": "30m",
+        "options": {
+            "num_ctx": OLLAMA_UNIFORM_NUM_CTX,
+            "temperature": 0.2,
+            "num_predict": 280
+        },
         "messages": [
             { "role": "user", "content": prompt }
         ]

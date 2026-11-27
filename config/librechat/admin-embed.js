@@ -379,23 +379,59 @@
     } catch (e) {}
   }
 
+  var _tabFetchedAt = {};
+
+  async function fetchHeavyTabData(tab, force) {
+    if (!state.authed || isGuest()) return;
+    var now = Date.now();
+    if (!force && _tabFetchedAt[tab] && (now - _tabFetchedAt[tab]) < 8000) return;
+    _tabFetchedAt[tab] = now;
+    try {
+      if (tab === 'audit') {
+        var ar = await api('/admin/api/audit/dashboard?ts=' + now);
+        if (ar.ok && ar.data) state.auditData = ar.data;
+        render();
+      } else if (tab === 'insights') {
+        var br = await api('/admin/api/analytics/behavior?ts=' + now);
+        if (br.ok && br.data) state.behaviorData = br.data;
+        render();
+      } else if (tab === 'system') {
+        var hr = await api('/admin/api/system/health?ts=' + now);
+        if (hr.ok) state.health = hr.data;
+        render();
+      } else if (tab === 'documents') {
+        var pr = await api('/admin/api/preferences?ts=' + now);
+        if (pr.ok && pr.data) state.preferencesData = pr.data;
+        render();
+      }
+    } catch (e) {}
+  }
+
   async function refreshAll(manual) {
     if (!state.authed) return;
     try {
-      var res = await Promise.all([
-        api('/admin/api/requests?ts=' + Date.now()),
-        api('/admin/api/profiles?ts=' + Date.now()),
-        api('/admin/api/people-groups?ts=' + Date.now()),
-        api('/admin/api/locations?ts=' + Date.now()),
-        api('/admin/api/location-groups?ts=' + Date.now()),
-        api('/admin/api/documents?ts=' + Date.now()),
-        api('/admin/api/document-groups?ts=' + Date.now()),
-        api('/admin/api/system/health?ts=' + Date.now()),
-        api('/admin/api/categories?ts=' + Date.now()),
-        api('/admin/api/preferences?ts=' + Date.now()),
-        api('/admin/api/audit/dashboard?ts=' + Date.now()),
-        api('/admin/api/analytics/behavior?ts=' + Date.now())
-      ]);
+      var ts = Date.now();
+      var reqs = [
+        api('/admin/api/requests?ts=' + ts),
+        api('/admin/api/profiles?ts=' + ts),
+        api('/admin/api/people-groups?ts=' + ts),
+        api('/admin/api/locations?ts=' + ts),
+        api('/admin/api/location-groups?ts=' + ts),
+        api('/admin/api/documents?ts=' + ts),
+        api('/admin/api/document-groups?ts=' + ts),
+        api('/admin/api/categories?ts=' + ts)
+      ];
+      // Load heavy analytics/audit/system/preferences endpoints ONLY for the active tab (or explicit manual refresh)
+      var wantHealth = manual || state.tab === 'system';
+      var wantPrefs = manual || state.tab === 'documents';
+      var wantAudit = manual || state.tab === 'audit';
+      var wantBehavior = manual || state.tab === 'insights';
+      if (wantHealth) reqs.push(api('/admin/api/system/health?ts=' + ts));
+      if (wantPrefs) reqs.push(api('/admin/api/preferences?ts=' + ts));
+      if (wantAudit) reqs.push(api('/admin/api/audit/dashboard?ts=' + ts));
+      if (wantBehavior) reqs.push(api('/admin/api/analytics/behavior?ts=' + ts));
+
+      var res = await Promise.all(reqs);
       if (res[0].ok && Array.isArray(res[0].data)) state.requests = res[0].data;
       if (res[1].ok && Array.isArray(res[1].data)) state.profiles = res[1].data;
       if (res[2].ok && Array.isArray(res[2].data)) state.peopleGroups = res[2].data;
@@ -403,11 +439,23 @@
       if (res[4].ok && Array.isArray(res[4].data)) state.locationGroups = res[4].data;
       if (res[5].ok && Array.isArray(res[5].data)) state.documents = res[5].data;
       if (res[6].ok && Array.isArray(res[6].data)) state.documentGroups = res[6].data;
-      if (res[7].ok) state.health = res[7].data;
-      if (res[8].ok && Array.isArray(res[8].data)) state.categories = res[8].data;
-      if (res[9].ok && res[9].data) state.preferencesData = res[9].data;
-      if (res[10].ok && res[10].data) state.auditData = res[10].data;
-      if (res[11].ok && res[11].data) state.behaviorData = res[11].data;
+      if (res[7].ok && Array.isArray(res[7].data)) state.categories = res[7].data;
+      var idx = 8;
+      if (wantHealth) {
+        if (res[idx] && res[idx].ok) { state.health = res[idx].data; _tabFetchedAt.system = ts; }
+        idx++;
+      }
+      if (wantPrefs) {
+        if (res[idx] && res[idx].ok && res[idx].data) { state.preferencesData = res[idx].data; _tabFetchedAt.documents = ts; }
+        idx++;
+      }
+      if (wantAudit) {
+        if (res[idx] && res[idx].ok && res[idx].data) { state.auditData = res[idx].data; _tabFetchedAt.audit = ts; }
+        idx++;
+      }
+      if (wantBehavior) {
+        if (res[idx] && res[idx].ok && res[idx].data) { state.behaviorData = res[idx].data; _tabFetchedAt.insights = ts; }
+      }
       render();
       if (manual) toast('Admin data refreshed');
     } catch (e) {}
@@ -471,7 +519,7 @@
     checkSessionAndLoad();
     if (!state.pollTimer) {
       state.pollTimer = setInterval(function () {
-        if (state.open && !isGuest() && state.authed && !document.querySelector('.rf-modal-backdrop')) {
+        if (!document.hidden && state.open && !isGuest() && state.authed && !document.querySelector('.rf-modal-backdrop')) {
           api('/admin/api/requests?ts=' + Date.now()).then(function (r) {
             if (r.ok && Array.isArray(r.data)) {
               state.requests = r.data;
@@ -645,6 +693,9 @@
         state.tab = nextTab;
         state.search = '';
         render();
+        if (!guestMode && (nextTab === 'audit' || nextTab === 'insights' || nextTab === 'system' || nextTab === 'documents')) {
+          fetchHeavyTabData(nextTab, false);
+        }
       });
     });
     document.getElementById('rf-refresh-btn').addEventListener('click', function () {
@@ -1476,7 +1527,9 @@
       var gs = locGroupSlug(l);
       if (state.selectedLocGroup === 'unassigned' && gs) return false;
       if (state.selectedLocGroup !== 'all' && state.selectedLocGroup !== 'unassigned' && gs !== state.selectedLocGroup) return false;
-      return !q || JSON.stringify(l).toLowerCase().indexOf(q) !== -1;
+      if (!q) return true;
+      var hay = [l.name, l.group, l.category, l.parent_institution, l.building_or_wing, l.floor_or_room, l.address, l.coordinates, l.description, l.historical_significance, l.notes].join(' ').toLowerCase();
+      return hay.indexOf(q) !== -1;
     });
 
     var folderDropdownHtml =
@@ -1883,7 +1936,9 @@
         var srcVal = String(d.author_or_source || '').trim();
         if (srcVal !== state.docSourceFilter) return false;
       }
-      return !q || JSON.stringify(d).toLowerCase().indexOf(q) !== -1;
+      if (!q) return true;
+      var hay = [d.title, d.subject, d.category, d.year, d.author_or_source, d.group, d.script_type, d.reference_code, d.origin_location, d.summary, String(d.extracted_text || '').slice(0, 600), d.notes].join(' ').toLowerCase();
+      return hay.indexOf(q) !== -1;
     });
 
     list.sort(function (a, b) {

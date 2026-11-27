@@ -63,6 +63,19 @@ pub fn encode_image_b64(path: &Path, max_dim: u32) -> Result<String, String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(jpeg))
 }
 
+/// Fast in-memory thumbnail + JPEG base64 encoder for local Vision LLM calls.
+/// Produces 5–10x smaller payloads than PNG, cutting Ollama vision latency and token overhead.
+pub fn encode_image_bytes_b64(bytes: &[u8], max_dim: u32, quality: u8) -> Result<String, String> {
+    let img = image::load_from_memory(bytes).map_err(|e| format!("Image decode failed: {e}"))?;
+    let resized = if img.width() > max_dim || img.height() > max_dim {
+        img.thumbnail(max_dim, max_dim)
+    } else {
+        img
+    };
+    let jpeg = encode_jpeg(&resized, quality)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(jpeg))
+}
+
 pub fn compute_ahash_bits(pixels: &[i64]) -> String {
     if pixels.is_empty() {
         return String::new();

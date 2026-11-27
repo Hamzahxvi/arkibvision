@@ -1239,7 +1239,7 @@ pub async fn summarize_with_ollama(
     text: &str,
     language_hint: &str,
 ) -> Option<String> {
-    let clipped: String = text.chars().take(12_000).collect();
+    let clipped: String = text.chars().take(8_000).collect();
     if clipped.trim().is_empty() {
         return None;
     }
@@ -1247,20 +1247,20 @@ pub async fn summarize_with_ollama(
         || language_hint.eq_ignore_ascii_case("malay")
         || language_hint.eq_ignore_ascii_case("bm")
     {
-        "Write strictly in natural Standard Bahasa Malaysia (DBP). Use Malaysian terms (maklumat, boleh, pejabat, kulat, merosakkan, asas perundangan, cabaran, adakah, gambar, pemasyhuran, pemuliharaan) — NEVER Indonesian terms (informasi, bisa, kantor, jamur, merusak, dasar hukum, tantangan, apakah, foto, kesulitan)."
+        "Write in Standard Bahasa Malaysia DBP (maklumat, boleh, pejabat, kulat, merosakkan, asas perundangan, cabaran, adakah, gambar, pemuliharaan; never Indonesian)."
     } else {
-        "Reply in the same language as the document (English or Standard Bahasa Malaysia DBP). If replying in Bahasa Malaysia, use Malaysian DBP terms (maklumat, boleh, pejabat, kulat, merosakkan, asas perundangan, adakah, pemasyhuran) and avoid Indonesian vocabulary (informasi, bisa, kantor, jamur, merusak, dasar hukum, apakah, tantangan)."
+        "Match the document's language (English or Standard BM DBP; if BM use maklumat/boleh/pejabat/gambar/pemuliharaan, never Indonesian)."
     };
     let body = json!({
         "model": cfg.vision_model,
         "stream": false,
         "think": false,
         "keep_alive": "30m",
-        "options": { "temperature": 0.1, "num_predict": 420, "num_ctx": OLLAMA_UNIFORM_NUM_CTX },
+        "options": { "temperature": 0.1, "num_predict": 320, "num_ctx": OLLAMA_UNIFORM_NUM_CTX },
         "messages": [{
             "role": "user",
             "content": format!(
-                "Generate a concise archival description and structured summary of this document preserving its exact original context, roles, and meaning (pay strict attention to who acted on behalf of whom, e.g. 'bagi pihak X' means representing X). Include main purpose, key topics, people/organizations, dates, and events. Do NOT invent facts. {lang_rule}\n\nDOCUMENT:\n{clipped}"
+                "Write a concise archival summary preserving exact roles/meaning (e.g. 'bagi pihak X' = representing X). Include purpose, key topics, names, dates, and events. Do not invent facts. {lang_rule}\n\nDOCUMENT:\n{clipped}"
             )
         }]
     });
@@ -2134,6 +2134,17 @@ fn parse_llm_json_object(raw: &str) -> Option<Map<String, Value>> {
         .and_then(|v| v.as_object().cloned())
 }
 
+fn shared_ollama_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(45))
+            .pool_max_idle_per_host(4)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 /// Analyze an uploaded image or document file (PDF/DOCX/TXT/Image) and suggest archival fields
 /// (Category, Subject/Title, Year, Source, Script, Summary) using pure-Rust deterministic
 /// extraction + local Ollama `qwen3-vl:4b-instruct-16k` with graceful fallback.
@@ -2169,57 +2180,34 @@ pub async fn analyze_file_for_suggestions(
         .trim()
         .to_string();
 
-    // Call Ollama (`qwen3-vl:4b-instruct-16k`) for rich content understanding (image or text).
+    // Call Ollama (`qwen3-vl:4b-instruct-16k`) with think=false, keep_alive=30m, and compact JPEG
+    // for fast local inference without hidden reasoning token overhead.
     let mut ai_obj: Option<Map<String, Value>> = None;
     let mut ai_used = false;
-    if let Ok(client) = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(55))
-        .build()
     {
+        let client = shared_ollama_client();
         let cat_list = cat_names.join(", ");
         let prompt = if is_img {
             format!(
-                "Analyze this uploaded archival image (filename: '{filename}'). \
-Return ONLY a valid JSON object (no markdown) with keys: \
-\"category\" (choose ONE from: [{cat_list}]), \
-\"subject\" (concise archival title/subject), \
-\"year\" (4-digit Masihi year if visible, else empty string), \
-\"source\" (issuing agency, ministry, archive, publisher, or donor if visible, else empty string), \
-\"script_type\" (jawi/rumi/english/mixed/other), \
-\"summary\" (1-2 sentence archival description), \
-\"extracted_text\" (key readable text or caption from image)."
+                "Analyze archival image '{filename}'. Return ONLY JSON (no markdown): \
+{{\"category\":\"one of [{cat_list}]\",\"subject\":\"concise title\",\"year\":\"4-digit year or empty\",\
+\"source\":\"agency/donor or empty\",\"script_type\":\"jawi|rumi|english|mixed|other\",\
+\"summary\":\"1-2 sentence description\",\"extracted_text\":\"key readable text\"}}."
             )
         } else {
-            let excerpt: String = extracted_text.chars().take(3000).collect();
+            let excerpt: String = extracted_text.chars().take(2400).collect();
             format!(
-                "Analyze this uploaded archival document (filename: '{filename}'). \
-Return ONLY a valid JSON object (no markdown) with keys: \
-\"category\" (choose ONE from: [{cat_list}]), \
-\"subject\" (concise archival title/subject), \
-\"year\" (4-digit Masihi year if found, else empty string), \
-\"source\" (issuing agency, ministry, archive, author, or donor if found, else empty string), \
-\"script_type\" (jawi/rumi/english/mixed/other), \
-\"summary\" (1-2 sentence archival summary).\n\nDocument text:\n{excerpt}"
+                "Analyze archival document '{filename}'. Return ONLY JSON (no markdown): \
+{{\"category\":\"one of [{cat_list}]\",\"subject\":\"concise title\",\"year\":\"4-digit year or empty\",\
+\"source\":\"agency/author/donor or empty\",\"script_type\":\"jawi|rumi|english|mixed|other\",\
+\"summary\":\"1-2 sentence summary\"}}.\n\nText:\n{excerpt}"
             )
         };
 
         let message = if is_img {
             use base64::Engine as _;
-            let b64_img = if let Ok(img) = image::load_from_memory(bytes) {
-                let resized = if img.width() > 1024 || img.height() > 1024 {
-                    img.resize(1024, 1024, image::imageops::FilterType::Triangle)
-                } else {
-                    img
-                };
-                let mut out = Cursor::new(Vec::new());
-                if resized.write_to(&mut out, image::ImageFormat::Png).is_ok() {
-                    base64::engine::general_purpose::STANDARD.encode(out.into_inner())
-                } else {
-                    base64::engine::general_purpose::STANDARD.encode(bytes)
-                }
-            } else {
-                base64::engine::general_purpose::STANDARD.encode(bytes)
-            };
+            let b64_img = crate::vision_ops::encode_image_bytes_b64(bytes, 640, 80)
+                .unwrap_or_else(|_| base64::engine::general_purpose::STANDARD.encode(bytes));
             json!({
                 "role": "user",
                 "content": prompt,
@@ -2235,7 +2223,13 @@ Return ONLY a valid JSON object (no markdown) with keys: \
         let body = json!({
             "model": cfg.vision_model,
             "stream": false,
-            "options": { "num_ctx": OLLAMA_UNIFORM_NUM_CTX, "temperature": 0.1 },
+            "think": false,
+            "keep_alive": "30m",
+            "options": {
+                "num_ctx": OLLAMA_UNIFORM_NUM_CTX,
+                "temperature": 0.1,
+                "num_predict": 220
+            },
             "messages": [message],
         });
 
@@ -2465,46 +2459,31 @@ pub async fn suggest_image_description(
         (0, 0, false)
     };
 
-    if let Ok(client) = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(45))
-        .build()
     {
         use base64::Engine as _;
-        let b64_img = if let Ok(img) = image::load_from_memory(bytes) {
-            let resized = if img.width() > 896 || img.height() > 896 {
-                img.resize(896, 896, image::imageops::FilterType::Triangle)
-            } else {
-                img
-            };
-            let mut out = Cursor::new(Vec::new());
-            if resized.write_to(&mut out, image::ImageFormat::Png).is_ok() {
-                base64::engine::general_purpose::STANDARD.encode(out.into_inner())
-            } else {
-                base64::engine::general_purpose::STANDARD.encode(bytes)
-            }
-        } else {
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        };
+        let client = shared_ollama_client();
+        let b64_img = crate::vision_ops::encode_image_bytes_b64(bytes, 512, 78)
+            .unwrap_or_else(|_| base64::engine::general_purpose::STANDARD.encode(bytes));
 
         let role_ctx = match entity_type {
-            "location" => format!("archival photograph of location '{context_label}'"),
-            "document" => format!("digitized archival document image from '{context_label}'"),
-            _ => format!("reference portrait/photograph of '{context_label}'"),
+            "location" => format!("archival photo of location '{context_label}'"),
+            "document" => format!("scanned archival page from '{context_label}'"),
+            _ => format!("reference photo of '{context_label}'"),
         };
 
         let prompt = format!(
-            "Describe this {role_ctx} in 1 to 2 concise, factual archival sentences (max 40 words). \
-Focus on visible clothing/headwear, pose or action, background/setting, and lighting. \
-Do NOT include markdown, quotes, bullet points, or introductory phrases like 'This image shows'."
+            "Describe this {role_ctx} in 1-2 factual sentences (max 35 words): clothing/headwear, pose, background, lighting. Plain prose only, no markdown or preamble."
         );
 
         let body = json!({
             "model": cfg.vision_model,
             "stream": false,
+            "think": false,
+            "keep_alive": "30m",
             "options": {
                 "num_ctx": OLLAMA_UNIFORM_NUM_CTX,
                 "temperature": 0.15,
-                "num_predict": 140
+                "num_predict": 90
             },
             "messages": [{
                 "role": "user",
@@ -2518,7 +2497,6 @@ Do NOT include markdown, quotes, bullet points, or introductory phrases like 'Th
             && let Ok(val) = resp.json::<Value>().await
             && let Some(raw) = val["message"]["content"].as_str()
         {
-            // Strip optional <think>...</think> blocks if present
             let cleaned = if let Some(end_idx) = raw.rfind("</think>") {
                 &raw[end_idx + "</think>".len()..]
             } else {
