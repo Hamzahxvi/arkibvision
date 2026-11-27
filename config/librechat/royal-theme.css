@@ -406,11 +406,11 @@ html.dark .rf-err-banner {
 }
 .rf-section-head {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-bottom: 18px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 .rf-section-head h2 {
   font-size: 1.2rem;
