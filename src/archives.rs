@@ -595,6 +595,7 @@ pub fn save_document(
         "folio_number",
         "hijri_date",
         "gregorian_date_masihi",
+        "jawi_text",
         "summary",
         "extracted_text",
         "notes",

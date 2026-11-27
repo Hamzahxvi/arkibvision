@@ -2950,3 +2950,27 @@ html:not(.dark) .rf-aud-rec {
 .rf-aud-ai-bullet {
   padding: 3px 0 3px 6px;
 }
+
+/* ─── Preserved Jawi RTL Text inside Document Cards, Admin Modal & Guest View ── */
+:is(#rf-admin-stage, #arkib-admin, .rf-modal-backdrop, .arkib-modal) .rf-jawi-doc-ta,
+.rf-jawi-preview {
+  direction: rtl !important;
+  text-align: right !important;
+  font-family: "Amiri", "Scheherazade New", "Traditional Arabic", "Arial", serif !important;
+  font-size: 1.26rem !important;
+  line-height: 1.85 !important;
+  min-height: 108px;
+}
+.rf-jawi-card-snippet {
+  direction: rtl;
+  text-align: right;
+  font-family: "Amiri", "Scheherazade New", "Traditional Arabic", "Arial", serif !important;
+  font-size: 1.04rem;
+  line-height: 1.7;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
+  margin-bottom: 6px !important;
+}

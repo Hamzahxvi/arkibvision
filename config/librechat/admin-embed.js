@@ -1866,7 +1866,8 @@
       (d.subject ? '<div class="rf-guest-kv"><span>Subject</span><strong>' + esc(d.subject) + '</strong></div>' : '') +
       (d.script_type ? '<div class="rf-guest-kv"><span>Script / Language</span><strong>' + esc(d.script_type) + '</strong></div>' : '') +
       (d.summary ? '<div class="rf-guest-kv rf-guest-kv-full"><span>Summary</span><p style="margin:4px 0 0;white-space:pre-wrap;line-height:1.55">' + esc(d.summary) + '</p></div>' : '') +
-      (d.extracted_text ? '<div class="rf-guest-kv rf-guest-kv-full"><span>Transcribed / Extracted Text</span><pre class="rf-guest-pre">' + esc(d.extracted_text) + '</pre></div>' : '') +
+      (d.jawi_text ? '<div class="rf-guest-kv rf-guest-kv-full"><span>Original Jawi Text (Teks Jawi Asal · RTL)</span><pre class="rf-guest-pre rf-jawi-preview" dir="rtl">' + esc(d.jawi_text) + '</pre></div>' : '') +
+      (d.extracted_text ? '<div class="rf-guest-kv rf-guest-kv-full"><span>Transcribed / Extracted Text (Rumi)</span><pre class="rf-guest-pre">' + esc(d.extracted_text) + '</pre></div>' : '') +
       '</div>' +
       '<div class="rf-actions" style="margin:14px 0">' +
       '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl('/guest/api/documents/' + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx">📄 Download DOCX</a>' +
@@ -1937,7 +1938,7 @@
         if (srcVal !== state.docSourceFilter) return false;
       }
       if (!q) return true;
-      var hay = [d.title, d.subject, d.category, d.year, d.author_or_source, d.group, d.script_type, d.reference_code, d.origin_location, d.summary, String(d.extracted_text || '').slice(0, 600), d.notes].join(' ').toLowerCase();
+      var hay = [d.title, d.subject, d.category, d.year, d.author_or_source, d.group, d.script_type, d.reference_code, d.origin_location, d.summary, d.jawi_text, String(d.extracted_text || '').slice(0, 600), d.notes].join(' ').toLowerCase();
       return hay.indexOf(q) !== -1;
     });
 
@@ -2085,6 +2086,7 @@
         return '<article class="rf-card">' + thumbHtml + '<div class="rf-card-body">' +
           '<h3 title="' + esc(d.title) + '">' + esc(d.title) + '</h3>' +
           '<div class="rf-sub" title="' + esc(sub) + '">' + esc(sub) + '</div>' +
+          (d.jawi_text ? '<p class="rf-desc rf-jawi-card-snippet" dir="rtl" title="Preserved Original Jawi Text">' + esc(d.jawi_text) + '</p>' : '') +
           '<p class="rf-desc">' + esc(d.summary || d.extracted_text || 'No summary yet.') + '</p>' +
           '<div class="rf-meta">' + (d.file_count || 0) + ' file(s)' + verdict + revBadge + '</div>' +
           actionsHtml + '</div></article>';
@@ -2331,11 +2333,12 @@
       '<div class="rf-field"><label>Script / Writing System</label><select class="rf-select" id="rf-d-script">' +
       scripts.map(function (s) { return '<option value="' + esc(s) + '"' + (doc && doc.script_type && doc.script_type.toLowerCase() === s.toLowerCase() ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') +
       '</select></div>' +
-      '<div class="rf-field"><label>Full Date / Era</label><input class="rf-input" id="rf-d-date" placeholder="e.g. 31 Aug 1957 or 13 Muharam 1324H" value="' + esc(doc ? doc.date_created || '' : '') + '"/></div>' +
+      '<div class="rf-field"><label>Full Date / Era</label><input class="rf-input" id="rf-d-date" placeholder="e.g. 31 Aug 1957 or 13 Muharam 1324H" value="' + esc(doc ? (doc.date_created || [doc.hijri_date, doc.gregorian_date_masihi].filter(Boolean).join(' · ')) : '') + '"/></div>' +
       '<div class="rf-field full"><label>Origin / Location</label><input class="rf-input" id="rf-d-orig" value="' + esc(doc ? doc.origin_location || '' : '') + '"/></div>' +
       (doc ? '<div class="rf-field full"><label>Uploaded Files (duplicate &amp; change-tracked)</label><div id="rf-d-files" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:6px"></div><input class="rf-input" id="rf-d-addfile" type="file" accept=".txt,.md,.csv,.json,.html,.htm,.xml,.pdf,.docx,.jpg,.jpeg,.png,.webp,.bmp"/><div id="rf-d-authinfo" style="font-size:.8rem;margin-top:6px"></div></div>' : '') +
       '<div class="rf-field full"><div style="display:flex;justify-content:space-between;align-items:center"><label>Summary</label>' + (doc ? '<button type="button" class="rf-btn rf-btn-ok rf-btn-sm" id="rf-d-sum-btn">✨ Auto-Summarize</button>' : '') + '</div><textarea class="rf-textarea" id="rf-d-sum">' + esc(doc ? doc.summary || '' : '') + '</textarea></div>' +
-      '<div class="rf-field full"><label>Digitized / Extracted Text</label><textarea class="rf-textarea" id="rf-d-text" style="min-height:110px">' + esc(doc ? doc.extracted_text || '' : '') + '</textarea></div>' +
+      '<div class="rf-field arkib-field full"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label class="arkib-label" for="rf-d-jawi" style="margin-bottom:0">✍️ Original Jawi / Script Text (Teks Jawi Asal · RTL — Preserved)</label><button type="button" class="rf-btn rf-btn-sm" id="rf-d-decode-jawi-btn" title="Transliterate Jawi into Rumi below">🔄 Decode Jawi → Rumi</button></div><textarea class="rf-textarea arkib-input rf-jawi-doc-ta" id="rf-d-jawi" dir="rtl" placeholder="توليس اتاو سيمڤن تيکس جاوي اصل دسيني...">' + esc(doc ? doc.jawi_text || '' : '') + '</textarea></div>' +
+      '<div class="rf-field arkib-field full"><label class="arkib-label" for="rf-d-text">Digitized / Transcribed Text (Rumi)</label><textarea class="rf-textarea arkib-input" id="rf-d-text" style="min-height:110px">' + esc(doc ? doc.extracted_text || '' : '') + '</textarea></div>' +
       '<div class="rf-field"><label>Key Topics (comma-separated)</label><input class="rf-input" id="rf-d-topics" value="' + esc(doc && Array.isArray(doc.key_topics) ? doc.key_topics.join(', ') : '') + '"/></div>' +
       '<div class="rf-field"><label>Key Names (comma-separated)</label><input class="rf-input" id="rf-d-names" value="' + esc(doc && Array.isArray(doc.key_names) ? doc.key_names.join(', ') : '') + '"/></div>' +
       '<div class="rf-field full"><label>Key Dates (comma-separated)</label><input class="rf-input" id="rf-d-dates" value="' + esc(doc && Array.isArray(doc.key_dates) ? doc.key_dates.join(', ') : '') + '"/></div>' +
@@ -2535,6 +2538,39 @@
       };
     }
 
+    var decodeJawiBtn = document.getElementById('rf-d-decode-jawi-btn');
+    if (decodeJawiBtn) {
+      decodeJawiBtn.onclick = async function () {
+        var jawiEl = document.getElementById('rf-d-jawi');
+        var raw = jawiEl ? jawiEl.value.trim() : '';
+        if (!raw) {
+          setFieldError(jawiEl, 'Enter Jawi text first to decode.');
+          if (jawiEl) jawiEl.focus();
+          return;
+        }
+        decodeJawiBtn.disabled = true;
+        decodeJawiBtn.textContent = '⏳ Decoding…';
+        try {
+          var res = await api('/canvas/api/jawi-preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jawi_text: raw })
+          });
+          if (res.ok && res.data && res.data.standard_malay_rumi_text) {
+            document.getElementById('rf-d-text').value = res.data.standard_malay_rumi_text;
+            toast('Decoded Jawi → Standard BM Rumi');
+          } else {
+            toast((res.data && res.data.reason) || 'Decode failed', false);
+          }
+        } catch (e) {
+          toast('Decode error: ' + e.message, false);
+        } finally {
+          decodeJawiBtn.disabled = false;
+          decodeJawiBtn.textContent = '🔄 Decode Jawi → Rumi';
+        }
+      };
+    }
+
     document.getElementById('rf-d-form').onsubmit = async function (ev) {
       ev.preventDefault();
       var dForm = ev.target;
@@ -2557,6 +2593,7 @@
         origin_location: document.getElementById('rf-d-orig').value,
         author_or_source: document.getElementById('rf-d-auth').value,
         summary: document.getElementById('rf-d-sum').value,
+        jawi_text: document.getElementById('rf-d-jawi').value,
         extracted_text: document.getElementById('rf-d-text').value,
         key_topics: document.getElementById('rf-d-topics').value,
         key_names: document.getElementById('rf-d-names').value,
