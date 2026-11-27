@@ -430,11 +430,18 @@ pub fn list_documents(cfg: &AppConfig) -> Vec<Value> {
 pub fn extract_four_digit_year(s: &str) -> Option<String> {
     static YEAR_RE: OnceLock<Regex> = OnceLock::new();
     let re = YEAR_RE.get_or_init(|| Regex::new(r"\b(1[0-9]{3}|20[0-9]{2})\b").expect("year regex"));
-    re.captures(s).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+    re.captures(s)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
 }
 
 pub fn derive_document_year(meta: &Map<String, Value>) -> String {
-    for key in ["year", "gregorian_date_masihi", "date_created", "hijri_date"] {
+    for key in [
+        "year",
+        "gregorian_date_masihi",
+        "date_created",
+        "hijri_date",
+    ] {
         if let Some(val) = meta.get(key).and_then(Value::as_str)
             && let Some(y) = extract_four_digit_year(val)
         {
@@ -2027,17 +2034,44 @@ fn guess_category_deterministic(
             .map(|c| c.name.clone())
             .unwrap_or_else(|| fallback.to_string())
     };
-    if lower.contains("peta") || lower.contains("map") || lower.contains("pelan") || lower.contains("survey") {
+    if lower.contains("peta")
+        || lower.contains("map")
+        || lower.contains("pelan")
+        || lower.contains("survey")
+    {
         return (find_name("peta", "Peta"), "Matched map/plan keywords");
     }
-    if lower.contains("warta") || lower.contains("gazette") || lower.contains("proclamation") || lower.contains("perisytiharan") {
-        return (find_name("warta", "Warta"), "Matched gazette/proclamation keywords");
+    if lower.contains("warta")
+        || lower.contains("gazette")
+        || lower.contains("proclamation")
+        || lower.contains("perisytiharan")
+    {
+        return (
+            find_name("warta", "Warta"),
+            "Matched gazette/proclamation keywords",
+        );
     }
-    if lower.contains("laporan") || lower.contains("report") || lower.contains("annual") || lower.contains("kajian") {
-        return (find_name("laporan", "Laporan"), "Matched report/study keywords");
+    if lower.contains("laporan")
+        || lower.contains("report")
+        || lower.contains("annual")
+        || lower.contains("kajian")
+    {
+        return (
+            find_name("laporan", "Laporan"),
+            "Matched report/study keywords",
+        );
     }
-    if lower.contains("surat") || lower.contains("memo") || lower.contains("pekeliling") || lower.contains("letter") || lower.contains("ruj.") || lower.contains("bil.") {
-        return (find_name("surat_rasmi", "Surat Rasmi"), "Matched official correspondence keywords");
+    if lower.contains("surat")
+        || lower.contains("memo")
+        || lower.contains("pekeliling")
+        || lower.contains("letter")
+        || lower.contains("ruj.")
+        || lower.contains("bil.")
+    {
+        return (
+            find_name("surat_rasmi", "Surat Rasmi"),
+            "Matched official correspondence keywords",
+        );
     }
     if lower.contains("hikayat")
         || lower.contains("manuskrip")
@@ -2046,15 +2080,31 @@ fn guess_category_deterministic(
         || lower.contains("watikah")
         || text.chars().any(|c| ('\u{0600}'..='\u{06FF}').contains(&c))
     {
-        return (find_name("manuskrip", "Manuskrip"), "Detected Jawi/manuscript script or terms");
+        return (
+            find_name("manuskrip", "Manuskrip"),
+            "Detected Jawi/manuscript script or terms",
+        );
     }
     if is_image && text.trim().len() < 40 {
-        return (find_name("gambar", "Gambar"), "Uploaded image without dense body text");
+        return (
+            find_name("gambar", "Gambar"),
+            "Uploaded image without dense body text",
+        );
     }
-    if lower.contains("akhbar") || lower.contains("newspaper") || lower.contains("buku") || lower.contains("risalah") {
-        return (find_name("bahan_bercetak", "Bahan Bercetak"), "Matched printed publication keywords");
+    if lower.contains("akhbar")
+        || lower.contains("newspaper")
+        || lower.contains("buku")
+        || lower.contains("risalah")
+    {
+        return (
+            find_name("bahan_bercetak", "Bahan Bercetak"),
+            "Matched printed publication keywords",
+        );
     }
-    (find_name("lain_lain", "Lain-lain"), "General archival default")
+    (
+        find_name("lain_lain", "Lain-lain"),
+        "General archival default",
+    )
 }
 
 fn guess_source_deterministic(text: &str) -> String {
@@ -2098,11 +2148,8 @@ pub async fn analyze_file_for_suggestions(
         .map(|s| s.to_ascii_lowercase())
         .unwrap_or_else(|| "bin".to_string());
     let is_img = is_image_ext(Path::new(filename));
-    let tmp_path = std::env::temp_dir().join(format!(
-        "arkib_suggest_{}.{}",
-        Uuid::new_v4().simple(),
-        ext
-    ));
+    let tmp_path =
+        std::env::temp_dir().join(format!("arkib_suggest_{}.{}", Uuid::new_v4().simple(), ext));
     fs::write(&tmp_path, bytes).map_err(|e| format!("Failed staging file for analysis: {e}"))?;
 
     let mut extracted_text = if !is_img {
@@ -2224,13 +2271,12 @@ Return ONLY a valid JSON object (no markdown) with keys: \
 
     // Match AI category to maintainable registry, fallback to deterministic match
     let raw_ai_cat = ai_str("category");
-    let (category, cat_reason) = if let Some(resolved) =
-        crate::categories::resolve_category(cfg, &raw_ai_cat)
-    {
-        (resolved.name, "AI content classification")
-    } else {
-        (det_cat, det_cat_reason)
-    };
+    let (category, cat_reason) =
+        if let Some(resolved) = crate::categories::resolve_category(cfg, &raw_ai_cat) {
+            (resolved.name, "AI content classification")
+        } else {
+            (det_cat, det_cat_reason)
+        };
 
     let subject = {
         let s = ai_str("subject");
@@ -2285,17 +2331,18 @@ Return ONLY a valid JSON object (no markdown) with keys: \
     };
 
     let mut suggested_fields = Vec::new();
-    let push_field = |list: &mut Vec<Value>, field: &str, label: &str, val: &str, conf: &str, reason: &str| {
-        if !val.trim().is_empty() {
-            list.push(json!({
-                "field": field,
-                "label": label,
-                "value": val.trim(),
-                "confidence": conf,
-                "reason": reason,
-            }));
-        }
-    };
+    let push_field =
+        |list: &mut Vec<Value>, field: &str, label: &str, val: &str, conf: &str, reason: &str| {
+            if !val.trim().is_empty() {
+                list.push(json!({
+                    "field": field,
+                    "label": label,
+                    "value": val.trim(),
+                    "confidence": conf,
+                    "reason": reason,
+                }));
+            }
+        };
     push_field(
         &mut suggested_fields,
         "category",
@@ -2310,15 +2357,27 @@ Return ONLY a valid JSON object (no markdown) with keys: \
         "Subject / Title",
         &subject,
         if ai_used { "high" } else { "medium" },
-        if ai_used { "Extracted from content" } else { "Derived from filename" },
+        if ai_used {
+            "Extracted from content"
+        } else {
+            "Derived from filename"
+        },
     );
     push_field(
         &mut suggested_fields,
         "year",
         "Year",
         &year,
-        if !gregorian_date_masihi.is_empty() || ai_used { "high" } else { "medium" },
-        if !hijri_date.is_empty() { "Converted from Hijri colophon" } else { "Detected in file content" },
+        if !gregorian_date_masihi.is_empty() || ai_used {
+            "high"
+        } else {
+            "medium"
+        },
+        if !hijri_date.is_empty() {
+            "Converted from Hijri colophon"
+        } else {
+            "Detected in file content"
+        },
     );
     push_field(
         &mut suggested_fields,
@@ -2342,7 +2401,11 @@ Return ONLY a valid JSON object (no markdown) with keys: \
         "Summary",
         &summary,
         if ai_used { "high" } else { "medium" },
-        if ai_used { "AI content summary" } else { "Extractive summary" },
+        if ai_used {
+            "AI content summary"
+        } else {
+            "Extractive summary"
+        },
     );
 
     Ok(json!({

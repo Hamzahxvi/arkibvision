@@ -1633,8 +1633,17 @@ impl ArkibService {
         };
         match enhance_archival_image(&self.cfg, &resolved, mode) {
             Ok(mut res) => {
-                if let Some(out_name) = res.get("enhanced_filename").and_then(Value::as_str).map(String::from) {
-                    let enh_path = self.cfg.librechat_dir.join("images").join("enhanced").join(&out_name);
+                if let Some(out_name) = res
+                    .get("enhanced_filename")
+                    .and_then(Value::as_str)
+                    .map(String::from)
+                {
+                    let enh_path = self
+                        .cfg
+                        .librechat_dir
+                        .join("images")
+                        .join("enhanced")
+                        .join(&out_name);
                     if let (Ok(b_bytes), Ok(a_bytes)) = (fs::read(&resolved), fs::read(&enh_path)) {
                         let b_name = resolved
                             .file_name()
@@ -1696,8 +1705,14 @@ impl ArkibService {
             let (Ok(b_bytes), Ok(a_bytes)) = (fs::read(&b_resolved), fs::read(&a_resolved)) else {
                 return json!({ "status": "error", "reason": "Could not read before or after file bytes." });
             };
-            let b_name = b_resolved.file_name().and_then(|s| s.to_str()).unwrap_or("before.bin");
-            let a_name = a_resolved.file_name().and_then(|s| s.to_str()).unwrap_or("after.bin");
+            let b_name = b_resolved
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("before.bin");
+            let a_name = a_resolved
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("after.bin");
             let cmp_title = if title.trim().is_empty() {
                 format!("{b_name} → {a_name}")
             } else {
@@ -1732,12 +1747,18 @@ impl ArkibService {
             let q_lc = q_doc.to_ascii_lowercase();
             let matched = docs.iter().find(|d| {
                 d["slug"].as_str().unwrap_or("").eq_ignore_ascii_case(&q_lc)
-                    || d["title"].as_str().unwrap_or("").to_ascii_lowercase().contains(&q_lc)
+                    || d["title"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .contains(&q_lc)
             });
             if let Some(doc) = matched {
                 let slug = doc["slug"].as_str().unwrap_or("").to_string();
                 let doc_title = doc["title"].as_str().unwrap_or(&slug).to_string();
-                if let Ok(cmp) = crate::compare::build_archived_document_comparison(&self.cfg, &slug) {
+                if let Ok(cmp) =
+                    crate::compare::build_archived_document_comparison(&self.cfg, &slug)
+                {
                     let link = format!(
                         "[Open Before/After Comparison Studio](#arkib-canvas:compare:doc_{slug})"
                     );

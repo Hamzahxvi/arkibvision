@@ -230,10 +230,9 @@ pub fn update_category(
     if let Some(n) = new_name.map(str::trim).filter(|s| !s.is_empty()) {
         let candidate_slug = category_slug(n);
         if candidate_slug != old_slug
-            && cats
-                .iter()
-                .enumerate()
-                .any(|(i, c)| i != idx && (c.slug == candidate_slug || c.name.eq_ignore_ascii_case(n)))
+            && cats.iter().enumerate().any(|(i, c)| {
+                i != idx && (c.slug == candidate_slug || c.name.eq_ignore_ascii_case(n))
+            })
         {
             return Err(format!("Another category named '{n}' already exists."));
         }
@@ -256,12 +255,8 @@ pub fn update_category(
     // Cascade category rename to documents that referenced old_name or old_slug.
     let mut updated_docs = 0usize;
     if updated.name != old_name || updated.slug != old_slug {
-        updated_docs = rewrite_document_categories(
-            &cfg.documents_dir,
-            &old_slug,
-            &old_name,
-            &updated.name,
-        );
+        updated_docs =
+            rewrite_document_categories(&cfg.documents_dir, &old_slug, &old_name, &updated.name);
     }
 
     Ok((updated, updated_docs))
@@ -284,7 +279,9 @@ pub fn delete_category(
         .filter(|s| !s.is_empty())
         .and_then(|target| {
             cats.iter()
-                .find(|c| c.slug.eq_ignore_ascii_case(target) || c.name.eq_ignore_ascii_case(target))
+                .find(|c| {
+                    c.slug.eq_ignore_ascii_case(target) || c.name.eq_ignore_ascii_case(target)
+                })
                 .map(|c| c.name.clone())
         })
         .unwrap_or_default();
@@ -368,8 +365,13 @@ mod tests {
     #[test]
     fn category_crud_and_document_cascade() {
         let cfg = temp_cfg();
-        let created = create_category(&cfg, "Perjanjian Diraja", Some("#14b8a6"), Some("Royal treaties"))
-            .expect("create category");
+        let created = create_category(
+            &cfg,
+            "Perjanjian Diraja",
+            Some("#14b8a6"),
+            Some("Royal treaties"),
+        )
+        .expect("create category");
         assert_eq!(created.slug, "perjanjian_diraja");
 
         // Create sample document referencing the new category
@@ -381,9 +383,14 @@ mod tests {
         )
         .unwrap();
 
-        let (renamed, count) =
-            update_category(&cfg, "perjanjian_diraja", Some("Watikah Diraja"), None, None)
-                .expect("rename category");
+        let (renamed, count) = update_category(
+            &cfg,
+            "perjanjian_diraja",
+            Some("Watikah Diraja"),
+            None,
+            None,
+        )
+        .expect("rename category");
         assert_eq!(renamed.slug, "watikah_diraja");
         assert_eq!(count, 1);
 

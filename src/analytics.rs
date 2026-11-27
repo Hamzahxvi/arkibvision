@@ -49,6 +49,19 @@ pub fn append_behavior_event(cfg: &AppConfig, ev: &BehaviorEvent) {
     {
         let _ = writeln!(file, "{line}");
     }
+    // Bounded log compaction: keep latest 2,500 events when file exceeds 1.5 MB.
+    if fs::metadata(&cfg.analytics_log_file).is_ok_and(|m| m.len() > 1_500_000)
+        && let Ok(raw) = fs::read_to_string(&cfg.analytics_log_file)
+    {
+        let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
+        if lines.len() > 2500 {
+            let trimmed = lines[lines.len() - 2500..].join("\n") + "\n";
+            let tmp = cfg.analytics_log_file.with_extension("jsonl.tmp");
+            if fs::write(&tmp, trimmed).is_ok() {
+                let _ = fs::rename(&tmp, &cfg.analytics_log_file);
+            }
+        }
+    }
 }
 
 pub fn classify_tool_feature(tool_name: &str) -> &'static str {
@@ -270,18 +283,124 @@ pub fn load_behavior_events(cfg: &AppConfig, max_events: usize) -> Vec<BehaviorE
 fn is_stopword(w: &str) -> bool {
     const STOPS: &[&str] = &[
         // English
-        "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "what", "who",
-        "where", "when", "why", "how", "can", "you", "please", "tell", "show", "find", "search",
-        "about", "into", "have", "has", "had", "not", "but", "all", "any", "get", "check", "read",
-        "image", "file", "photo", "picture", "text", "translate", "convert", "open", "list",
-        "give", "help", "make", "need", "want", "more", "some", "there", "their", "they", "them",
-        "will", "would", "could", "should", "does", "did", "been", "being", "than", "then", "also",
+        "the",
+        "and",
+        "for",
+        "with",
+        "that",
+        "this",
+        "from",
+        "are",
+        "was",
+        "were",
+        "what",
+        "who",
+        "where",
+        "when",
+        "why",
+        "how",
+        "can",
+        "you",
+        "please",
+        "tell",
+        "show",
+        "find",
+        "search",
+        "about",
+        "into",
+        "have",
+        "has",
+        "had",
+        "not",
+        "but",
+        "all",
+        "any",
+        "get",
+        "check",
+        "read",
+        "image",
+        "file",
+        "photo",
+        "picture",
+        "text",
+        "translate",
+        "convert",
+        "open",
+        "list",
+        "give",
+        "help",
+        "make",
+        "need",
+        "want",
+        "more",
+        "some",
+        "there",
+        "their",
+        "they",
+        "them",
+        "will",
+        "would",
+        "could",
+        "should",
+        "does",
+        "did",
+        "been",
+        "being",
+        "than",
+        "then",
+        "also",
         // Bahasa Malaysia
-        "yang", "dan", "ini", "itu", "untuk", "dengan", "pada", "dari", "daripada", "dalam", "ada",
-        "tidak", "atau", "juga", "akan", "telah", "boleh", "sila", "tolong", "baca", "cari",
-        "tunjuk", "siapa", "apa", "bila", "mana", "bagaimana", "kenapa", "mengapa", "saya", "kami",
-        "kita", "anda", "mereka", "gambar", "dokumen", "fail", "teks", "tukar", "semak", "lihat",
-        "lagi", "satu", "dua", "semua", "bagi", "oleh", "kerana", "sebagai", "kepada", "tentang",
+        "yang",
+        "dan",
+        "ini",
+        "itu",
+        "untuk",
+        "dengan",
+        "pada",
+        "dari",
+        "daripada",
+        "dalam",
+        "ada",
+        "tidak",
+        "atau",
+        "juga",
+        "akan",
+        "telah",
+        "boleh",
+        "sila",
+        "tolong",
+        "baca",
+        "cari",
+        "tunjuk",
+        "siapa",
+        "apa",
+        "bila",
+        "mana",
+        "bagaimana",
+        "kenapa",
+        "mengapa",
+        "saya",
+        "kami",
+        "kita",
+        "anda",
+        "mereka",
+        "gambar",
+        "dokumen",
+        "fail",
+        "teks",
+        "tukar",
+        "semak",
+        "lihat",
+        "lagi",
+        "satu",
+        "dua",
+        "semua",
+        "bagi",
+        "oleh",
+        "kerana",
+        "sebagai",
+        "kepada",
+        "tentang",
     ];
     STOPS.contains(&w)
 }
@@ -295,7 +414,10 @@ fn extract_topic_tokens(text: &str) -> Vec<String> {
                 cur.push(lc);
             }
         } else if !cur.is_empty() {
-            if cur.chars().count() >= 3 && !cur.chars().all(|c| c.is_ascii_digit()) && !is_stopword(&cur) {
+            if cur.chars().count() >= 3
+                && !cur.chars().all(|c| c.is_ascii_digit())
+                && !is_stopword(&cur)
+            {
                 words.push(cur.clone());
             }
             cur.clear();
@@ -687,7 +809,11 @@ pub fn build_behavior_analytics(cfg: &AppConfig) -> Value {
     if let Some(top_f) = tool_usage.first() {
         let fname = top_f["name"].as_str().unwrap_or("");
         let cnt = top_f["count"].as_u64().unwrap_or(0);
-        let i_lbl = if cnt == 1 { "interaction" } else { "interactions" };
+        let i_lbl = if cnt == 1 {
+            "interaction"
+        } else {
+            "interactions"
+        };
         admin_insights.push(format!(
             "Most Used Capability: \"{fname}\" leads user demand ({cnt} {i_lbl})."
         ));
@@ -759,8 +885,7 @@ mod tests {
 
     fn temp_cfg() -> AppConfig {
         let mut cfg = AppConfig::load();
-        let root =
-            std::env::temp_dir().join(format!("arkib_ana_test_{}", Uuid::new_v4().simple()));
+        let root = std::env::temp_dir().join(format!("arkib_ana_test_{}", Uuid::new_v4().simple()));
         cfg.analytics_log_file = root.join("behavior_analytics.jsonl");
         cfg
     }
@@ -768,7 +893,11 @@ mod tests {
     #[test]
     fn behavior_analytics_ranks_hot_topics_and_chatbot_questions() {
         let cfg = temp_cfg();
-        record_chat_prompt(&cfg, "Tolong baca manuskrip Jawi Surat Sultan 1324H", "guest");
+        record_chat_prompt(
+            &cfg,
+            "Tolong baca manuskrip Jawi Surat Sultan 1324H",
+            "guest",
+        );
         record_chat_prompt(&cfg, "Apa isi Surat Sultan 1324H dalam Jawi?", "guest");
         record_mcp_tool_usage(
             &cfg,
@@ -792,10 +921,18 @@ mod tests {
         assert_eq!(res["summary"]["chatbot_questions"], 3);
         let topics = res["hot_topics"].as_array().unwrap();
         assert!(!topics.is_empty());
-        assert!(topics
-            .iter()
-            .any(|t| t["topic"].as_str().unwrap_or("").to_ascii_lowercase().contains("jawi")
-                || t["topic"].as_str().unwrap_or("").to_ascii_lowercase().contains("surat")));
+        assert!(topics.iter().any(|t| {
+            t["topic"]
+                .as_str()
+                .unwrap_or("")
+                .to_ascii_lowercase()
+                .contains("jawi")
+                || t["topic"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_ascii_lowercase()
+                    .contains("surat")
+        }));
         assert_eq!(res["daily_trend"].as_array().unwrap().len(), 7);
 
         let _ = fs::remove_dir_all(cfg.analytics_log_file.parent().unwrap());

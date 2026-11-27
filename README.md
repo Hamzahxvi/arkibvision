@@ -1,6 +1,6 @@
-# ArkibVision Enterprise Vision, Biometric Identity & Archival Forensics Platform (Pure Rust)
+# ArkibVision Enterprise Archival Vision, Biometrics, Forensics & Governance Platform (Pure Rust)
 
-An **air-gapped, 100% on-premise multimodal AI & archival governance platform** written in **100% safe Rust (`#![forbid(unsafe_code)]`, 0% Python)** that integrates **Biometric Face Recognition**, **Privacy-Aware Identity & Visual Photo Retrieval**, **Historical Script OCR (Jawi, Pallava, Kawi, Rencong)**, **4-Layer Deep Authenticity & AI Watermark Forensics**, **Archival Conservation / Damage Healing & Digital Enhancement**, **Managed Location & Document Folders**, and **Live System Performance Monitoring** natively inside **LibreChat** (`http://localhost:3080`) — including the integrated **Admin Portal** right under the **MCP Settings** icon — powered by a single compiled **Rust Axum + Tokio MCP SSE & Headless JSON API Server** (`http://0.0.0.0:8005/sse`).
+An **air-gapped, 100% on-premise multimodal AI & archival governance platform** written in **100% Pure Safe Rust (`#![forbid(unsafe_code)]`, 0% Python)** that integrates **Biometric Face Recognition**, **Privacy-Aware Identity & Visual Photo Retrieval**, **Historical Script OCR (Jawi, Pallava, Kawi, Rencong) + FST DBP Lexicon & Hijri→Masihi Colophon Parsing**, **4-Layer Deep Authenticity & AI Watermark Forensics**, **Archival Conservation / Damage Healing & Enhancement**, **Split-Screen Arkib Canvas (Jawi OCR Workbench, Identity Enrollment, Interactive Before/After Comparison Studio)**, **Pure-Rust DOCX/PDF Export**, **Audit Rules Engine & Outlier Detection**, **Before/After Revision Tracking**, and **User Behavior & Hot-Topics SVG Analytics** natively inside **LibreChat** (`http://localhost:3080`) — powered by a single compiled **Rust Axum + Tokio MCP SSE & Headless JSON API Server** (`http://0.0.0.0:8005/sse`).
 
 ![ArkibVision Pipeline Architecture Diagram](reports/pipeline_diagram.svg)
 
@@ -9,47 +9,38 @@ An **air-gapped, 100% on-premise multimodal AI & archival governance platform** 
 ## Table of Contents
 1. [Key Features](#1-key-features)
 2. [Pure-Rust Architecture & Performance Optimizations](#2-pure-rust-architecture--performance-optimizations)
-3. [4-Layer Deep Authenticity & AI Watermark Engine](#3-4-layer-deep-authenticity--ai-watermark-engine)
-4. [System Requirements & Prerequisites](#4-system-requirements--prerequisites)
-5. [Build & Setup Guide](#5-build--setup-guide)
-6. [Running, Stopping & CLI Tools](#6-running-stopping--cli-tools)
-7. [Core Processing Pipelines & 24 MCP Tools](#7-core-processing-pipelines--24-mcp-tools)
-8. [Integrated Admin Portal & Safe UX Governance](#8-integrated-admin-portal--safe-ux-governance)
-9. [Client-Friendly Chatbox Prompts (English & Bahasa Melayu)](#9-client-friendly-chatbox-prompts-english--bahasa-melayu)
-10. [Project Structure](#10-project-structure)
-11. [Configuration & Environment Variables](#11-configuration--environment-variables)
-12. [Testing & Verification](#12-testing--verification)
+3. [Split-Screen Arkib Canvas (3 Interactive Modes)](#3-split-screen-arkib-canvas-3-interactive-modes)
+4. [4-Layer Deep Authenticity & AI Watermark Engine](#4-4-layer-deep-authenticity--ai-watermark-engine)
+5. [Audit Management, Anomaly Detection & User Insights](#5-audit-management-anomaly-detection--user-insights)
+6. [System Requirements & Prerequisites](#6-system-requirements--prerequisites)
+7. [Build & Setup Guide](#7-build--setup-guide)
+8. [Running, Stopping & CLI Tools](#8-running-stopping--cli-tools)
+9. [Core Processing Pipelines & 25 MCP Tools](#9-core-processing-pipelines--25-mcp-tools)
+10. [Integrated Admin Portal (8 Tabs & Safe UX)](#10-integrated-admin-portal-8-tabs--safe-ux)
+11. [Client-Friendly Chatbox Prompts (English & Bahasa Melayu)](#11-client-friendly-chatbox-prompts-english--bahasa-melayu)
+12. [Project Structure](#12-project-structure)
+13. [Configuration & Environment Variables](#13-configuration--environment-variables)
+14. [Testing & Verification](#14-testing--verification)
 
 ---
 
 ## 1. Key Features
 
-- **100% Pure Safe Rust Backend (`#![forbid(unsafe_code)]`, Zero Python Runtime)**: Compiles to a single ~9 MB native release binary (`arkib-server.exe`) with `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, `strip = true`, targeted `tokio` features, sub-second startup, graceful `Ctrl+C` shutdown, and a `GET /health` endpoint.
-- **100% Air-Gapped Local AI (Zero Cloud Dependencies)**: Runs entirely on local hardware using **Ollama (`qwen3-vl:4b-instruct-16k`)**, native **ONNX Runtime (`ort`, `GraphOptimizationLevel::Level3`)** for **YuNet** face detection and **CLIP ViT-B/32 (768-D)** embeddings, and an embedded **Pre-Normalized Zero-Clone Top-K SIMD Cosine Vector Store**.
-- **Biometric Face Recognition & Auto-Gallery Capture**: Identifies enrolled individuals with an anti-false-positive cosine threshold (`>= 0.88`) and automatically captures new high-confidence (`>= 0.90`), non-duplicate face angles using unified 16×16 perceptual average hashing (`aHash`).
-- **Direct Database & Bilingual Visual Attribute Search**: Case- and spacing-insensitive identity lookup supporting photo count limits (*"2 photos only"*), photos-only rendering, and bilingual English/Malay visual attribute queries (*"photo that wear songkok"*, *"pakai cermin mata"*) via per-profile `visual_index.json` + async Ollama vision fallback.
-- **Public vs. Private Data Boundary**: Profile attributes are divided into **Public Data** (rendered in centered Markdown tables in chat) and **Private Data** (`license_no`, `dob`, `date_of_birth`, `ic`, `nric`, `passport`, `ssn`, `phone`, `email`, `exp`, `no_kp`, `tarikh_lahir`, strictly hidden from chat and editable only inside the Admin Portal).
-- **Historical Malay & Ancient Script OCR & Transliteration**:
-  - **Adaptive Line-Valley Chunker** (`arkib_ocr_document`): Projects horizontal edge energy in microseconds and slices tall/dense manuscripts along natural whitespace valleys (`Top`, `Middle`, `Bottom`) with auto-contrast and `1.4×` sharpening.
-  - **Jawi, Pallava, Kawi & Rencong Script Decoder** (`arkib_decode_jawi`, `arkib_decode_ancient_script`): Restores 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`), transliterates Unicode **Kawi** (`U+11F00–U+11F5F`) and **Rencong / Surat Ulu** (`U+A930–U+A95F`), normalizes **Pallava** Old Malay / Srivijaya inscriptions with archival glossary notes, and produces searchable digital text.
-- **Computer Vision, Archival Location Recognition & Managed Folders (`arkib_analyze_image`, `arkib_search_locations`)**:
-  - Recognizes buildings, landmarks, and specific halls/wings/galleries (e.g. **Arkib Negara Malaysia / National Archives of Malaysia**) using CLIP ViT-B/32 768-D embeddings against managed **Location Folders**.
-  - Extracts full technical & EXIF metadata (file name, size, MIME, dimensions, Date/Time, Camera Make/Model, GPS coordinates, Software, PNG `tEXt`/`iTXt`/`zTXt` chunks, SHA-256, perceptual `aHash`).
-- **4-Layer Deep Authenticity, AI Watermark & Copy/Fraud Detection (`arkib_detect_authenticity`)**:
-  - Combines archive duplicate matching (SHA-256 + 16×16 `aHash`), deep C2PA/JUMBF/IPTC/XMP/PNG/JPEG container structure inspection, pixel-level forensics (8×8 ELA, local noise CV, 8×8 JPEG blockiness, lossless LSB probe), and a dedicated zero-temperature observation-first Vision-AI audit to detect **AI-generated**, **digitally manipulated/composite**, **copied/re-encoded external-source**, and **original camera** images.
-- **Automatic Description, Archival Summarization & Managed Document Folders (`arkib_summarize_document`, `arkib_search_documents`)**:
-  - Parses **TXT, MD, CSV, JSON, HTML, XML, DOCX, PDF, and image scans** in pure Rust, generating structured archival summaries, key topics, names, dates, events, script type, and deep authenticity status.
-- **Duplicate Prevention & SHA-256 Checksum Integrity (`arkib_verify_integrity`)**:
-  - Guards location photo and document uploads against both exact SHA-256 and perceptual 16×16 `aHash` duplicates across all archive roots (`409 Conflict` with override confirmation in Admin Portal) and audits `data/processed/checksum_manifest.json` for corruption, tampering, missing files, and archive duplicates.
-- **Image Quality, Archival Damage Detection, Healing Advice & Digital Enhancement (`arkib_assess_conservation`, `arkib_enhance_image`)**:
-  - Scores **resolution**, **lighting/exposure**, and **readability/sharpness** (`0–100`).
-  - Detects **tear**, **faded**, **mold**, and **aging** classified as **`none` / `light` / `medium` / `heavy`**.
-  - Recommends physical conservation treatments (**fungal removal**, **controlled drying**, **Japanese Kozo tissue mending**, **deacidification**, **protective coating/sizing**, **UV-filtered storage**) and enhances scans digitally with Before vs. After metrics.
-- **Administration System Performance & Overload Monitoring (`arkib_system_health`)**:
-  - Live telemetry (`sysinfo`) of CPU %, RAM GB/%, Disk GB/%, Server Process RSS MB, Ollama ping latency, request throughput, error rates, and RAII-guarded in-flight concurrency — detects abnormalities and overload (`HEALTHY` / `WARNING` / `CRITICAL_OVERLOAD`) with concrete recommended actions plus one-click integrity check and temp cache cleanup.
-- **Native LibreChat-Embedded Admin Portal with Maintainable Group Folders**:
-  - Embedded natively inside LibreChat (`http://localhost:3080`) via the Shield-Check icon directly under **MCP Settings** (exact LibreChat font family, floating tooltip, and Light/Dark CSS variables; standalone `http://127.0.0.1:8005/admin` redirects straight into `http://localhost:3080/#arkib-admin`).
-  - Organizes **Enrolled People** (`Staff`, `External Entity`), **Archival Locations** (`Arkib Negara Malaysia`, `Historical Landmarks`), and **Archival Documents** (`Historical Manuscripts`, `Official Records`) into searchable, maintainable group folders with safe **⋮ Three-Dot Menus**, **Trash Can icons**, **Custom Confirmation Modals**, and **Ghost Red Delete buttons**.
+- **100% Pure Safe Rust Backend (`#![forbid(unsafe_code)]`, Zero Python Runtime)**: Compiles to a single ~9 MB optimized release binary (`arkib-server.exe`) with `opt-level = 3`, `lto = "thin"`, `codegen-units = 1`, `strip = true`, sub-second startup, graceful `Ctrl+C` shutdown, bounded auto-compacting telemetry logs, and a `GET /health` endpoint.
+- **100% Air-Gapped Local AI (Zero Cloud Dependencies)**: Runs locally via **Ollama (`qwen3-vl:4b-instruct-16k`, Flash Attention + Q8_0 KV cache)**, native **ONNX Runtime (`ort`, `GraphOptimizationLevel::Level3`)** for **YuNet** 5-point face detection + **MobileFaceNet 512-D** (`w600k_mbf.onnx`, optional drop-in) or **CLIP ViT-B/32 768-D** (`patch32_v1.onnx`), and a **Pre-Normalized Zero-Clone Top-K SIMD Cosine Vector Store** with versioned model/dimension guards.
+- **Biometric Face Recognition & Auto-Gallery Capture**: Detects faces with 5-point YuNet landmarks + pure-Rust Umeyama similarity affine alignment, enforces anti-false-positive cosine thresholds (`>= 0.45` MobileFaceNet / `>= 0.88` CLIP), and auto-captures non-duplicate face angles via unified 16×16 perceptual `aHash`.
+- **Public vs. Private Data Governance**: Two-tier role boundary (**Guest** default in chat vs. authenticated **Admin**). Private fields (`ic`, `nric`, `no_kp`, `passport`, `phone`, `email`, `dob`, `tarikh_lahir`, etc.) are strictly hidden from chat and editable only in the Admin Portal; Guest submissions stage as `REQ-*` requests for Admin approval.
+- **Historical Malay & Ancient Script OCR + Build-Time FST DBP Lexicon**:
+  - **Adaptive 3–4 Line Chunker** (`arkib_ocr_document`): Detects red-ink rubrication (*dakwat merah*), applies $O(1)$ integral-image Sauvola adaptive thresholding blended 70/30, and slices dense manuscripts cleanly into 1024px-capped strips.
+  - **Deterministic Modern + Classical Jawi Decoder** (`arkib_decode_jawi`): Unicode NFKC + Presentation Forms-A/B normalization, zero-copy build-time compiled `fst::Map` DBP lexicon (`build.rs` + `data/lexicon/dbp_jawi_rumi.tsv`), 3-dot Jawi restoration (`چ ڠ ڤ ݢ ڽ ۏ`), and deterministic **Hijri → Masihi colophon date conversion**.
+  - **Ancient Scripts** (`arkib_decode_ancient_script`): Auto-detects and transliterates **Jawi**, **Pallava**, **Kawi** (`U+11F00–U+11F5F`), and **Rencong / Surat Ulu** (`U+A930–U+A95F`).
+- **Pure-Rust Archival Export (`DOCX` & `PDF`)**: Exports verified Jawi + Rumi documents (with native Word `<w:bidi/><w:rtl/>` RTL Jawi paragraphs and multi-page A4 `lopdf` PDFs) and formal **Audit Inspection Reports** directly from the Admin Portal and Arkib Canvas.
+- **AI Upload Auto-Fill, Maintainable Categories & Click Preference Learning**:
+  - Upload any image, PDF, DOCX, or text file to auto-suggest **Category**, **Subject / Title**, **Year**, **Source**, **Script**, and **Summary** (`POST /admin/api/analyze-upload`).
+  - Maintainable **Categories CRUD** (`categories.json`) with cascade rename/reassignment across documents, **Group Folder dropdowns** across People/Locations/Documents, and sorting by **Category, Year, Source, Title, Newest, or ⭐ For You (Preferences)**.
+- **4-Layer Authenticity Forensics, Conservation Lab & Interactive Before/After Comparison Studio**:
+  - Combines archive duplicate checks, C2PA/JUMBF/IPTC/XMP/PNG/bare-JPEG inspection, ELA/noise/blockiness/LSB pixel forensics, and zero-temp Vision-AI forensic audits.
+  - Assesses resolution, lighting, readability, and **tear / faded / mold / aging** (`none` / `light` / `medium` / `heavy`), digitally enhances scans, and opens an interactive **Before & After Comparison Studio** (`Split Slider | Side-by-Side`, `Side-by-Side Diff | Unified Diff`, changed-pages-only PDF/DOCX/TXT diff, Conservation & Integrity metrics, Intake Metadata comparison table, and Format Migration Fidelity).
 
 ---
 
@@ -57,75 +48,111 @@ An **air-gapped, 100% on-premise multimodal AI & archival governance platform** 
 
 ```mermaid
 flowchart TD
-    User(["Client / Archivist in LibreChat (Port 3080)"])
-    Admin(["Integrated Admin Portal inside LibreChat\n(MCP Settings Shield Icon • 6 Tabs)"])
+    User(["Client / Archivist in LibreChat (:3080)"])
+    Canvas(["Split-Screen Arkib Canvas\n(0 LLM Tokens · 3 Modes)"])
+    Admin(["Integrated Admin Portal inside LibreChat\n(Shield Icon · 8 Tabs)"])
 
-    User --> VLM["Local Ollama (Port 11434)\nqwen3-vl:4b-instruct-16k"]
-    VLM --> Router{"Pure-Rust Axum MCP SSE Server\n(Port 8005 • 24 Tools • 0% Python)"}
-    Admin -->|"CORS JSON API + HttpOnly Session"| Router
+    User --> VLM["Local Ollama (:11434)\nqwen3-vl:4b-instruct-16k (Flash Attn + Q8_0 KV)"]
+    VLM --> Router{"Pure-Rust Axum Server (:8005)\n25 MCP Tools · Admin API · Canvas API · 0% Python"}
+    Canvas -->|"Host-Guarded JSON / Multipart API"| Router
+    Admin -->|"HttpOnly Session Cookie + Audit Middleware"| Router
 
-    Router -->|"1. Face ID & Search"| A1["Biometrics & People Store\nYuNet + CLIP ONNX (ort Level3)"]
-    Router -->|"2. Historical Scripts & Docs"| B1["OCR Line-Valley Chunker\nJawi / Pallava / Kawi / Rencong + Summarizer"]
-    Router -->|"3. Deep Authenticity & Conservation"| C1["4-Layer Forensics + Quality/Damage Lab\nMetadata/C2PA + ELA/Noise + Vision-AI + Enhance"]
-    Router -->|"4. Locations, Integrity & Ops"| D1["CLIP Location Search • SHA-256 Manifest\nLive sysinfo Telemetry & Overload Advisor"]
+    Router --> A1["Biometrics & Vector Search\nYuNet 5-Pt + MobileFaceNet/CLIP (ort Level3)"]
+    Router --> B1["Scripts OCR, FST DBP Lexicon & Export\nSauvola + Rubrication + Hijri + DOCX/PDF"]
+    Router --> C1["4-Layer Forensics, Conservation & Compare\nC2PA/ELA/Vision + Damage Lab + Diff Studio"]
+    Router --> D1["Audit Rules Engine, Revisions & Analytics\n8 Rules + Z-Score Outliers + SVG Hot Topics"]
 
-    A1 --> DB1[("Embedded Rust Vector Store\nZero-Clone Top-K 768-D Unit Vectors")]
-    A1 --> DB2[("People & Group Folders\nPublic/Private Metadata + Pending REQ-*")]
-    B1 --> DB3[("Document & Group Folders\nOCR Chunks + Extracted Text + Summaries")]
-    C1 --> DB4[("Enhanced Scans & Checksum Manifest\n/images/enhanced/ + checksum_manifest.json")]
-    D1 --> DB5[("Location Folders & CLIP Index\nArkib Negara Malaysia Halls/Wings")]
+    A1 --> DB1[("arkib_vectors.json · location_vectors.json\nprofiles/ · pending_requests/")]
+    B1 --> DB2[("documents/ · locations/ · categories.json\ndbp_jawi_rumi.tsv (FST)")]
+    C1 --> DB3[("enhanced/ · canvas_sessions/ · compare_media/\nchecksum_manifest.json")]
+    D1 --> DB4[("audit_log.jsonl · behavior_analytics.jsonl\nrevisions/ · user_preferences.json")]
 ```
 
-| Rust Module | Key Optimizations & Safety Properties |
+| Rust Module | Key Responsibilities & Safety / Performance Properties |
 | :--- | :--- |
-| [src/main.rs](src/main.rs) | Tokio + Axum headless server, `GET /health`, graceful `Ctrl+C` shutdown, CLI tools (`--verify-face`, `--enroll-dir`), and RAII `InFlightGuard` middleware so dropped/cancelled requests never leak concurrency counters. |
-| [src/config.rs](src/config.rs) | Environment config, archive directory bootstrapping (`profiles/`, `locations/`, `documents/`, `pending_requests/`), persistent admin key, and ONNX Runtime / model auto-discovery. |
-| [src/biometrics.rs](src/biometrics.rs) | Dynamic ONNX Runtime (`ort`) with `GraphOptimizationLevel::Level3`, balanced `intra_threads` (`2..=4`), YuNet 640×640 + NMS (`IoU 0.30`), and CLIP ViT-B/32 `square_pad` + bicubic 224×224 normalization. |
-| [src/vector_store.rs](src/vector_store.rs) | Pre-computes L2-normalized 768-D `unit_vector` on load/upsert; `search()` uses **zero-clone index scoring + `select_nth_unstable_by`** (cloning only the top-K winners) with atomic temp-file rename persistence. |
-| [src/vision_ops.rs](src/vision_ops.rs) | Pure-Rust EXIF orientation decoding (`kamadak-exif`), unified 16×16 perceptual `aHash` (`perceptual_hash_from_image` / `from_bytes`), O(N) prefix-sum moving-average OCR line-valley chunker, autocontrast, and sharpening. |
-| [src/forensics.rs](src/forensics.rs) | **Single-read / single-decode** pipeline for file metadata, C2PA/JUMBF, IPTC `DigitalSourceType`, XMP, PNG chunks, deep JPEG segment/DQT parser, 8×8 ELA/noise/blockiness/lossless-LSB pixel forensics, deterministic visual fusion, upload duplicate guard, and SHA-256 manifest audit. |
-| [src/conservation.rs](src/conservation.rs) | Pure-Rust image quality analyzer (resolution, lighting, readability), 4-class damage detector (`tear`, `faded`, `mold`, `aging` as `none`/`light`/`medium`/`heavy`), physical conservation advisor, and 5-mode digital enhancer. |
-| [src/jawi.rs](src/jawi.rs) | Zero-`unsafe`, zero-`.unwrap()` Jawi-to-Rumi orthographic and phonetic skeleton decoder with 3-dot Jawi restoration, classical Malay lexicon, and reduplication (`٢`) support. |
-| [src/ancient_scripts.rs](src/ancient_scripts.rs) | Auto-detects and transliterates **Jawi**, **Pallava**, **Kawi** (`U+11F00–U+11F5F`), and **Rencong / Surat Ulu** (`U+A930–U+A95F`) with Old Malay / Srivijaya archival glossary notes. |
-| [src/archives.rs](src/archives.rs) | Manages **Archival Locations**, **Archival Documents**, **People Group Folders**, and **Document Group Folders**, plus pure-Rust DOCX/PDF/HTML/XML/TXT text extraction and Ollama archival summarization. |
-| [src/monitor.rs](src/monitor.rs) | Lightweight targeted `sysinfo` startup (`CpuRefreshKind` + `MemoryRefreshKind` only, no full OS process scan), live CPU/RAM/Disk/RSS/Ollama telemetry, and `HEALTHY`/`WARNING`/`CRITICAL_OVERLOAD` advisor. |
-| [src/metadata.rs](src/metadata.rs) | ASCII/Unicode slugging, identity normalization, 12-hour AM/PM time formatting, bilingual English/Malay sensitive-field privacy classification, and truncated JSON recovery. |
-| [src/service.rs](src/service.rs) | Orchestrates all **24 MCP tools**, concurrent `tokio::join!` overlap of CPU/ONNX work with Ollama vision inference (`analyze_authenticity_deep`, `tool_analyze_image`, `tool_assess_conservation`), LibreChat attachment resolution, perceptual ID cache, and staging queue. |
-| [src/mcp_sse.rs](src/mcp_sse.rs) | Standard MCP 2024-11-05 SSE transport (`GET /sse`, `POST /messages/`) with `Drop`-guarded session cleanup, DNS-rebinding `Host` guard, async dispatch for I/O/AI tools, and `spawn_blocking` workers for heavy CPU tasks. |
-| [src/admin.rs](src/admin.rs) | Headless CORS-enabled JSON Admin API consumed natively inside LibreChat, constant-time login, `HttpOnly; SameSite=Lax` 8-hour session cookies, safe filename path-traversal guards, and 32 MB multipart limit. |
+| [build.rs](build.rs) | Build-time compilation of `data/lexicon/dbp_jawi_rumi.tsv` into a zero-copy `fst::Map` binary artifact embedded directly in the server binary. |
+| [src/main.rs](src/main.rs) | Tokio + Axum headless server, `GET /health`, graceful `Ctrl+C` shutdown, CLI (`--verify-face`, `--enroll-dir`, `--reindex-faces`), and RAII `InFlightGuard` middleware. |
+| [src/config.rs](src/config.rs) | Environment config, archive & telemetry path bootstrapping, persistent `.arkib_admin_key`, and ONNX Runtime / model auto-discovery. |
+| [src/biometrics.rs](src/biometrics.rs) | Dynamic ONNX Runtime (`ort` Level3), YuNet 640×640 + 5-point Umeyama similarity affine alignment (`112×112` warp), MobileFaceNet 512-D with automatic CLIP ViT-B/32 768-D fallback. |
+| [src/vector_store.rs](src/vector_store.rs) | Versioned (`embedding_model`, `embedding_dim`) pre-normalized unit-vector store with cross-dim mismatch guard, zero-clone top-K scoring, and atomic temp+rename saves. |
+| [src/vision_ops.rs](src/vision_ops.rs) | Pure-Rust EXIF orientation, 16×16 perceptual `aHash`, red-ink rubrication detection (*dakwat merah*), $O(1)$ integral-image Sauvola thresholding (70/30 blend), and 3–4 line OCR chunking. |
+| [src/jawi.rs](src/jawi.rs) | Zero-`unsafe` Modern + Classical Jawi decoder: NFKC + Presentation Forms-A/B normalization, FST DBP lexicon lookup, 3-dot restoration, morphology, and Hijri→Masihi colophon converter. |
+| [src/ancient_scripts.rs](src/ancient_scripts.rs) | Auto-detects & transliterates **Jawi**, **Pallava**, **Kawi** (`U+11F00–U+11F5F`), and **Rencong / Surat Ulu** (`U+A930–U+A95F`) with Old Malay / Srivijaya archival glossary notes. |
+| [src/export.rs](src/export.rs) | 100% pure-Rust OOXML **DOCX** (`zip` + native `<w:bidi/><w:rtl/>` Jawi + Rumi) and multi-page A4 **PDF** (`lopdf`) generator for archival documents and audit reports. |
+| [src/forensics.rs](src/forensics.rs) | Single-read/single-decode 4-layer authenticity engine (C2PA/JUMBF, IPTC, XMP, PNG chunks, raw JPEG segments, 8×8 ELA/noise/blockiness/LSB, Vision-AI fusion), duplicate guard, and SHA-256 manifest audit. |
+| [src/conservation.rs](src/conservation.rs) | Pure-Rust quality scoring (resolution, lighting, readability), 4-class damage classifier (`tear`, `faded`, `mold`, `aging`), conservation treatment advisor, and 5-mode digital enhancer. |
+| [src/compare.rs](src/compare.rs) | Before vs. After engine: Conservation & Integrity delta metrics, `lopdf` real-page & text page-filtered LCS word diff (returning **changed pages only** with side-by-side & unified tokens), Intake Metadata table, and Format Migration Fidelity check. |
+| [src/archives.rs](src/archives.rs) | Managed Locations, Documents (`year`/`subject`/`category`/`source`), Group Folders CRUD, pure-Rust PDF (`lopdf`)/DOCX/HTML/TXT extraction, AI Upload Auto-Fill (`analyze_file_for_suggestions`), and archival summarization. |
+| [src/categories.rs](src/categories.rs) | Maintainable Archival Categories CRUD (`categories.json`) with cascade rename & reassignment across documents. |
+| [src/revisions.rs](src/revisions.rs) | Full lifecycle change tracker (`created`, `file_added`, `metadata_edit`, `image_edited`, `file_replaced`, `deleted`) with before/after JSON field diffs, preserved image/file snapshots (`aHash` & SHA-256), and external on-disk tamper scanning. |
+| [src/audit.rs](src/audit.rs) | Auto-compacting `audit_log.jsonl`, 8-rule deterministic Rules Engine (CRUD bursts, auth brute-force, off-hours writes, SQLi/NoSQLi/traversal, external SQL log checks), Z-score/IQR statistical outlier detector, and AI anomaly explainer. |
+| [src/preferences.rs](src/preferences.rs) | Exponentially time-decayed user click/filter preference engine (`user_preferences.json`), user-editable pinned categories/sources/folders/tags, and personalized document recommendations. |
+| [src/analytics.rs](src/analytics.rs) | Auto-compacting `behavior_analytics.jsonl` collecting chatbot prompts, MCP tool calls, Admin searches, and record views → recency-weighted Hot Topics, top chatbot questions, 7-day trend series, and structured Admin Insight cards. |
+| [src/canvas.rs](src/canvas.rs) | Split-screen Arkib Canvas backend (`/canvas/api/*`), 24h stale session + `compare_media/` auto-cleanup, live <5 ms Jawi preview, DOCX/PDF export, Guest staging vs. Admin direct commit, and compare endpoints. |
+| [src/monitor.rs](src/monitor.rs) | Lightweight `sysinfo` telemetry (CPU, RAM, Disk, RSS, Ollama ping, throughput/errors) with `HEALTHY` / `WARNING` / `CRITICAL_OVERLOAD` advisor. |
+| [src/metadata.rs](src/metadata.rs) | ASCII/Unicode slugging, identity normalization, 12-hour AM/PM formatting, bilingual EN/BM private-field classification, and JSON recovery. |
+| [src/service.rs](src/service.rs) | Orchestrates all **25 MCP tools**, `tokio::join!` concurrent pipelines, LibreChat attachment resolution, perceptual cache, and staging queue. |
+| [src/mcp_sse.rs](src/mcp_sse.rs) | MCP 2024-11-05 SSE server (`/sse`, `/messages/`) with `Drop`-guarded cleanup, DNS-rebinding `Host` guard, automatic MCP analytics logging, and `spawn_blocking` workers. |
+| [src/admin.rs](src/admin.rs) | Headless CORS JSON Admin API, constant-time login, 8-hour `HttpOnly; SameSite=Lax` cookies, automatic audit middleware, lifecycle revision hooks, and 32 MB multipart limit. |
 
 ---
 
-## 3. 4-Layer Deep Authenticity & AI Watermark Engine
+## 3. Split-Screen Arkib Canvas (3 Interactive Modes)
 
-Every authenticity check (`arkib_detect_authenticity`, `arkib_analyze_image`, `arkib_assess_conservation`, `arkib_summarize_document`, and the Admin Portal **System & Lab** tab) runs four complementary local forensic layers and fuses them deterministically in Rust:
+Arkib Canvas opens natively alongside LibreChat (`40–50%` resizable split-screen drawer, **0 extra LLM tokens**) via clickable cards in chat or the left navigation rail:
 
-1. **Layer 1 — Archive Duplicate & Integrity Matching**:
-   - Exact **SHA-256** match and unified **16×16 perceptual `aHash`** near-duplicate detection across `profiles/`, `locations/`, and `documents/`.
-2. **Layer 2 — Deep Metadata, Watermark & Container Structure**:
-   - Inspects **C2PA / Content Credentials** (`APP11 JUMBF` boxes & raw `c2pa`/`contentcredentials` headers), **IPTC/XMP `DigitalSourceType`** (`trainedAlgorithmicMedia`, `compositeSynthetic`), XMP `CreatorTool`, PNG prompt/workflow chunks (`parameters`, `prompt`, `workflow`, `sd-metadata`), **47+ AI generator markers**, and **external platform/stock markers** (`FBMD`/`FBMN`, WhatsApp, Telegram, TikTok, Getty, Shutterstock, Alamy, Screenshot).
-   - Parses raw JPEG segment headers (`APP0`–`APP14`, `COM`, `SOF2`, `DQT` quantization quality) to flag **bare stripped JPEG containers** (`0` APP/EXIF/JFIF/ICC/XMP headers — strong fingerprint of web/social re-encoded copies or stripped AI downloads).
-3. **Layer 3 — Pixel-Level Forensics**:
-   - **8×8 Error Level Analysis (ELA)** spatial splice disparity (`p95/median` ratio), **local high-pass sensor noise CV**, **8×8 JPEG block-grid boundary ratio**, and a **lossless-only LSB bit-plane statistical probe** (scoped to `.png`/`.bmp` so normal JPEG DCT quantization never triggers false LSB signals).
-4. **Layer 4 — Zero-Temperature Observation-First Vision-AI Forensic Audit**:
-   - Queries local Ollama (`qwen3-vl:4b-instruct-16k`, `temperature: 0`, `384px` input) for concrete factual observations (`scene_description`, `physically_possible_in_real_life`, `has_garbled_ai_text`, `visible_watermark`, `is_screenshot_or_repost`) — checking visible AI/stock corner watermarks (Gemini sparkle, Veo, Sora, Kling, Meta AI, TikTok, Getty, Shutterstock), physically impossible composites (e.g. human head grafted onto a robot body), and garbled AI text — and deterministically fuses the result in Rust (`fuse_visual_audit`) without false positives on normal portraits.
-- **Note on Proprietary Invisible Watermarks**: Open provenance standards (C2PA/JUMBF, IPTC `DigitalSourceType`, PNG/XMP AI chunks, visible watermarks, and lossless LSB anomalies) are verified offline. Proprietary cryptographic pixel watermarks such as **Google SynthID** cannot be decoded locally without Google's private verification API — this caveat is transparently reported in every output.
+1. **📜 Mode 1 — Jawi & Manuscript OCR Workbench (`#arkib-canvas:ocr:<id>`)**:
+   - Interactive scan zoom/pan + clickable 3–4 line OCR strip selector with rubrication badges.
+   - 6-key Malay Jawi helper bar (`چ ڠ ڤ ݢ ڽ ۏ`) + 250 ms deterministic live Rumi preview, FST coverage badge, and Hijri→Masihi colophon bar.
+   - **Live Before → After OCR Diff** with segmented **`[ Side-by-Side Diff | Unified Diff ]`** toggle, green `DBP Coverage` delta pill, and gold `Hijri → Masihi` pill.
+   - One-click **`📄 DOCX`** (RTL Jawi + Rumi) & **`📕 PDF`** export, plus **Save to Archive** and optional **Teach a New Jawi Word** dictionary append.
+2. **🪪 Mode 2 — Identity & Photo Enrollment Canvas (`#arkib-canvas:enroll:<id>`)**:
+   - HTML5 `<canvas>` interactive face cropper, rotate, brightness/contrast controls, and `Ctrl+V` paste.
+   - Public vs. 🔒 Private metadata form (sensitive keys routed automatically via `src/metadata.rs`), People Group Folder selector, and Two-Tier Governance (Guest stages `REQ-*`; Admin saves directly).
+3. **⚖️ Mode 3 — Interactive Before & After Comparison Studio (`#arkib-canvas:compare:<id>`)**:
+   - **Images**: Segmented **`[ Split Slider | Side-by-Side ]`** draggable curtain comparator + **🛡️ Conservation & Integrity Metrics (Before → After)**.
+   - **Documents & OCR**: Segmented **`[ Side-by-Side Diff | Unified Diff ]`** comparing **Original vs. Latest** with **Changed Pages Only** filtering (`lopdf` real PDF pages + word-level LCS red/green highlight pills).
+   - **Metadata & Migration**: **📋 Intake Metadata Comparison** (`Field | Before | After | Status` with Changed-Only toggle) + **📦 Format Migration Fidelity** (Format, File Size, Dimensions, `aHash` Visual Similarity %, EXIF Retention, SHA-256 Checksums, `PASS`/`REVIEW`).
 
 ---
 
-## 4. System Requirements & Prerequisites
+## 4. 4-Layer Deep Authenticity & AI Watermark Engine
+
+Every authenticity check (`arkib_detect_authenticity`, `arkib_analyze_image`, `arkib_assess_conservation`, `arkib_summarize_document`, and **System & Lab**) runs 4 local forensic layers fused deterministically in Rust:
+
+1. **Layer 1 — Archive Duplicate & Integrity Matching**: Exact SHA-256 + unified 16×16 perceptual `aHash` across `profiles/`, `locations/`, and `documents/`.
+2. **Layer 2 — Deep Metadata, Watermark & Container Structure**: C2PA/JUMBF (`APP11`), IPTC/XMP `DigitalSourceType`, PNG AI prompt chunks, 47+ AI generator markers, external/social markers, and raw JPEG segment/DQT inspection flagging bare stripped JPEGs.
+3. **Layer 3 — Pixel-Level Forensics**: 8×8 ELA spatial splice disparity, local sensor noise CV, 8×8 JPEG blockiness, and lossless-only LSB bit-plane statistics.
+4. **Layer 4 — Zero-Temperature Vision-AI Forensic Audit**: Local Ollama (`qwen3-vl:4b-instruct-16k`, `temperature: 0`) checks visible corner watermarks, physically impossible composites, and garbled AI text — fused deterministically (`fuse_visual_audit`).
+- *Transparency note:* Proprietary invisible pixel watermarks like Google SynthID cannot be decoded offline without Google's private API; every report discloses this clearly.
+
+---
+
+## 5. Audit Management, Anomaly Detection & User Insights
+
+- **3-Layer Hybrid Audit Engine (`🛡️ Audit & Changes`)**:
+  - **Layer 1 (Rules Engine)**: Detects suspicious delete bursts (`R001`), bulk export bursts (`R002`), login brute-force (`R003`), off-hours mutations 00:00–05:00 (`R004`), SQL injection (`R005`), NoSQL/path traversal (`R006`), abnormal external SQL queries such as `DELETE`/`UPDATE` missing `WHERE`, DDL, or unbounded `SELECT *` (`R007`), and rapid CRUD spikes (`R008`).
+  - **Layer 2 (Statistical Outliers)**: Rolling Z-score + IQR detection on hourly volume spikes, heavy request latency, and abnormal deletion ratios.
+  - **Layer 3 (AI Explainer & Reports)**: Local `qwen3-vl:4b` plain-language explanation + pure-Rust **DOCX / PDF Audit Summary Reports**, plus **Created / Added / Updated / Deleted** revision history with live location pills (`📍 Documents › ...`), **`↗ Open Item`**, **`🔍 Inspect / Compare`**, and **External On-Disk SHA-256 Scan**.
+- **User Behavior & Hot-Topics Analytics (`📈 User Insights`)**:
+  - Collects LibreChat chatbot prompts, MCP tool calls, Admin searches, and record views into bounded `behavior_analytics.jsonl`.
+  - Renders 100% air-gapped local **pure-SVG graphs**: **🔥 Hot Topics Bar Chart**, **📈 7-Day Multi-Series Trend Chart** (Chatbot vs. Searches vs. Views), **🍩 AI Capability & Interest Donut Chart**, **💡 Actionable Admin Insight Cards**, **💬 Frequently Asked Chatbot Questions**, **🔍 Search History**, and **⭐ Most Checked Records**.
+
+---
+
+## 6. System Requirements & Prerequisites
 
 | Requirement | Minimum / Recommended Specification |
 | :--- | :--- |
 | **Operating System** | Windows 10/11 (64-bit), Linux, or macOS |
 | **Rust Toolchain** | Rust **1.97+** (`cargo`, `rustc`, edition 2024) — *no Python required at runtime* |
-| **ONNX Runtime & Models** | `onnxruntime.dll` (or `.so`/`.dylib`) in `models/runtime/`, plus `yunet_face_detector.onnx` and `patch32_v1.onnx` in `models/` (or `~/.cache/`) |
+| **ONNX Runtime & Models** | `onnxruntime.dll` (or `.so`/`.dylib`) in `models/runtime/`, `yunet_face_detector.onnx`, `patch32_v1.onnx` (and optional `w600k_mbf.onnx` for 512-D MobileFaceNet) in `models/` |
 | **Docker** | **Docker Desktop** (Compose v2) for LibreChat (`http://localhost:3080`) |
 | **Ollama** | **Ollama** (`http://127.0.0.1:11434`) running `qwen3-vl:4b-instruct-16k` |
 
 ---
 
-## 5. Build & Setup Guide
+## 7. Build & Setup Guide
 
 ### Step 1 — Clone & Compile the Pure-Rust Binary
 ```powershell
@@ -156,66 +183,59 @@ Copy-Item config\librechat\royal-theme.css ..\LibreChat\images\royal-theme.css -
 Copy-Item config\librechat\admin-embed.js ..\LibreChat\images\admin-embed.js -Force
 ```
 
-### Step 4 — Optional First-Time Batch Face Enrollment (Pure Rust)
-Seed the embedded vector store (`data/processed/arkib_vectors.json`) and profile galleries from `data/raw/staff_enroll/`:
+### Step 4 — Optional First-Time Batch Face Enrollment
 ```powershell
 .\target\release\arkib-server.exe --enroll-dir data\raw\staff_enroll
 ```
 
 ---
 
-## 6. Running, Stopping & CLI Tools
+## 8. Running, Stopping & CLI Tools
 
-### One-Click Launch & Shutdown (Windows)
 ```powershell
-# Start Ollama + arkib-server.exe (8005) + LibreChat (3080)
+# One-click launch (Ollama with Flash Attn + Q8_0 KV + arkib-server.exe + LibreChat)
 cmd /c start.bat
 
 # Stop arkib-server.exe cleanly
 cmd /c stop.bat
-```
 
-### Manual CLI Commands & Health Check
-```powershell
-# Run the MCP SSE + Headless Admin JSON API server
-.\target\release\arkib-server.exe
-
-# Health check endpoint
+# Health check
 curl http://127.0.0.1:8005/health
 
-# Offline biometric face identification check on any image
+# Offline biometric face identification test
 .\target\release\arkib-server.exe --verify-face path\to\portrait.jpg
 
-# Batch enroll all subdirectories under a folder (<dir>/<Person Name>/*.jpg)
-.\target\release\arkib-server.exe --enroll-dir data\raw\staff_enroll
+# Re-index all enrolled face vectors (e.g. after adding models/w600k_mbf.onnx)
+.\target\release\arkib-server.exe --reindex-faces
 ```
 
 ---
 
-## 7. Core Processing Pipelines & 24 MCP Tools
+## 9. Core Processing Pipelines & 25 MCP Tools
 
 Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/messages/`):
 
 | Pipeline | MCP Tool | Description |
 | :--- | :--- | :--- |
-| **Pipeline A: Biometric Face ID** | `arkib_identify_faces` | YuNet face detection + 768-D CLIP embeddings + zero-clone SIMD cosine match (`>= 0.88`), auto-gallery capture (`>= 0.90`), returns `MATCHED`, `NOT_IN_DATABASE`, or `NO_FACE_DETECTED` (with `ocr_document_chunks`). |
+| **A. Biometric Face ID** | `arkib_identify_faces` | YuNet 5-point detection + MobileFaceNet/CLIP embeddings + cosine match, auto-gallery capture, and Canvas enrollment card for unknowns. |
 | | `arkib_detect_faces` | Low-level YuNet bounding box `[x, y, w, h]` and confidence inspection. |
-| **Pipeline B: People, Locations & Documents Search** | `arkib_search_identity` | Case/spacing-insensitive profile lookup supporting `limit`, `photos_only`, and bilingual English/Malay visual `query`. |
-| | `arkib_list_identities` | Lists all enrolled identities grouped by People Group Folder (`Staff`, `External Entity`, custom) and reference vector counts. |
-| | `arkib_search_locations` | Searches/lists managed archival **Location** folders (e.g. Arkib Negara Malaysia halls/wings/rooms) with coordinates, history, and gallery photos. |
-| | `arkib_search_documents` | Searches/lists managed archival **Document** folders (with group folder metadata) by title, reference code, script, topic, or extracted digital text. |
-| **Pipeline C: Historical Script OCR, Vision & Deep Authenticity** | `arkib_ocr_document` | Adaptive horizontal edge-energy line-valley chunking with autocontrast & `1.4×` sharpening (`/images/ocr-chunks/`). |
-| | `arkib_decode_jawi` | Decodes Jawi script or rough transliterations into corrected 3-dot Jawi (`ڤ ڠ ݢ چ ڽ`) and Standard Bahasa Melayu (Rumi). |
-| | `arkib_decode_ancient_script` | Auto-detects & transliterates **Jawi**, **Pallava**, **Kawi** (`U+11F00–U+11F5F`), and **Rencong / Surat Ulu** (`U+A930–U+A95F`) with archival Old Malay glossary notes. |
-| | `arkib_analyze_image` | All-in-one concurrent check: extracts full file/EXIF/GPS/PNG metadata, runs the **4-layer deep authenticity check**, assesses archival quality & damage, counts faces, and matches buildings/landmarks via CLIP 768-D against managed Locations. |
-| | `arkib_detect_authenticity` | **4-layer forensic authenticity & AI watermark detector**: archive duplicates (SHA-256 + `aHash`), C2PA/IPTC/XMP/PNG/bare-JPEG header inspection, ELA/noise/blockiness/LSB pixel forensics, and zero-temp Vision-AI forensic audit. |
-| | `arkib_summarize_document` | Multi-format (TXT/MD/CSV/JSON/HTML/DOCX/PDF/Image) automatic archival description & structured summary (topics, names, dates, events, and deep authenticity). |
-| **Pipeline D: Archival Conservation, Integrity & Ops** | `arkib_assess_conservation` | Concurrently evaluates resolution, lighting, readability, detects tear/faded/mold/aging (`none`/`light`/`medium`/`heavy`), runs the **4-layer deep authenticity check**, and suggests physical healing treatments. |
-| | `arkib_enhance_image` | Digitally enhances dark, yellowed, or faded archival images (gray-world de-yellowing, gamma lighting, autocontrast, unsharp mask) with Before vs. After quality scores. |
-| | `arkib_verify_integrity` | Audits SHA-256 file integrity across `profiles/`, `locations/`, and `documents/` against `checksum_manifest.json` to flag corruption, tampering, missing files, and exact duplicates. |
-| | `arkib_system_health` | Live administration telemetry (CPU, RAM, Disk, RSS, Ollama latency, workload/errors) with abnormality/overload detection (`HEALTHY`/`WARNING`/`CRITICAL_OVERLOAD`) and recommended actions. |
-| **Pipeline E: Role-Based Governance** | `arkib_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
-| | `arkib_request_update_metadata` | Stages a Guest metadata/MyKad/ID-card update request (`REQ-*`), auto-classifying English & Malay sensitive keys as `private`. |
+| **B. People, Locations & Documents** | `arkib_search_identity` | Case/spacing-insensitive profile lookup supporting `limit`, `photos_only`, and bilingual EN/BM visual attribute `query`. |
+| | `arkib_list_identities` | Lists enrolled identities grouped by People Group Folder and vector counts. |
+| | `arkib_search_locations` | Searches/lists managed archival **Location** folders with coordinates, history, and gallery photos. |
+| | `arkib_search_documents` | Searches/lists managed archival **Document** folders by title, reference code, script, category, topic, or extracted text. |
+| **C. Historical Scripts, Vision & Forensics** | `arkib_ocr_document` | Rubrication + Sauvola adaptive 3–4 line OCR chunking (`/images/ocr-chunks/`) + clickable Jawi OCR Workbench card. |
+| | `arkib_decode_jawi` | Deterministic Modern & Classical Jawi-to-Rumi decoder (FST DBP lexicon + Hijri→Masihi colophon) + Canvas card. |
+| | `arkib_decode_ancient_script` | Auto-detects & transliterates **Jawi**, **Pallava**, **Kawi**, and **Rencong / Surat Ulu** with archival glossary notes. |
+| | `arkib_analyze_image` | Concurrent all-in-one check: EXIF/GPS/PNG metadata, **4-layer authenticity**, quality/damage, face count, and CLIP location match. |
+| | `arkib_detect_authenticity` | **4-layer forensic authenticity & AI watermark detector** (duplicates, C2PA/IPTC/JPEG/PNG, ELA/noise/LSB, Vision-AI fusion). |
+| | `arkib_summarize_document` | Multi-format (`TXT/MD/CSV/JSON/HTML/DOCX/PDF/Image`) archival summarization with Hijri/Masihi dates & deep authenticity. |
+| **D. Conservation, Compare & Ops** | `arkib_assess_conservation` | Evaluates resolution, lighting, readability, tear/faded/mold/aging (`none`/`light`/`medium`/`heavy`), authenticity, and healing steps. |
+| | `arkib_enhance_image` | 5-mode archival digital enhancer + automatic **Before & After Comparison Studio** Canvas card. |
+| | `arkib_compare_before_after` | Opens the interactive **Before & After Comparison Studio** (Split Slider/Side-by-Side, Changed Pages Only diff, Conservation & Integrity metrics, Intake Metadata table, Format Migration Fidelity). |
+| | `arkib_verify_integrity` | Audits SHA-256 file integrity & duplicates across `profiles/`, `locations/`, and `documents/` against `checksum_manifest.json`. |
+| | `arkib_system_health` | Live CPU, RAM, Disk, RSS, Ollama latency, workload/errors, and `HEALTHY`/`WARNING`/`CRITICAL_OVERLOAD` advice. |
+| **E. Two-Tier Role Governance** | `arkib_request_enrollment` | Stages a Guest enrollment request (`REQ-*`) for Admin review. |
+| | `arkib_request_update_metadata` | Stages a Guest metadata/MyKad update request (`REQ-*`), auto-routing sensitive keys to `private`. |
 | | `arkib_list_pending_requests` | Lists pending, approved, or rejected staging requests. |
 | | `arkib_review_pending_request` | Admin-key guarded approval/rejection tool. |
 | | `arkib_enroll_named_identity` | Admin direct enrollment tool (auto-stages for Guests). |
@@ -225,79 +245,80 @@ Exposed over standard MCP SSE (`http://host.docker.internal:8005/sse` and `/mess
 
 ---
 
-## 8. Integrated Admin Portal & Safe UX Governance
+## 10. Integrated Admin Portal (8 Tabs & Safe UX)
 
-Open **LibreChat (`http://localhost:3080`)** and click the **Admin Portal** shield-check icon directly underneath **MCP Settings** in the left navigation rail:
+Open **LibreChat (`http://localhost:3080`)** and click the **Admin Portal** shield-check icon under **MCP Settings** (visiting `http://127.0.0.1:8005/admin` redirects `307` straight into `http://localhost:3080/#arkib-admin`):
 
-- **Native LibreChat Theme & Layout**: Rendered directly inside LibreChat using LibreChat's exact Light/Dark CSS variables (no separate standalone `:8005/admin` page or iframe; visiting `http://127.0.0.1:8005/admin` automatically redirects `307` to `http://localhost:3080/#arkib-admin`).
-- **Session Auth**: Constant-time credential verification (`POST /admin/api/login`) with 8-hour `HttpOnly; SameSite=Lax` session cookies (`ARKIB_ADMIN_USER` / `ARKIB_ADMIN_PASS`).
-- **Maintainable Group Folders (with Instant Folder Search)**:
-  - **Enrolled People Group Folders** (`Staff`, `External Entity`, plus custom folders), **Location Group Folders** (`Arkib Negara Malaysia`, `Historical Landmarks`, plus custom folders), and **Document Group Folders** (`Historical Manuscripts`, `Official Records`, plus custom folders): search folders instantly, create, rename, assign via dropdown-chevron selector on each card, or delete safely (deleting a folder moves items to `Unassigned` without deleting records).
-- **Misclick-Safe Destructive UX**:
-  - Group folder actions use a **⋮ Three-Dot Menu** (`Rename folder` / `Delete folder`) instead of exposed inline `×` buttons.
-  - All destructive actions use **Trash Can SVG icons**, **ghost/outline red Delete buttons** (`border: 1px solid #ef4444; color: #ef4444`, filling solid red only on hover), and **Custom Confirmation Modals** specifying exact impact before deletion (e.g., *"Delete Ahmad Zahid Hamidi and their 2 vector(s) / photo(s)?"*).
-- **6 Integrated Tabs**:
-  1. **📋 Approvals**: Review, approve, or reject Guest enrollment and metadata update requests.
-  2. **👥 People**: Manage group folders, Public vs. Private custom fields, and per-photo metadata/galleries.
-  3. **📍 Locations**: Manage location group folders and CLIP-indexed halls/wings/landmarks with duplicate upload guard.
-  4. **📁 Documents**: Manage document group folders, multi-format uploads with duplicate guard, and one-click Auto-Summarize.
-  5. **📊 System & Lab**: Live CPU/RAM/Disk/Ollama telemetry, SHA-256 archive integrity audit, temp cache cleanup, and the **Archival Quality, Damage, Deep Authenticity & Enhancement Lab**.
-  6. **🔍 Test Face**: Dry-run face recognition via file upload, drag-and-drop, or **Ctrl+V / clipboard paste** with custom confidence threshold without altering records.
+1. **📋 Approvals**: Approve or reject Guest face enrollments, metadata updates, and Canvas OCR corrections (`REQ-*`).
+2. **👥 People**: Group Folder dropdown + `⋮ Manage Folder`, Public vs. Private fields, per-photo metadata, and `🕒 Changes` Before/After history.
+3. **📍 Locations**: Group Folder dropdown + `⋮ Manage Folder`, CLIP-indexed halls/wings/landmarks, duplicate upload guard, and `🕒 Changes`.
+4. **📁 Documents**: Group Folder dropdown, **🏷️ Maintainable Categories CRUD**, **✨ AI Content Auto-Fill on Upload**, **Sort by Category / Year / Source / Title / ⭐ For You**, **⭐ My Preferences**, one-click **`📄 DOCX`** & **`📕 PDF`** export, and **`🕒 Changes`**.
+5. **📈 User Insights**: Actionable Admin Insight cards, pure-SVG **🔥 Hot Topics Bar Chart**, **📈 7-Day Activity Trend Chart**, **🍩 Feature/Interest Donut Chart**, **💬 Frequently Asked Chatbot Questions**, **🔍 Search History**, and **⭐ Most Checked Records**.
+6. **🛡️ Audit & Changes**: Risk status banner, **🕒 Data & File Changes** (`Created` / `Added` / `Updated` / `Deleted` with live location badges + `↗ Open Item` + `🔍 Inspect / Compare`), **🚨 Rules Engine Alerts**, **📈 Statistical Outliers**, **🗄️ External SQL Log Inspector**, **🔍 Scan Disk Changes**, **✨ AI Explain Anomalies**, and **`📄 DOCX` / `📕 PDF` Audit Reports**.
+7. **📊 System & Lab**: Live `sysinfo` telemetry, SHA-256 archive integrity audit, temp cache cleanup, and the **Archival Quality, Damage, Forensics & Enhancement Lab**.
+8. **🔍 Test Face**: Dry-run face recognition via file picker, drag-and-drop, or `Ctrl+V` paste with custom confidence threshold.
 
 ---
 
-## 9. Client-Friendly Chatbox Prompts (English & Bahasa Melayu)
-
-Clients do not need IT jargon — everyday wording is automatically mapped to the right MCP tool:
+## 11. Client-Friendly Chatbox Prompts (English & Bahasa Melayu)
 
 ### English Prompts
-- **General Photo Check** *(attach photo)*: `check this` / `what is this?` / `what building or place is this?`
-- **Deep Authenticity & AI Watermark Check** *(attach photo)*: `is this real or fake?` / `is this AI-generated or copied from another source?` / `check watermark and metadata`
-- **Quality, Damage & Healing** *(attach scan)*: `is this damaged, torn, mouldy, or faded? how do we heal or preserve it?`
-- **Digital Enhancement** *(attach dark/old scan)*: `make this clearer` / `brighten and restore this old photo`
+- **Before & After Comparison Studio**: `open the before and after comparison tool` / *(attach old scan)* `enhance this archival scan and compare before and after`
+- **Deep Authenticity & AI Watermark Check** *(attach photo)*: `is this real or fake?` / `is this AI-generated or copied?`
+- **Quality, Damage & Conservation** *(attach scan)*: `is this damaged, torn, mouldy, or faded? how do we heal or preserve it?`
 - **Face Identification & Lookup**: `who is this? show all details and photos` / `show lando zawawi photos, 2 photos only` / `show lando zawawi photo wearing songkok`
-- **Historical Scripts & Summaries**: `read this jawi manuscript, convert to rumi, and explain the meaning` / `transcribe this kawi/pallava/rencong inscription` / `summarize this document`
-- **Archive Integrity & System Health**: `are our archive files safe or duplicated?` / `how is the system doing? is anything slow or overloaded?`
+- **Historical Scripts & Summaries**: `read this jawi manuscript, convert to rumi, and explain the meaning` / `summarize this document`
+- **Archive Integrity & System Health**: `are our archive files safe or duplicated?` / `how is the system doing?`
 
 ### Bahasa Melayu (Malaysia) Prompts
-- **Semakan Umum & Ketulenan** *(lampirkan gambar)*: `tengok gambar ini` / `gambar ini tulen, palsu, gambar AI, atau salinan?` / `sudah ada dalam sistem ke?`
-- **Kualiti, Kerosakan & Pemuliharaan** *(lampirkan imbasan)*: `gambar ini rosak, koyak, pudar, atau berkulat tak? macam mana nak baiki dan jaga?` / `jelaskan dan baiki gambar lama ini`
-- **Pengecaman Wajah & Carian Profil**: `siapa ini? tunjuk maklumat penuh dan semua gambar beliau` / `tunjuk 2 gambar lando zawawi sahaja` / `tunjuk gambar lando zawawi yang pakai songkok`
-- **OCR Tulisan Lama & Ringkasan**: `baca tulisan jawi ini, tukar ke rumi, dan jelaskan maksudnya` / `ringkaskan dokumen ini`
-- **Integriti Fail & Kesihatan Sistem**: `semak fail arkib ada rosak atau pendua tak?` / `sistem ok ke? kenapa lambat?`
+- **Perbandingan Sebelum & Selepas**: `buka alat perbandingan sebelum dan selepas` / *(lampirkan imbasan)* `jelaskan dan baiki gambar lama ini`
+- **Semakan Umum & Ketulenan** *(lampirkan gambar)*: `gambar ini tulen, palsu, gambar AI, atau salinan?`
+- **Kualiti, Kerosakan & Pemuliharaan** *(lampirkan imbasan)*: `gambar ini rosak, koyak, pudar, atau berkulat tak? macam mana nak baiki dan jaga?`
+- **Pengecaman Wajah & Carian Profil**: `siapa ini? tunjuk maklumat penuh dan semua gambar beliau` / `tunjuk gambar lando zawawi yang pakai songkok`
+- **OCR Tulisan Lama & Ringkasan**: `baca dan tukar teks Jawi ini ke Rumi: مک تتکال ايت سݢل راج٢ برهيمڤون قد ١٣ محرم ١٣٢٤` / `ringkaskan dokumen ini`
 
 ---
 
-## 10. Project Structure
+## 12. Project Structure
 
 ```text
+├── build.rs                        # Build-time FST DBP Jawi lexicon compiler
 ├── Cargo.toml                      # Pure-Rust package manifest (arkib-server v2.0.0)
 ├── Cargo.lock                      # Reproducible Rust dependency lockfile
 ├── src/                            # 100% safe Rust (#![forbid(unsafe_code)])
-│   ├── main.rs                     # Tokio + Axum server, /health, RAII monitor guard, graceful shutdown & CLI
+│   ├── main.rs                     # Tokio + Axum server, /health, RAII InFlightGuard & CLI
 │   ├── config.rs                   # Environment config, paths & ONNX/DLL auto-discovery
-│   ├── biometrics.rs               # Native YuNet ONNX face detector + CLIP ViT-B/32 embedder
-│   ├── vector_store.rs             # Embedded zero-clone top-K 768-D SIMD cosine vector store
-│   ├── vision_ops.rs               # EXIF orientation, unified 16x16 perceptual aHash, OCR line-valley chunker
-│   ├── jawi.rs                     # Jawi-to-Rumi orthographic & phonetic skeleton decoder
-│   ├── ancient_scripts.rs          # Jawi, Pallava, Kawi & Rencong script decoder & archival glossary
-│   ├── forensics.rs                # 4-layer authenticity, C2PA/IPTC/JPEG/ELA/LSB forensics, duplicate guard & SHA-256 manifest
-│   ├── conservation.rs             # Image quality, tear/faded/mold/aging classifier, healing advisor & digital enhancer
-│   ├── monitor.rs                  # Live CPU/RAM/Disk/Ollama telemetry, abnormality & burden overload advisor
-│   ├── archives.rs                 # Managed Locations, Documents, People/Document Group Folders & summarizer
-│   ├── metadata.rs                 # Slugs, identity normalization, 12h time, bilingual privacy classification
-│   ├── service.rs                  # Core business logic & concurrent tokio::join! pipelines for all 24 MCP tools
-│   ├── mcp_sse.rs                  # MCP-over-SSE server (/sse & /messages/) + DNS-rebinding Host guard
-│   └── admin.rs                    # Headless CORS-enabled JSON Admin API consumed natively inside LibreChat
+│   ├── biometrics.rs               # YuNet 5-point alignment + MobileFaceNet / CLIP ViT-B/32
+│   ├── vector_store.rs             # Versioned zero-clone top-K SIMD cosine vector store
+│   ├── vision_ops.rs               # EXIF orientation, 16x16 aHash, rubrication, Sauvola, OCR chunker
+│   ├── jawi.rs                     # FST DBP lexicon Jawi-to-Rumi decoder & Hijri→Masihi colophon
+│   ├── ancient_scripts.rs          # Jawi, Pallava, Kawi & Rencong script decoder
+│   ├── export.rs                   # Pure-Rust RTL DOCX & multi-page A4 PDF exporter
+│   ├── forensics.rs                # 4-layer authenticity, C2PA/IPTC/JPEG/ELA/LSB & SHA-256 manifest
+│   ├── conservation.rs             # Quality scoring, tear/faded/mold/aging lab & 5-mode enhancer
+│   ├── compare.rs                  # Before/After studio: changed-pages LCS diff, metrics & migration fidelity
+│   ├── archives.rs                 # Locations, Documents, Group Folders, lopdf/DOCX & AI Upload Auto-Fill
+│   ├── categories.rs               # Maintainable Categories CRUD with document cascade
+│   ├── revisions.rs                # Created/Added/Updated/Deleted revision diffs, snapshots & disk scan
+│   ├── audit.rs                    # Audit telemetry, 8-rule Rules Engine, Z-score outliers & AI explainer
+│   ├── preferences.rs              # Time-decayed click preference learning & document recommendations
+│   ├── analytics.rs                # Chatbot prompt, search history & recency-weighted hot-topics engine
+│   ├── canvas.rs                   # Split-screen Arkib Canvas API (OCR, Enrollment, Compare Studio)
+│   ├── monitor.rs                  # Live CPU/RAM/Disk/Ollama telemetry & overload advisor
+│   ├── metadata.rs                 # Slugs, identity normalization & bilingual privacy classification
+│   ├── service.rs                  # Business logic & concurrent pipelines for all 25 MCP tools
+│   ├── mcp_sse.rs                  # MCP-over-SSE server (/sse & /messages/) + Host guard
+│   └── admin.rs                    # Headless CORS JSON Admin API + Audit Middleware
 ├── config/
 │   ├── librechat/                  # librechat.yaml, docker-compose.override.yml, custom-index.html, royal-theme.css, admin-embed.js
 │   └── settings.json               # Thresholds, ports & vector store settings
 ├── data/
+│   ├── lexicon/dbp_jawi_rumi.tsv   # Verified DBP Jawi–Rumi lexicon (compiled to FST)
 │   └── raw/staff_enroll/           # Sample enrollment source portraits
 ├── models/
 │   └── Modelfile                   # Ollama Modelfile for qwen3-vl:4b-instruct-16k
 ├── reports/
-│   └── pipeline_diagram.svg        # Pure-Rust architecture diagram
+│   └── pipeline_diagram.svg        # Updated ArkibVision v2.0.0 architecture diagram
 ├── Dockerfile                      # Multi-stage Pure-Rust Docker image with HEALTHCHECK
 ├── start.bat                       # One-click launch (Ollama + arkib-server.exe + LibreChat)
 ├── stop.bat                        # One-click shutdown for arkib-server.exe
@@ -306,35 +327,40 @@ Clients do not need IT jargon — everyday wording is automatically mapped to th
 
 ---
 
-## 11. Configuration & Environment Variables
+## 13. Configuration & Environment Variables
 
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
-| `ARKIB_HOST` | `0.0.0.0` | Bind host for MCP SSE, `/health`, & Admin JSON API |
-| `ARKIB_PORT` | `8005` | Port for `/sse`, `/health`, and `/admin/api/*` |
+| `ARKIB_HOST` | `0.0.0.0` | Bind host for MCP SSE, `/health`, `/admin/api/*`, & `/canvas/api/*` |
+| `ARKIB_PORT` | `8005` | Server port |
 | `ARKIB_ADMIN_USER` | `admin` | Admin Portal login username |
 | `ARKIB_ADMIN_PASS` | `admin123` | Admin Portal login password (override in production) |
 | `ARKIB_ADMIN_KEY` | *(persisted in `.arkib_admin_key`)* | Internal secret key for Admin-only MCP operations |
-| `ARKIB_OLLAMA_URL` | `http://127.0.0.1:11434/api/chat` | Local Ollama endpoint for visual search, summarization & visual forensic audit |
+| `ARKIB_OLLAMA_URL` | `http://127.0.0.1:11434/api/chat` | Local Ollama endpoint |
 | `ARKIB_VISION_MODEL` | `qwen3-vl:4b-instruct-16k` | Local Ollama multimodal model |
 | `ORT_DYLIB_PATH` | *(auto-discovered in `models/runtime/`)* | Path to `onnxruntime.dll` / `libonnxruntime.so` |
 | `ARKIB_YUNET_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `yunet_face_detector.onnx` |
-| `ARKIB_CLIP_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `patch32_v1.onnx` |
+| `ARKIB_MOBILEFACENET_MODEL` | *(optional `models/w600k_mbf.onnx`)* | Optional 512-D MobileFaceNet face encoder |
+| `ARKIB_CLIP_MODEL` | *(auto-discovered in `models/` or `~/.cache/`)* | Path to `patch32_v1.onnx` (768-D fallback & location encoder) |
 | `LIBRECHAT_DIR` | `../LibreChat` | Path to sibling LibreChat directory |
-| `LIBRECHAT_URL` | `http://localhost:3080` | Base URL for profile gallery, OCR chunks, enhanced images & Admin Portal redirect |
+| `LIBRECHAT_URL` | `http://localhost:3080` | Base URL for galleries, OCR chunks, enhanced images & Admin Portal |
 
 ---
 
-## 12. Testing & Verification
+## 14. Testing & Verification
 
 ```powershell
 # Format check + strict zero-warning lint
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 
-# Run all 21 unit tests (biometrics, vector store, vision ops & dense Jawi chunking, Modern/Old Jawi,
-# ancient scripts, forensics/duplicate guard/visual fusion, conservation, archives/groups, monitor, MCP catalog)
+# Run all 39 unit tests (biometrics, vector store, vision ops, FST Jawi & Hijri colophon,
+# ancient scripts, DOCX/PDF export, forensics, conservation, compare studio, categories,
+# revisions, audit rules/outliers, click preferences, behavior analytics, canvas, monitor, MCP)
 cargo test
+
+# Verify Admin Portal & Canvas frontend JS syntax
+node --check config/librechat/admin-embed.js
 
 # Build optimized release binary
 cargo build --release

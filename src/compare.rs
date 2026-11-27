@@ -28,7 +28,12 @@ pub fn compare_media_dir(cfg: &AppConfig) -> PathBuf {
         .join("compare_media")
 }
 
-fn save_compare_media(cfg: &AppConfig, prefix: &str, filename: &str, bytes: &[u8]) -> Option<String> {
+fn save_compare_media(
+    cfg: &AppConfig,
+    prefix: &str,
+    filename: &str,
+    bytes: &[u8],
+) -> Option<String> {
     let dir = compare_media_dir(cfg);
     fs::create_dir_all(&dir).ok()?;
     let ext = Path::new(filename)
@@ -37,7 +42,10 @@ fn save_compare_media(cfg: &AppConfig, prefix: &str, filename: &str, bytes: &[u8
         .map(|s| s.to_ascii_lowercase())
         .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric()))
         .unwrap_or_else(|| "bin".to_string());
-    let out_name = format!("{prefix}_{}.{ext}", &Uuid::new_v4().simple().to_string()[..10]);
+    let out_name = format!(
+        "{prefix}_{}.{ext}",
+        &Uuid::new_v4().simple().to_string()[..10]
+    );
     fs::write(dir.join(&out_name), bytes).ok()?;
     Some(format!("/canvas/api/compare-media/{out_name}"))
 }
@@ -271,14 +279,8 @@ pub fn compare_pages_only_changed(
 
     for idx in 0..total_pages {
         let page_num = idx + 1;
-        let b_txt = before_pages
-            .get(idx)
-            .map(|(_, s)| s.as_str())
-            .unwrap_or("");
-        let a_txt = after_pages
-            .get(idx)
-            .map(|(_, s)| s.as_str())
-            .unwrap_or("");
+        let b_txt = before_pages.get(idx).map(|(_, s)| s.as_str()).unwrap_or("");
+        let a_txt = after_pages.get(idx).map(|(_, s)| s.as_str()).unwrap_or("");
 
         if b_txt.trim() == a_txt.trim() {
             unchanged_page_numbers.push(page_num);
@@ -293,8 +295,12 @@ pub fn compare_pages_only_changed(
         } else {
             "Modified"
         };
-        let is_rtl = b_txt.chars().any(|c| ('\u{0600}'..='\u{06FF}').contains(&c))
-            || a_txt.chars().any(|c| ('\u{0600}'..='\u{06FF}').contains(&c));
+        let is_rtl = b_txt
+            .chars()
+            .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c))
+            || a_txt
+                .chars()
+                .any(|c| ('\u{0600}'..='\u{06FF}').contains(&c));
 
         changed_pages.push(json!({
             "page": page_num,
@@ -390,7 +396,8 @@ fn analyze_image_conservation_bytes(filename: &str, bytes: &[u8]) -> Option<Valu
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("png");
-    let tmp = std::env::temp_dir().join(format!("arkib_cmp_cons_{}.{ext}", Uuid::new_v4().simple()));
+    let tmp =
+        std::env::temp_dir().join(format!("arkib_cmp_cons_{}.{ext}", Uuid::new_v4().simple()));
     fs::write(&tmp, bytes).ok()?;
     let res = analyze_image_quality_and_conservation(&tmp).ok();
     let _ = fs::remove_file(&tmp);
@@ -402,7 +409,8 @@ fn count_exif_tags_bytes(filename: &str, bytes: &[u8]) -> usize {
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("bin");
-    let tmp = std::env::temp_dir().join(format!("arkib_cmp_meta_{}.{ext}", Uuid::new_v4().simple()));
+    let tmp =
+        std::env::temp_dir().join(format!("arkib_cmp_meta_{}.{ext}", Uuid::new_v4().simple()));
     if fs::write(&tmp, bytes).is_err() {
         return 0;
     }
@@ -422,30 +430,31 @@ fn build_conservation_comparison(
     perceptual_dist: Option<u32>,
 ) -> Vec<Value> {
     let mut rows = Vec::new();
-    let add_score_row = |rows: &mut Vec<Value>, label: &str, b: Option<f64>, a: Option<f64>, unit: &str| {
-        if let (Some(bv), Some(av)) = (b, a) {
-            let delta = ((av - bv) * 10.0).round() / 10.0;
-            let status = if delta > 1.0 {
-                "Improved"
-            } else if delta < -1.0 {
-                "Degraded"
-            } else {
-                "Stable"
-            };
-            let delta_str = if delta > 0.0 {
-                format!("+{delta}{unit}")
-            } else {
-                format!("{delta}{unit}")
-            };
-            rows.push(json!({
-                "metric": label,
-                "before": format!("{bv}{unit}"),
-                "after": format!("{av}{unit}"),
-                "delta": delta_str,
-                "status": status,
-            }));
-        }
-    };
+    let add_score_row =
+        |rows: &mut Vec<Value>, label: &str, b: Option<f64>, a: Option<f64>, unit: &str| {
+            if let (Some(bv), Some(av)) = (b, a) {
+                let delta = ((av - bv) * 10.0).round() / 10.0;
+                let status = if delta > 1.0 {
+                    "Improved"
+                } else if delta < -1.0 {
+                    "Degraded"
+                } else {
+                    "Stable"
+                };
+                let delta_str = if delta > 0.0 {
+                    format!("+{delta}{unit}")
+                } else {
+                    format!("{delta}{unit}")
+                };
+                rows.push(json!({
+                    "metric": label,
+                    "before": format!("{bv}{unit}"),
+                    "after": format!("{av}{unit}"),
+                    "delta": delta_str,
+                    "status": status,
+                }));
+            }
+        };
 
     if let (Some(bc), Some(ac)) = (before_cons, after_cons) {
         add_score_row(
@@ -482,9 +491,18 @@ fn build_conservation_comparison(
             "delta": if bd == ad { "Unchanged" } else { "Updated" },
             "status": if ad == "none" || (bd == "heavy" && ad != "heavy") { "Improved" } else if bd == ad { "Stable" } else { "Review" },
         }));
-        for (dk, dlbl) in [("faded", "Fading"), ("aging", "Yellowing / Aging"), ("mold", "Mold / Stain"), ("tear", "Tear / Crease")] {
-            let bl = bc["damage_assessment"][dk]["level"].as_str().unwrap_or("none");
-            let al = ac["damage_assessment"][dk]["level"].as_str().unwrap_or("none");
+        for (dk, dlbl) in [
+            ("faded", "Fading"),
+            ("aging", "Yellowing / Aging"),
+            ("mold", "Mold / Stain"),
+            ("tear", "Tear / Crease"),
+        ] {
+            let bl = bc["damage_assessment"][dk]["level"]
+                .as_str()
+                .unwrap_or("none");
+            let al = ac["damage_assessment"][dk]["level"]
+                .as_str()
+                .unwrap_or("none");
             if bl != "none" || al != "none" {
                 rows.push(json!({
                     "metric": dlbl,
@@ -573,7 +591,10 @@ fn build_migration_fidelity(
         "Stripped — Manual Review"
     };
 
-    let verdict = if dims_status == "Resized" || exif_status.starts_with("Stripped") || perceptual_dist.is_some_and(|d| d > 20) {
+    let verdict = if dims_status == "Resized"
+        || exif_status.starts_with("Stripped")
+        || perceptual_dist.is_some_and(|d| d > 20)
+    {
         "REVIEW"
     } else {
         "PASS"
@@ -612,8 +633,7 @@ pub fn build_file_comparison_session(
     after_name: &str,
     after_bytes: &[u8],
 ) -> Result<(String, Value), String> {
-    let both_images =
-        is_image_ext(Path::new(before_name)) && is_image_ext(Path::new(after_name));
+    let both_images = is_image_ext(Path::new(before_name)) && is_image_ext(Path::new(after_name));
     let before_sha = sha256_bytes(before_bytes);
     let after_sha = sha256_bytes(after_bytes);
 
@@ -778,13 +798,8 @@ pub fn build_archived_document_comparison(cfg: &AppConfig, slug: &str) -> Result
         after_img_url = fd.after_snapshot_url.clone();
         let b_sha = fd.before_sha256.clone().unwrap_or_default();
         let a_sha = fd.after_sha256.clone().unwrap_or_default();
-        conservation_metrics = build_conservation_comparison(
-            None,
-            None,
-            &b_sha,
-            &a_sha,
-            fd.perceptual_distance,
-        );
+        conservation_metrics =
+            build_conservation_comparison(None, None, &b_sha, &a_sha, fd.perceptual_distance);
         migration_fidelity = json!({
             "source_format": ext_format_label(&fd.filename),
             "target_format": ext_format_label(&fd.filename),
@@ -882,10 +897,34 @@ mod tests {
         assert_eq!(cmp["unchanged_page_count"], 2);
         let pages = cmp["changed_pages"].as_array().unwrap();
         assert_eq!(pages[0]["page"], 2);
-        assert!(pages[0]["before_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "farjanjin" && t["kind"] == "del"));
-        assert!(pages[0]["after_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "perjanjian" && t["kind"] == "add"));
-        assert!(pages[0]["unified_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "farjanjin" && t["kind"] == "del"));
-        assert!(pages[0]["unified_tokens"].as_array().unwrap().iter().any(|t| t["text"] == "perjanjian" && t["kind"] == "add"));
+        assert!(
+            pages[0]["before_tokens"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["text"] == "farjanjin" && t["kind"] == "del")
+        );
+        assert!(
+            pages[0]["after_tokens"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["text"] == "perjanjian" && t["kind"] == "add")
+        );
+        assert!(
+            pages[0]["unified_tokens"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["text"] == "farjanjin" && t["kind"] == "del")
+        );
+        assert!(
+            pages[0]["unified_tokens"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t["text"] == "perjanjian" && t["kind"] == "add")
+        );
     }
 
     #[test]
@@ -908,8 +947,17 @@ mod tests {
         .unwrap()
         .clone();
         let rows = build_intake_metadata_comparison(&before, &after);
-        assert!(rows.iter().any(|r| r["field"] == "title" && r["status"] == "Updated"));
-        assert!(rows.iter().any(|r| r["field"] == "category" && r["status"] == "Unchanged"));
-        assert!(rows.iter().any(|r| r["field"] == "author_or_source" && r["status"] == "Added"));
+        assert!(
+            rows.iter()
+                .any(|r| r["field"] == "title" && r["status"] == "Updated")
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["field"] == "category" && r["status"] == "Unchanged")
+        );
+        assert!(
+            rows.iter()
+                .any(|r| r["field"] == "author_or_source" && r["status"] == "Added")
+        );
     }
 }

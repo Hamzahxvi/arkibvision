@@ -185,7 +185,10 @@ fn is_ignored_diff_key(key: &str) -> bool {
 }
 
 /// Compute clean, field-by-field before/after differences between two JSON objects.
-pub fn compute_json_diffs(before: &Map<String, Value>, after: &Map<String, Value>) -> Vec<FieldDiff> {
+pub fn compute_json_diffs(
+    before: &Map<String, Value>,
+    after: &Map<String, Value>,
+) -> Vec<FieldDiff> {
     let mut keys: BTreeSet<&str> = BTreeSet::new();
     for k in before.keys() {
         if !is_ignored_diff_key(k) {
@@ -249,14 +252,8 @@ pub fn compute_json_diffs(before: &Map<String, Value>, after: &Map<String, Value
             continue;
         }
 
-        let bv = before
-            .get(k)
-            .map(format_value_compact)
-            .unwrap_or_default();
-        let av = after
-            .get(k)
-            .map(format_value_compact)
-            .unwrap_or_default();
+        let bv = before.get(k).map(format_value_compact).unwrap_or_default();
+        let av = after.get(k).map(format_value_compact).unwrap_or_default();
         if bv != av {
             let kind = if bv.is_empty() {
                 "added"
@@ -378,7 +375,9 @@ fn image_metrics(bytes: &[u8]) -> (Option<String>, Option<u64>) {
         return (None, None);
     };
     let dims = format!("{}×{}", img.width(), img.height());
-    let small = img.grayscale().resize_exact(8, 8, image::imageops::FilterType::Triangle);
+    let small = img
+        .grayscale()
+        .resize_exact(8, 8, image::imageops::FilterType::Triangle);
     let luma = small.to_luma8();
     let sum: u64 = luma.pixels().map(|p| u64::from(p.0[0])).sum();
     let mean = sum / 64;
@@ -440,12 +439,16 @@ pub fn record_file_change(
     let before_snapshot_url = before_bytes.and_then(|bytes| {
         let name = format!("{rev_id}_before.{ext}");
         fs::write(snap_dir.join(&name), bytes).ok()?;
-        Some(format!("/admin/revision-snapshots/{entity_type}/{slug}/{name}"))
+        Some(format!(
+            "/admin/revision-snapshots/{entity_type}/{slug}/{name}"
+        ))
     });
     let after_snapshot_url = after_bytes.and_then(|bytes| {
         let name = format!("{rev_id}_after.{ext}");
         fs::write(snap_dir.join(&name), bytes).ok()?;
-        Some(format!("/admin/revision-snapshots/{entity_type}/{slug}/{name}"))
+        Some(format!(
+            "/admin/revision-snapshots/{entity_type}/{slug}/{name}"
+        ))
     });
 
     let action = match change_kind {
@@ -507,7 +510,10 @@ pub fn get_entity_revisions(cfg: &AppConfig, entity_type: &str, slug: &str) -> V
 }
 
 /// Fast summary count `(revision_count, last_modified_at)` for cards in Admin Portal.
-pub fn revision_summary_map(cfg: &AppConfig, entity_type: &str) -> HashMap<String, (usize, String)> {
+pub fn revision_summary_map(
+    cfg: &AppConfig,
+    entity_type: &str,
+) -> HashMap<String, (usize, String)> {
     let mut map = HashMap::new();
     let Some(et) = sanitize_segment(entity_type) else {
         return map;
@@ -661,8 +667,7 @@ mod tests {
 
     fn temp_cfg() -> AppConfig {
         let mut cfg = AppConfig::load();
-        let root =
-            std::env::temp_dir().join(format!("arkib_rev_test_{}", Uuid::new_v4().simple()));
+        let root = std::env::temp_dir().join(format!("arkib_rev_test_{}", Uuid::new_v4().simple()));
         cfg.revisions_dir = root.join("revisions");
         cfg.checksum_manifest_file = root.join("checksum_manifest.json");
         let _ = fs::create_dir_all(&cfg.revisions_dir);

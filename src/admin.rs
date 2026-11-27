@@ -151,7 +151,13 @@ async fn audit_middleware(State(state): State<AdminState>, req: Request, next: N
         .headers()
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or("127.0.0.1").trim().to_string())
+        .map(|s| {
+            s.split(',')
+                .next()
+                .unwrap_or("127.0.0.1")
+                .trim()
+                .to_string()
+        })
         .unwrap_or_else(|| "127.0.0.1".to_string());
     let started = std::time::Instant::now();
 
@@ -413,7 +419,10 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
         )
         // Audit Management, Rules Engine, Outlier Detection & AI Summary Report
         .route("/admin/api/audit/dashboard", get(admin_audit_dashboard))
-        .route("/admin/api/audit/inspect-sql", post(admin_audit_inspect_sql))
+        .route(
+            "/admin/api/audit/inspect-sql",
+            post(admin_audit_inspect_sql),
+        )
         .route("/admin/api/audit/explain", post(admin_audit_explain))
         .route(
             "/admin/api/audit/report/{format}",
@@ -424,10 +433,7 @@ pub fn admin_router(state: AdminState) -> Result<Router, String> {
             "/admin/api/preferences",
             get(admin_api_preferences).patch(admin_update_preferences),
         )
-        .route(
-            "/admin/api/preferences/track",
-            post(admin_track_preference),
-        )
+        .route("/admin/api/preferences/track", post(admin_track_preference))
         .route(
             "/admin/api/preferences/reset",
             post(admin_reset_preferences),
@@ -1894,7 +1900,11 @@ async fn admin_add_document_file(
     let force = is_force(&q);
     let cfg = state.service.cfg.clone();
     match tokio::task::spawn_blocking(move || {
-        let existing_path = cfg.documents_dir.join(&clean_slug).join("files").join(&upload_name);
+        let existing_path = cfg
+            .documents_dir
+            .join(&clean_slug)
+            .join("files")
+            .join(&upload_name);
         let before_bytes = fs::read(&existing_path).ok();
         let doc = archives::add_document_file(&cfg, &clean_slug, &upload_name, &bytes, force)?;
         let title = doc["title"].as_str().unwrap_or(&clean_slug).to_string();
@@ -2635,7 +2645,6 @@ async fn admin_delete_location_group(
     }
 }
 
-
 // ─── Maintainable Categories CRUD Endpoints ──────────────────────────────────
 
 #[derive(Deserialize)]
@@ -2810,7 +2819,10 @@ async fn admin_analyze_upload(
     let mut upload_bytes: Option<Vec<u8>> = None;
     let mut upload_name = String::new();
     while let Ok(Some(field)) = multipart.next_field().await {
-        if matches!(field.name(), Some("file") | Some("image") | Some("document")) {
+        if matches!(
+            field.name(),
+            Some("file") | Some("image") | Some("document")
+        ) {
             upload_name = field.file_name().unwrap_or("upload.txt").to_string();
             if let Ok(bytes) = field.bytes().await {
                 upload_bytes = Some(bytes.to_vec());
@@ -3004,7 +3016,11 @@ async fn admin_audit_export_report(
         format!("Total Events Analyzed: {}", snapshot.total_events_analyzed),
         format!(
             "Severity Breakdown: CRITICAL={}, HIGH={}, MEDIUM={}, LOW={}",
-            snapshot.severity_counts.get("CRITICAL").copied().unwrap_or(0),
+            snapshot
+                .severity_counts
+                .get("CRITICAL")
+                .copied()
+                .unwrap_or(0),
             snapshot.severity_counts.get("HIGH").copied().unwrap_or(0),
             snapshot.severity_counts.get("MEDIUM").copied().unwrap_or(0),
             snapshot.severity_counts.get("LOW").copied().unwrap_or(0),
@@ -3216,7 +3232,6 @@ async fn admin_reset_preferences(State(state): State<AdminState>) -> Response {
             .into_response(),
     }
 }
-
 
 // ─── User Behavior, Search History & Chatbot Hot-Topics Analytics ────────────
 

@@ -71,28 +71,33 @@ pub fn save_canvas_session(
     Ok(id)
 }
 
-/// Removes stale Canvas session files older than `max_age_secs` (default 24 hours).
+/// Removes stale Canvas session files and staged compare media older than `max_age_secs` (default 24 hours).
 pub fn cleanup_stale_canvas_sessions(cfg: &AppConfig, max_age_secs: u64) -> (usize, u64) {
-    let dir = canvas_sessions_dir(cfg);
+    let dirs = [
+        canvas_sessions_dir(cfg),
+        crate::compare::compare_media_dir(cfg),
+    ];
     let mut removed = 0usize;
     let mut freed = 0u64;
     let now = SystemTime::now();
-    if let Ok(entries) = fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if !p.is_file() {
-                continue;
-            }
-            if let Ok(meta) = fs::metadata(&p) {
-                let age = meta
-                    .modified()
-                    .ok()
-                    .and_then(|m| now.duration_since(m).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                if age >= max_age_secs && fs::remove_file(&p).is_ok() {
-                    removed += 1;
-                    freed += meta.len();
+    for dir in dirs {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if !p.is_file() {
+                    continue;
+                }
+                if let Ok(meta) = fs::metadata(&p) {
+                    let age = meta
+                        .modified()
+                        .ok()
+                        .and_then(|m| now.duration_since(m).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    if age >= max_age_secs && fs::remove_file(&p).is_ok() {
+                        removed += 1;
+                        freed += meta.len();
+                    }
                 }
             }
         }
@@ -130,7 +135,10 @@ pub fn canvas_router(state: AdminState) -> Router {
             "/canvas/api/submit-enrollment",
             post(canvas_submit_enrollment),
         )
-        .route("/canvas/api/track-chat-query", post(canvas_track_chat_query))
+        .route(
+            "/canvas/api/track-chat-query",
+            post(canvas_track_chat_query),
+        )
         .route(
             "/canvas/api/compare-media/{filename}",
             get(canvas_serve_compare_media),

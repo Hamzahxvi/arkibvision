@@ -131,6 +131,19 @@ pub fn append_audit_event(cfg: &AppConfig, event: &AuditEvent) {
     {
         let _ = writeln!(file, "{line}");
     }
+    // Bounded log compaction: keep latest 2,500 lines when file exceeds 1.5 MB so read latency stays <2 ms.
+    if fs::metadata(&cfg.audit_log_file).is_ok_and(|m| m.len() > 1_500_000)
+        && let Ok(raw) = fs::read_to_string(&cfg.audit_log_file)
+    {
+        let lines: Vec<&str> = raw.lines().filter(|l| !l.trim().is_empty()).collect();
+        if lines.len() > 2500 {
+            let trimmed = lines[lines.len() - 2500..].join("\n") + "\n";
+            let tmp = cfg.audit_log_file.with_extension("jsonl.tmp");
+            if fs::write(&tmp, trimmed).is_ok() {
+                let _ = fs::rename(&tmp, &cfg.audit_log_file);
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -458,7 +471,10 @@ pub fn evaluate_rules(events: &[AuditEvent]) -> Vec<RuleAlert> {
             rule_id: "R004_OFF_HOURS_MUTATION".to_string(),
             severity: "MEDIUM".to_string(),
             category: "ACCESS".to_string(),
-            title: format!("Off-Hours Archival Data Modification ({} events)", off_hours_writes.len()),
+            title: format!(
+                "Off-Hours Archival Data Modification ({} events)",
+                off_hours_writes.len()
+            ),
             description: format!(
                 "Detected {} data modification(s) between 00:00 and 05:00 local time.",
                 off_hours_writes.len()
@@ -474,7 +490,8 @@ pub fn evaluate_rules(events: &[AuditEvent]) -> Vec<RuleAlert> {
                 .take(5)
                 .map(|e| format!("{} {} by {} ({})", e.action, e.path, e.actor, e.timestamp))
                 .collect(),
-            recommended_action: "Verify whether after-hours archival cataloging was scheduled.".to_string(),
+            recommended_action: "Verify whether after-hours archival cataloging was scheduled."
+                .to_string(),
         });
     }
 
@@ -897,7 +914,14 @@ Do not invent events not present in the JSON:\n\n{}",
 mod tests {
     use super::*;
 
-    fn mk_event(actor: &str, action: &str, path: &str, query: &str, payload: &str, epoch: i64) -> AuditEvent {
+    fn mk_event(
+        actor: &str,
+        action: &str,
+        path: &str,
+        query: &str,
+        payload: &str,
+        epoch: i64,
+    ) -> AuditEvent {
         AuditEvent {
             id: format!("e_{epoch}"),
             timestamp: Utc.timestamp_opt(epoch, 0).single().unwrap().to_rfc3339(),
@@ -922,13 +946,42 @@ mod tests {
         let base = 1_750_000_000i64;
         let events = vec![
             mk_event("admin", "DELETE", "/admin/api/documents/a", "", "", base),
-            mk_event("admin", "DELETE", "/admin/api/documents/b", "", "", base + 10),
-            mk_event("admin", "DELETE", "/admin/api/documents/c", "", "", base + 20),
-            mk_event("guest", "READ", "/admin/api/documents", "q=' OR 1=1 UNION SELECT * FROM users--", "", base + 30),
+            mk_event(
+                "admin",
+                "DELETE",
+                "/admin/api/documents/b",
+                "",
+                "",
+                base + 10,
+            ),
+            mk_event(
+                "admin",
+                "DELETE",
+                "/admin/api/documents/c",
+                "",
+                "",
+                base + 20,
+            ),
+            mk_event(
+                "guest",
+                "READ",
+                "/admin/api/documents",
+                "q=' OR 1=1 UNION SELECT * FROM users--",
+                "",
+                base + 30,
+            ),
         ];
         let alerts = evaluate_rules(&events);
-        assert!(alerts.iter().any(|a| a.rule_id == "R001_SUSPICIOUS_DELETE_BURST"));
-        assert!(alerts.iter().any(|a| a.rule_id == "R005_SQL_INJECTION_PATTERN"));
+        assert!(
+            alerts
+                .iter()
+                .any(|a| a.rule_id == "R001_SUSPICIOUS_DELETE_BURST")
+        );
+        assert!(
+            alerts
+                .iter()
+                .any(|a| a.rule_id == "R005_SQL_INJECTION_PATTERN")
+        );
 
         let sql_res = inspect_external_sql_logs(
             "DELETE FROM archival_records;\nSELECT * FROM confidential_profiles;\n",
@@ -943,13 +996,31 @@ mod tests {
         let mut events = Vec::new();
         // Normal baseline: 1 event per hour for 6 hours
         for h in 0..6 {
-            events.push(mk_event("alice", "READ", "/admin/api/documents", "", "", base + h * 3600));
+            events.push(mk_event(
+                "alice",
+                "READ",
+                "/admin/api/documents",
+                "",
+                "",
+                base + h * 3600,
+            ));
         }
         // Sudden spike: 18 events in hour 7
         for i in 0..18 {
-            events.push(mk_event("alice", "READ", "/admin/api/documents", "", "", base + 7 * 3600 + i * 10));
+            events.push(mk_event(
+                "alice",
+                "READ",
+                "/admin/api/documents",
+                "",
+                "",
+                base + 7 * 3600 + i * 10,
+            ));
         }
         let outliers = detect_outliers(&events);
-        assert!(outliers.iter().any(|o| o.metric == "hourly_request_volume" && o.actor == "alice"));
+        assert!(
+            outliers
+                .iter()
+                .any(|o| o.metric == "hourly_request_volume" && o.actor == "alice")
+        );
     }
 }

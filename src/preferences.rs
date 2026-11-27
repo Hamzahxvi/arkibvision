@@ -169,7 +169,9 @@ pub fn update_pinned_preferences(
 
 pub fn reset_preferences(cfg: &AppConfig, user: &str) -> Result<Value, String> {
     let mut store = load_store(&cfg.preferences_file);
-    store.users.insert(user.to_string(), UserPrefProfile::default());
+    store
+        .users
+        .insert(user.to_string(), UserPrefProfile::default());
     save_store(&cfg.preferences_file, &store)?;
     Ok(json!({ "status": "reset", "user": user }))
 }
@@ -195,18 +197,19 @@ pub fn summarize_profile(profile: &UserPrefProfile, now_epoch: i64) -> Value {
     let mut fld_scores: HashMap<String, (String, f64, usize)> = HashMap::new();
     let mut tag_scores: HashMap<String, (String, f64, usize)> = HashMap::new();
 
-    let add_score = |map: &mut HashMap<String, (String, f64, usize)>, raw: &str, w: f64, click: usize| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let key = trimmed.to_ascii_lowercase();
-        let entry = map
-            .entry(key)
-            .or_insert_with(|| (trimmed.to_string(), 0.0, 0));
-        entry.1 += w;
-        entry.2 += click;
-    };
+    let add_score =
+        |map: &mut HashMap<String, (String, f64, usize)>, raw: &str, w: f64, click: usize| {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let key = trimmed.to_ascii_lowercase();
+            let entry = map
+                .entry(key)
+                .or_insert_with(|| (trimmed.to_string(), 0.0, 0));
+            entry.1 += w;
+            entry.2 += click;
+        };
 
     for ev in &profile.events {
         let w = event_base_weight(&ev.event_type) * decay_factor(now_epoch, ev.epoch_secs);
@@ -391,8 +394,15 @@ mod tests {
             )
             .expect("track");
         }
-        update_pinned_preferences(&cfg, "admin", None, None, None, Some(vec!["merdeka".into()]))
-            .expect("pin");
+        update_pinned_preferences(
+            &cfg,
+            "admin",
+            None,
+            None,
+            None,
+            Some(vec!["merdeka".into()]),
+        )
+        .expect("pin");
 
         let docs = vec![
             json!({

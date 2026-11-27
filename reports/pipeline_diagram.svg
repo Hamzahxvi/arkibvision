@@ -1,178 +1,187 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1760 1080" width="1760" height="1080" font-family="Segoe UI, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 820" width="1320" height="820" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 1 L 10 5 L 0 9 z" fill="#475569"/>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1120"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="accentBlue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="accentEmerald" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#059669"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="accentViolet" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="accentAmber" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#d97706"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#60a5fa"/>
     </marker>
-    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 1 L 10 5 L 0 9 z" fill="#1D4ED8"/>
+    <marker id="arrowSlate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#94a3b8"/>
     </marker>
-    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
-      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.08"/>
-    </filter>
   </defs>
-  <rect width="1760" height="1080" fill="#F8FAFC"/>
-  <rect x="28" y="20" width="1704" height="82" rx="14" fill="#1E3A8A"/>
-  <text x="56" y="56" fill="#FFFFFF" font-size="25" font-weight="700">ArkibVision Enterprise Vision, Biometric Identity &amp; Multilingual OCR Pipeline</text>
-  <text x="56" y="84" fill="#BFDBFE" font-size="14">100% Air-Gapped Pure-Rust Local AI  |  LibreChat + Ollama (Qwen3-VL) + Axum MCP SSE + ONNX (YuNet/CLIP) + Rust Vector Store &amp; Jawi Decoder</text>
-  <g filter="url(#shadow)">
-    <rect x="420" y="124" width="520" height="68" rx="14" fill="#1E3A8A" stroke="#60A5FA" stroke-width="2"/>
-    <text x="680.0" y="150" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="700">User in LibreChat Enterprise Chatbox (Port 3080)</text>
-    <text x="680.0" y="172" text-anchor="middle" fill="#DBEAFE" font-size="13">Enforced Spec: Enterprise Vision &amp; Identity  |  Pinned MCP Tools</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="1280" y="124" width="420" height="68" rx="14" fill="#0F172A" stroke="#60A5FA" stroke-width="2"/>
-    <text x="1490.0" y="150" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="700">Admin in ArkibVision Portal (Port 8005/admin)</text>
-    <text x="1490.0" y="172" text-anchor="middle" fill="#CBD5E1" font-size="13">Form Login (8h TTL)  |  Approve/Reject  |  Public/Private Editor</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="420" y="224" width="520" height="74" rx="12" fill="#1D4ED8" stroke="#93C5FD" stroke-width="2"/>
-    <text x="680.0" y="250" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="700">Local AI Engine (Ollama Port 11434)</text>
-    <text x="680.0" y="272" text-anchor="middle" fill="#EFF6FF" font-size="13">Single Model: qwen3-vl:4b-instruct-16k (16K Context)</text>
-    <text x="680.0" y="291" text-anchor="middle" fill="#EFF6FF" font-size="13">Vision, Face/Profile Tool Calling, Multilingual OCR &amp; Chat Titling</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="480" y="330" width="400" height="58" rx="12" fill="#EFF6FF" stroke="#1D4ED8" stroke-width="2"/>
-    <text x="680.0" y="356" text-anchor="middle" fill="#1E3A8A" font-size="15" font-weight="700">ArkibVision Pure-Rust MCP Router (Axum SSE :8005)</text>
-    <text x="680.0" y="378" text-anchor="middle" fill="#1E40AF" font-size="13">14 Local Tools  |  0% Python  |  Zero Cloud Dependencies</text>
-  </g>
-  <line x1="680" y1="192" x2="680" y2="224" stroke="#1D4ED8" stroke-width="2.4" marker-end="url(#arrow-blue)"/>
-  <line x1="680" y1="298" x2="680" y2="330" stroke="#1D4ED8" stroke-width="2.4" marker-end="url(#arrow-blue)"/>
-  <line x1="680" y1="388" x2="680" y2="414" stroke="#1D4ED8" stroke-width="2.4"/>
-  <line x1="237.5" y1="414" x2="1512.5" y2="414" stroke="#1D4ED8" stroke-width="2.4"/>
-  <line x1="237.5" y1="414" x2="237.5" y2="468" stroke="#1D4ED8" stroke-width="2.4" marker-end="url(#arrow-blue)"/>
-  <rect x="150.3" y="430.0" width="174.4" height="22" rx="6" fill="#EFF6FF" stroke="#1D4ED8" stroke-width="1.2"/>
-  <text x="237.5" y="445.0" text-anchor="middle" fill="#1E3A8A" font-size="11.5" font-weight="600">1. Attached Face Photo</text>
-  <line x1="662.5" y1="414" x2="662.5" y2="468" stroke="#1D4ED8" stroke-width="2.4" marker-end="url(#arrow-blue)"/>
-  <rect x="578.9" y="430.0" width="167.20000000000002" height="22" rx="6" fill="#EFF6FF" stroke="#1D4ED8" stroke-width="1.2"/>
-  <text x="662.5" y="445.0" text-anchor="middle" fill="#1E3A8A" font-size="11.5" font-weight="600">2. Name / Photo Query</text>
-  <line x1="1087.5" y1="414" x2="1087.5" y2="468" stroke="#1D4ED8" stroke-width="2.4" marker-end="url(#arrow-blue)"/>
-  <rect x="989.5" y="430.0" width="196.0" height="22" rx="6" fill="#EFF6FF" stroke="#1D4ED8" stroke-width="1.2"/>
-  <text x="1087.5" y="445.0" text-anchor="middle" fill="#1E3A8A" font-size="11.5" font-weight="600">3. Document / Handwriting</text>
-  <line x1="1512.5" y1="414" x2="1512.5" y2="468" stroke="#1D4ED8" stroke-width="2.4" marker-end="url(#arrow-blue)"/>
-  <rect x="1410.9" y="430.0" width="203.20000000000002" height="22" rx="6" fill="#EFF6FF" stroke="#1D4ED8" stroke-width="1.2"/>
-  <text x="1512.5" y="445.0" text-anchor="middle" fill="#1E3A8A" font-size="11.5" font-weight="600">4. New Face / ID Card Data</text>
-  <g filter="url(#shadow)">
-    <rect x="40" y="468" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#0284C7" stroke-width="2"/>
-    <rect x="40" y="468" width="395" height="34" rx="12" fill="#0284C7"/>
-    <rect x="40" y="488" width="395" height="14" fill="#0284C7"/>
-    <text x="237.5" y="490" text-anchor="middle" fill="#FFFFFF" font-size="14" font-weight="700">Pipeline A: Biometric Face ID</text>
-    <text x="237.5" y="522" text-anchor="middle" fill="#334155" font-size="13">arkib_identify_faces</text>
-    <text x="237.5" y="541" text-anchor="middle" fill="#334155" font-size="13">Resolve attachment (&lt;60s + aHash cache)</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="40" y="600" width="395" height="86" rx="12" fill="#FFFFFF" stroke="#38BDF8" stroke-width="2"/>
-    <text x="237.5" y="626" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">YuNet + CLIP ViT-B/32 (768-D)</text>
-    <text x="237.5" y="648" text-anchor="middle" fill="#334155" font-size="13">Face detection &amp; vector extraction</text>
-    <text x="237.5" y="667" text-anchor="middle" fill="#334155" font-size="13">Pre-normalized SIMD cosine match (&gt;= 0.88)</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="40" y="722" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#38BDF8" stroke-width="2"/>
-    <text x="237.5" y="748" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">Auto-Gallery Capture &amp; Status</text>
-    <text x="237.5" y="770" text-anchor="middle" fill="#334155" font-size="13">MATCHED: Name + Public Profile</text>
-    <text x="237.5" y="789" text-anchor="middle" fill="#334155" font-size="13">Auto-save new photo (&gt;= 0.90, new aHash)</text>
-    <text x="237.5" y="808" text-anchor="middle" fill="#334155" font-size="13">NO_FACE_DETECTED -&gt; Auto OCR Chunking</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="40" y="860" width="395" height="96" rx="16" fill="#EFF6FF" stroke="#1E3A8A" stroke-width="2"/>
-    <text x="237.5" y="886" text-anchor="middle" fill="#1E3A8A" font-size="15" font-weight="700">Embedded Rust Vector Store</text>
-    <text x="237.5" y="908" text-anchor="middle" fill="#334155" font-size="13">data/processed/arkib_vectors.json</text>
-    <text x="237.5" y="927" text-anchor="middle" fill="#334155" font-size="13">768-D Unit Vectors  |  Atomic Persistence</text>
-  </g>
-  <line x1="237.5" y1="564" x2="237.5" y2="600" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="237.5" y1="686" x2="237.5" y2="722" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="237.5" y1="818" x2="237.5" y2="860" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <g filter="url(#shadow)">
-    <rect x="465" y="468" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#059669" stroke-width="2"/>
-    <rect x="465" y="468" width="395" height="34" rx="12" fill="#059669"/>
-    <rect x="465" y="488" width="395" height="14" fill="#059669"/>
-    <text x="662.5" y="490" text-anchor="middle" fill="#FFFFFF" font-size="14" font-weight="700">Pipeline B: Profile &amp; Photo Search</text>
-    <text x="662.5" y="522" text-anchor="middle" fill="#334155" font-size="13">arkib_search_identity</text>
-    <text x="662.5" y="541" text-anchor="middle" fill="#334155" font-size="13">Case &amp; spacing insensitive name lookup</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="465" y="600" width="395" height="86" rx="12" fill="#FFFFFF" stroke="#34D399" stroke-width="2"/>
-    <text x="662.5" y="626" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">Count Limit &amp; Visual Filter</text>
-    <text x="662.5" y="648" text-anchor="middle" fill="#334155" font-size="13">&quot;3 photos only&quot; -&gt; exact slice in Rust</text>
-    <text x="662.5" y="667" text-anchor="middle" fill="#334155" font-size="13">&quot;wear songkok&quot; -&gt; visual_index.json (0.00s)</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="465" y="722" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#34D399" stroke-width="2"/>
-    <text x="662.5" y="748" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">Privacy &amp; Table Formatting</text>
-    <text x="662.5" y="770" text-anchor="middle" fill="#334155" font-size="13">Strips all Private Data (Public Only)</text>
-    <text x="662.5" y="789" text-anchor="middle" fill="#334155" font-size="13">Formats per-photo Time to 12h AM/PM</text>
-    <text x="662.5" y="808" text-anchor="middle" fill="#334155" font-size="13">Centered Markdown Tables in LibreChat</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="465" y="860" width="395" height="96" rx="16" fill="#ECFDF5" stroke="#047857" stroke-width="2"/>
-    <text x="662.5" y="886" text-anchor="middle" fill="#065F46" font-size="15" font-weight="700">Trusted Profile Store</text>
-    <text x="662.5" y="908" text-anchor="middle" fill="#334155" font-size="13">data/processed/profiles/&lt;Slug&gt;/</text>
-    <text x="662.5" y="927" text-anchor="middle" fill="#334155" font-size="13">metadata.json, visual_index.json, images/</text>
-  </g>
-  <line x1="662.5" y1="564" x2="662.5" y2="600" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="662.5" y1="686" x2="662.5" y2="722" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="662.5" y1="818" x2="662.5" y2="860" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <g filter="url(#shadow)">
-    <rect x="890" y="468" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#7C3AED" stroke-width="2"/>
-    <rect x="890" y="468" width="395" height="34" rx="12" fill="#7C3AED"/>
-    <rect x="890" y="488" width="395" height="14" fill="#7C3AED"/>
-    <text x="1087.5" y="490" text-anchor="middle" fill="#FFFFFF" font-size="14" font-weight="700">Pipeline C: Visual OCR &amp; Jawi</text>
-    <text x="1087.5" y="522" text-anchor="middle" fill="#334155" font-size="13">arkib_ocr_document</text>
-    <text x="1087.5" y="541" text-anchor="middle" fill="#334155" font-size="13">Horizontal edge-energy projection (&lt;50ms)</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="890" y="600" width="395" height="86" rx="12" fill="#FFFFFF" stroke="#A78BFA" stroke-width="2"/>
-    <text x="1087.5" y="626" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">Line-Valley Adaptive Chunker</text>
-    <text x="1087.5" y="648" text-anchor="middle" fill="#334155" font-size="13">Slices Top / Middle / Bottom at whitespace</text>
-    <text x="1087.5" y="667" text-anchor="middle" fill="#334155" font-size="13">Auto-contrast + 1.4x sharpen -&gt; ocr-chunks/</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="890" y="722" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#A78BFA" stroke-width="2"/>
-    <text x="1087.5" y="748" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">Jawi-to-Rumi Phonetic Decoder</text>
-    <text x="1087.5" y="770" text-anchor="middle" fill="#334155" font-size="13">arkib_decode_jawi (src/jawi.rs)</text>
-    <text x="1087.5" y="789" text-anchor="middle" fill="#334155" font-size="13">Restores 3-dot Jawi + Malay vowel rules</text>
-    <text x="1087.5" y="808" text-anchor="middle" fill="#334155" font-size="13">Phonetic skeleton -&gt; Standard Bahasa Melayu</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="890" y="860" width="395" height="96" rx="16" fill="#F5F3FF" stroke="#6D28D9" stroke-width="2"/>
-    <text x="1087.5" y="886" text-anchor="middle" fill="#4C1D95" font-size="15" font-weight="700">Multilingual OCR Output</text>
-    <text x="1087.5" y="908" text-anchor="middle" fill="#334155" font-size="13">Jawi  •  Sanskrit  •  Tamil  •  Mandarin</text>
-    <text x="1087.5" y="927" text-anchor="middle" fill="#334155" font-size="13">Original Script + Rumi/Roman + Meaning</text>
-  </g>
-  <line x1="1087.5" y1="564" x2="1087.5" y2="600" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="1087.5" y1="686" x2="1087.5" y2="722" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="1087.5" y1="818" x2="1087.5" y2="860" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <g filter="url(#shadow)">
-    <rect x="1315" y="468" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#D97706" stroke-width="2"/>
-    <rect x="1315" y="468" width="395" height="34" rx="12" fill="#D97706"/>
-    <rect x="1315" y="488" width="395" height="14" fill="#D97706"/>
-    <text x="1512.5" y="490" text-anchor="middle" fill="#FFFFFF" font-size="14" font-weight="700">Pipeline D: Governance &amp; ID Cards</text>
-    <text x="1512.5" y="522" text-anchor="middle" fill="#334155" font-size="13">arkib_request_enrollment / update</text>
-    <text x="1512.5" y="541" text-anchor="middle" fill="#334155" font-size="13">Recovers truncated JSON + Duplicate Guard</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="1315" y="600" width="395" height="86" rx="12" fill="#FFFFFF" stroke="#FBBF24" stroke-width="2"/>
-    <text x="1512.5" y="626" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">Auto Public / Private Split</text>
-    <text x="1512.5" y="648" text-anchor="middle" fill="#334155" font-size="13">Private: license_no, dob, ic, exp, phone</text>
-    <text x="1512.5" y="667" text-anchor="middle" fill="#334155" font-size="13">Public: sex, hair, eyes, height, weight</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="1315" y="722" width="395" height="96" rx="12" fill="#FFFFFF" stroke="#FBBF24" stroke-width="2"/>
-    <text x="1512.5" y="748" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="700">Pending Approval Queue (REQ-*)</text>
-    <text x="1512.5" y="770" text-anchor="middle" fill="#334155" font-size="13">data/interim/pending_requests/requests.json</text>
-    <text x="1512.5" y="789" text-anchor="middle" fill="#334155" font-size="13">Admin reviews &amp; approves/rejects in /admin</text>
-    <text x="1512.5" y="808" text-anchor="middle" fill="#334155" font-size="13">Purges temp files &amp; appends history.jsonl</text>
-  </g>
-  <g filter="url(#shadow)">
-    <rect x="1315" y="860" width="395" height="96" rx="16" fill="#FFFBEB" stroke="#B45309" stroke-width="2"/>
-    <text x="1512.5" y="886" text-anchor="middle" fill="#92400E" font-size="15" font-weight="700">Updated Vector Store &amp; Profiles</text>
-    <text x="1512.5" y="908" text-anchor="middle" fill="#334155" font-size="13">Commits verified vectors &amp; metadata.json</text>
-    <text x="1512.5" y="927" text-anchor="middle" fill="#334155" font-size="13">Full audit trail in history.jsonl</text>
-  </g>
-  <line x1="1512.5" y1="564" x2="1512.5" y2="600" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="1512.5" y1="686" x2="1512.5" y2="722" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <line x1="1512.5" y1="818" x2="1512.5" y2="860" stroke="#475569" stroke-width="2.4" marker-end="url(#arrow)"/>
-  <polyline points="1700,158 1734,158 1734,770 1710,770" fill="none" stroke="#D97706" stroke-width="2.4" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
-  <rect x="1648" y="340" width="96" height="24" rx="6" fill="#FFFBEB" stroke="#D97706" stroke-width="1.2"/>
-  <text x="1696" y="356" text-anchor="middle" fill="#92400E" font-size="11.5" font-weight="600">Approve/Reject</text>
-  <text x="880.0" y="1058" text-anchor="middle" fill="#64748B" font-size="13">ArkibVision Biometric Identity &amp; Multilingual OCR Platform  |  Air-Gapped Local Deployment  |  All 4 Core Pipelines</text>
+
+  <!-- Canvas Background -->
+  <rect width="1320" height="820" rx="18" fill="url(#bgGrad)"/>
+
+  <!-- Header Banner -->
+  <rect x="28" y="22" width="1264" height="66" rx="12" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+  <text x="52" y="51" fill="#f8fafc" font-size="22" font-weight="700">ArkibVision v2.0.0 — Pure Safe Rust Archival AI, Forensics &amp; Governance Pipeline</text>
+  <text x="52" y="74" fill="#94a3b8" font-size="12.5">100% Air-Gapped Local · #![forbid(unsafe_code)] · 0% Python · 25 MCP Tools · 3-Mode Split-Screen Canvas · 8-Tab Admin Portal</text>
+  <rect x="1085" y="38" width="186" height="32" rx="16" fill="rgba(16,185,129,0.14)" stroke="#10b981" stroke-width="1"/>
+  <text x="1178" y="59" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">RUST 2024 · 39 TESTS OK</text>
+
+  <!-- LAYER 1: USER INTERFACES (LIBRECHAT PORT 3080) -->
+  <rect x="28" y="108" width="1264" height="122" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.2"/>
+  <text x="46" y="130" fill="#60a5fa" font-size="11.5" font-weight="700" letter-spacing="0.06em">LAYER 1 · NATIVE LIBRECHAT WORKSPACE (HTTP://LOCALHOST:3080)</text>
+
+  <!-- Box 1A: LibreChat Chatbox -->
+  <rect x="46" y="142" width="372" height="72" rx="10" fill="#1e293b" stroke="#3b82f6" stroke-width="1.3"/>
+  <text x="64" y="165" fill="#f8fafc" font-size="14" font-weight="700">Chatbox &amp; Clickable Canvas Cards</text>
+  <text x="64" y="185" fill="#cbd5e1" font-size="11.5">Bilingual BM/EN prompts · Image/PDF/DOCX upload</text>
+  <text x="64" y="202" fill="#94a3b8" font-size="11">Passive chat prompt telemetry → Hot Topics &amp; Trends</text>
+
+  <!-- Box 1B: Split-Screen Arkib Canvas -->
+  <rect x="444" y="142" width="404" height="72" rx="10" fill="#1e293b" stroke="#8b5cf6" stroke-width="1.3"/>
+  <text x="462" y="165" fill="#f8fafc" font-size="14" font-weight="700">Split-Screen Arkib Canvas (0 LLM Tokens)</text>
+  <text x="462" y="185" fill="#cbd5e1" font-size="11.5">Mode 1: Jawi OCR Workbench (Live Side-by-Side &amp; Unified Diff)</text>
+  <text x="462" y="202" fill="#cbd5e1" font-size="11.5">Mode 2: Identity Crop/Enroll · Mode 3: Before/After Compare</text>
+
+  <!-- Box 1C: Integrated Admin Portal -->
+  <rect x="874" y="142" width="400" height="72" rx="10" fill="#1e293b" stroke="#10b981" stroke-width="1.3"/>
+  <text x="892" y="165" fill="#f8fafc" font-size="14" font-weight="700">Integrated Admin Portal (8 Tabs)</text>
+  <text x="892" y="185" fill="#cbd5e1" font-size="11.5">Approvals · People · Locations · Documents (Sort &amp; Categories)</text>
+  <text x="892" y="202" fill="#cbd5e1" font-size="11.5">User Insights (SVG Graphs) · Audit &amp; Changes · System · Test Face</text>
+
+  <!-- Arrows Layer 1 -> Layer 2 -->
+  <line x1="232" y1="214" x2="232" y2="262" stroke="#60a5fa" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="646" y1="214" x2="646" y2="262" stroke="#60a5fa" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="1074" y1="214" x2="1074" y2="262" stroke="#60a5fa" stroke-width="2" marker-end="url(#arrowBlue)"/>
+
+  <!-- LAYER 2: LOCAL AI + PURE-RUST AXUM SERVER -->
+  <rect x="28" y="264" width="380" height="104" rx="12" fill="#0f172a" stroke="#f59e0b" stroke-width="1.4"/>
+  <rect x="28" y="264" width="380" height="28" rx="12" fill="url(#accentAmber)"/>
+  <text x="46" y="283" fill="#0b1120" font-size="12" font-weight="800">LOCAL MULTIMODAL LLM · OLLAMA (:11434)</text>
+  <text x="46" y="313" fill="#f8fafc" font-size="14" font-weight="700">qwen3-vl:4b-instruct-16k</text>
+  <text x="46" y="333" fill="#cbd5e1" font-size="11.5">num_ctx 16384 · Flash Attention · Q8_0 KV Cache</text>
+  <text x="46" y="352" fill="#94a3b8" font-size="11">Vision OCR · Forensics Audit · Upload Auto-Fill · Anomaly AI</text>
+
+  <line x1="408" y1="316" x2="454" y2="316" stroke="#60a5fa" stroke-width="2" marker-end="url(#arrowBlue)" marker-start="url(#arrowBlue)"/>
+
+  <rect x="456" y="264" width="836" height="104" rx="12" fill="#0f172a" stroke="#3b82f6" stroke-width="1.5"/>
+  <rect x="456" y="264" width="836" height="28" rx="12" fill="url(#accentBlue)"/>
+  <text x="476" y="283" fill="#ffffff" font-size="12" font-weight="800">PURE-RUST AXUM + TOKIO SERVER · ARKIB-SERVER (:8005) · #![forbid(unsafe_code)]</text>
+  <text x="476" y="313" fill="#f8fafc" font-size="13.5" font-weight="700">MCP SSE (/sse, /messages/ · 25 Tools)  |  Admin JSON API (/admin/api/*)  |  Canvas API (/canvas/api/*)</text>
+  <text x="476" y="334" fill="#cbd5e1" font-size="11.5">DNS-Rebinding Host Guard · Constant-Time HttpOnly Session Auth · RAII InFlightGuard · Audit Middleware</text>
+  <text x="476" y="353" fill="#94a3b8" font-size="11">Two-Tier Role Governance: Guest (Staged REQ-* Queue, Public Fields Only)  vs.  Admin (Direct Atomic Commit)</text>
+
+  <!-- Arrows Layer 2 -> Layer 3 -->
+  <line x1="560" y1="368" x2="150" y2="412" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="700" y1="368" x2="405" y2="412" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="874" y1="368" x2="660" y2="412" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="1020" y1="368" x2="915" y2="412" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="1170" y1="368" x2="1170" y2="412" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+
+  <!-- LAYER 3: 5 CORE RUST PROCESSING ENGINES -->
+  <!-- Engine 1: Biometrics -->
+  <rect x="28" y="414" width="242" height="194" rx="11" fill="#1e293b" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="42" y="438" fill="#60a5fa" font-size="12" font-weight="800">1. BIOMETRICS &amp; SEARCH</text>
+  <text x="42" y="460" fill="#f8fafc" font-size="11.5" font-weight="600">biometrics.rs · vector_store.rs</text>
+  <text x="42" y="482" fill="#cbd5e1" font-size="11">• YuNet 5-Point Umeyama Warp</text>
+  <text x="42" y="500" fill="#cbd5e1" font-size="11">• MobileFaceNet 512-D (opt.)</text>
+  <text x="42" y="518" fill="#cbd5e1" font-size="11">• CLIP ViT-B/32 768-D Fallback</text>
+  <text x="42" y="536" fill="#cbd5e1" font-size="11">• Zero-Clone Top-K SIMD Store</text>
+  <text x="42" y="554" fill="#cbd5e1" font-size="11">• Bilingual Visual Photo Search</text>
+  <text x="42" y="572" fill="#cbd5e1" font-size="11">• CLIP Archival Location ID</text>
+  <text x="42" y="592" fill="#94a3b8" font-size="10.5">Public vs. Private Data Guard</text>
+
+  <!-- Engine 2: Historical Scripts & Export -->
+  <rect x="284" y="414" width="242" height="194" rx="11" fill="#1e293b" stroke="#8b5cf6" stroke-width="1.2"/>
+  <text x="298" y="438" fill="#a78bfa" font-size="12" font-weight="800">2. SCRIPTS OCR &amp; EXPORT</text>
+  <text x="298" y="460" fill="#f8fafc" font-size="11.5" font-weight="600">jawi.rs · ancient_scripts · export</text>
+  <text x="298" y="482" fill="#cbd5e1" font-size="11">• Sauvola + Rubrication Chunker</text>
+  <text x="298" y="500" fill="#cbd5e1" font-size="11">• Zero-Copy FST DBP Lexicon</text>
+  <text x="298" y="518" fill="#cbd5e1" font-size="11">• Modern + Classical Jawi</text>
+  <text x="298" y="536" fill="#cbd5e1" font-size="11">• Pallava · Kawi · Rencong</text>
+  <text x="298" y="554" fill="#cbd5e1" font-size="11">• Hijri → Masihi Colophon</text>
+  <text x="298" y="572" fill="#cbd5e1" font-size="11">• Pure-Rust RTL DOCX &amp; A4 PDF</text>
+  <text x="298" y="592" fill="#94a3b8" font-size="10.5">lopdf PDF + OOXML ZIP Parser</text>
+
+  <!-- Engine 3: Forensics, Conservation & Compare -->
+  <rect x="540" y="414" width="242" height="194" rx="11" fill="#1e293b" stroke="#10b981" stroke-width="1.2"/>
+  <text x="554" y="438" fill="#34d399" font-size="12" font-weight="800">3. FORENSICS &amp; COMPARE</text>
+  <text x="554" y="460" fill="#f8fafc" font-size="11.5" font-weight="600">forensics · conservation · compare</text>
+  <text x="554" y="482" fill="#cbd5e1" font-size="11">• 4-Layer AI/Fraud Forensics</text>
+  <text x="554" y="500" fill="#cbd5e1" font-size="11">• C2PA/IPTC + ELA/Noise/LSB</text>
+  <text x="554" y="518" fill="#cbd5e1" font-size="11">• Tear/Mold/Fade/Aging Lab</text>
+  <text x="554" y="536" fill="#cbd5e1" font-size="11">• 5-Mode Digital Enhancer</text>
+  <text x="554" y="554" fill="#cbd5e1" font-size="11">• Split Slider &amp; Side-by-Side</text>
+  <text x="554" y="572" fill="#cbd5e1" font-size="11">• Changed-Pages LCS Word Diff</text>
+  <text x="554" y="592" fill="#94a3b8" font-size="10.5">Format Migration Fidelity Check</text>
+
+  <!-- Engine 4: Audit, Rules Engine & Revisions -->
+  <rect x="796" y="414" width="242" height="194" rx="11" fill="#1e293b" stroke="#f59e0b" stroke-width="1.2"/>
+  <text x="810" y="438" fill="#fbbf24" font-size="12" font-weight="800">4. AUDIT &amp; CHANGE TRACKER</text>
+  <text x="810" y="460" fill="#f8fafc" font-size="11.5" font-weight="600">audit.rs · revisions.rs · monitor</text>
+  <text x="810" y="482" fill="#cbd5e1" font-size="11">• 8-Rule Anomaly Rules Engine</text>
+  <text x="810" y="500" fill="#cbd5e1" font-size="11">• Z-Score &amp; IQR Outlier Engine</text>
+  <text x="810" y="518" fill="#cbd5e1" font-size="11">• External SQL Log Inspector</text>
+  <text x="810" y="536" fill="#cbd5e1" font-size="11">• AI Explainer + DOCX/PDF Rep.</text>
+  <text x="810" y="554" fill="#cbd5e1" font-size="11">• Created/Updated/Deleted Diff</text>
+  <text x="810" y="572" fill="#cbd5e1" font-size="11">• External On-Disk SHA-256 Scan</text>
+  <text x="810" y="592" fill="#94a3b8" font-size="10.5">Live CPU/RAM/Disk sysinfo Ops</text>
+
+  <!-- Engine 5: Intake AI, Categories & Insights -->
+  <rect x="1052" y="414" width="240" height="194" rx="11" fill="#1e293b" stroke="#ec4899" stroke-width="1.2"/>
+  <text x="1066" y="438" fill="#f472b6" font-size="12" font-weight="800">5. INTAKE AI &amp; INSIGHTS</text>
+  <text x="1066" y="460" fill="#f8fafc" font-size="11.5" font-weight="600">archives · categories · analytics</text>
+  <text x="1066" y="482" fill="#cbd5e1" font-size="11">• AI Upload Auto-Fill Fields</text>
+  <text x="1066" y="500" fill="#cbd5e1" font-size="11">• Maintainable Category CRUD</text>
+  <text x="1066" y="518" fill="#cbd5e1" font-size="11">• Group Folder Dropdowns</text>
+  <text x="1066" y="536" fill="#cbd5e1" font-size="11">• Decayed Click Preferences</text>
+  <text x="1066" y="554" fill="#cbd5e1" font-size="11">• Chatbot Hot-Topics Engine</text>
+  <text x="1066" y="572" fill="#cbd5e1" font-size="11">• Search History &amp; Top Items</text>
+  <text x="1066" y="592" fill="#94a3b8" font-size="10.5">Pure-SVG 7-Day Trend Graphs</text>
+
+  <!-- Arrows Layer 3 -> Layer 4 -->
+  <line x1="150" y1="608" x2="150" y2="650" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="405" y1="608" x2="405" y2="650" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="660" y1="608" x2="660" y2="650" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="915" y1="608" x2="915" y2="650" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+  <line x1="1170" y1="608" x2="1170" y2="650" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#arrowSlate)"/>
+
+  <!-- LAYER 4: ATOMIC LOCAL PERSISTENCE -->
+  <rect x="28" y="652" width="1264" height="140" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.2"/>
+  <text x="46" y="675" fill="#34d399" font-size="11.5" font-weight="700" letter-spacing="0.06em">LAYER 4 · AIR-GAPPED LOCAL ATOMIC STORAGE (TEMP + RENAME · BOUNDED TELEMETRY)</text>
+
+  <rect x="46" y="688" width="290" height="86" rx="9" fill="#1e293b" stroke="#334155"/>
+  <text x="60" y="710" fill="#f8fafc" font-size="12.5" font-weight="700">Vector &amp; Identity Stores</text>
+  <text x="60" y="730" fill="#cbd5e1" font-size="11">arkib_vectors.json · location_vectors.json</text>
+  <text x="60" y="748" fill="#cbd5e1" font-size="11">profiles/ · people_groups.json</text>
+  <text x="60" y="764" fill="#94a3b8" font-size="10.5">pending_requests/ (REQ-* Staging)</text>
+
+  <rect x="354" y="688" width="300" height="86" rx="9" fill="#1e293b" stroke="#334155"/>
+  <text x="368" y="710" fill="#f8fafc" font-size="12.5" font-weight="700">Archival Holdings &amp; Lexicon</text>
+  <text x="368" y="730" fill="#cbd5e1" font-size="11">documents/ · locations/ · categories.json</text>
+  <text x="368" y="748" fill="#cbd5e1" font-size="11">document_groups · location_groups.json</text>
+  <text x="368" y="764" fill="#94a3b8" font-size="10.5">data/lexicon/dbp_jawi_rumi.tsv (FST)</text>
+
+  <rect x="672" y="688" width="300" height="86" rx="9" fill="#1e293b" stroke="#334155"/>
+  <text x="686" y="710" fill="#f8fafc" font-size="12.5" font-weight="700">Integrity, Audit &amp; Revisions</text>
+  <text x="686" y="730" fill="#cbd5e1" font-size="11">checksum_manifest.json (SHA-256)</text>
+  <text x="686" y="748" fill="#cbd5e1" font-size="11">audit_log.jsonl (Auto-Compacted)</text>
+  <text x="686" y="764" fill="#94a3b8" font-size="10.5">revisions/&lt;type&gt;/&lt;slug&gt;/ + Snapshots</text>
+
+  <rect x="990" y="688" width="284" height="86" rx="9" fill="#1e293b" stroke="#334155"/>
+  <text x="1004" y="710" fill="#f8fafc" font-size="12.5" font-weight="700">Analytics, Canvas &amp; Galleries</text>
+  <text x="1004" y="730" fill="#cbd5e1" font-size="11">behavior_analytics.jsonl · preferences</text>
+  <text x="1004" y="748" fill="#cbd5e1" font-size="11">canvas_sessions/ + compare_media/</text>
+  <text x="1004" y="764" fill="#94a3b8" font-size="10.5">../LibreChat/images/ Galleries &amp; Scans</text>
 </svg>
