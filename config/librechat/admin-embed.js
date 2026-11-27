@@ -188,8 +188,68 @@
     document.body.appendChild(v);
   }
 
+  var _openMenuAnchor = null;
   function closeMenus() {
+    _openMenuAnchor = null;
     document.querySelectorAll('.rf-menu-pop').forEach(function (m) { m.remove(); });
+  }
+
+  function openCardActionMenu(anchorBtn, items) {
+    if (_openMenuAnchor === anchorBtn) {
+      closeMenus();
+      return;
+    }
+    closeMenus();
+    _openMenuAnchor = anchorBtn;
+    var rect = anchorBtn.getBoundingClientRect();
+    var pop = document.createElement('div');
+    pop.className = 'rf-menu-pop';
+    pop.setAttribute('role', 'menu');
+    pop.style.minWidth = '188px';
+
+    items.forEach(function (item) {
+      if (!item) return;
+      if (item.divider) {
+        var hr = document.createElement('div');
+        hr.className = 'rf-menu-sep';
+        pop.appendChild(hr);
+        return;
+      }
+      if (item.href) {
+        var a = document.createElement('a');
+        a.className = 'rf-menu-item' + (item.danger ? ' danger' : '');
+        a.href = item.href;
+        if (item.download) a.setAttribute('download', item.download);
+        a.innerHTML = (item.icon || '') + '<span>' + esc(item.label) + '</span>';
+        a.onclick = function () {
+          if (item.onClick) item.onClick();
+          closeMenus();
+        };
+        pop.appendChild(a);
+      } else {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'rf-menu-item' + (item.danger ? ' danger' : '');
+        b.innerHTML = (item.icon || '') + '<span>' + esc(item.label) + '</span>';
+        b.onclick = function (e) {
+          e.stopPropagation();
+          closeMenus();
+          if (item.onClick) item.onClick();
+        };
+        pop.appendChild(b);
+      }
+    });
+
+    document.body.appendChild(pop);
+    var popW = pop.offsetWidth || 190;
+    var popH = pop.offsetHeight || 160;
+    var top = rect.bottom + 6;
+    if (top + popH > window.innerHeight - 10) {
+      top = Math.max(8, rect.top - popH - 6);
+    }
+    var left = Math.min(window.innerWidth - popW - 10, Math.max(8, Math.round(rect.right - popW)));
+    pop.style.top = Math.round(top) + 'px';
+    pop.style.left = Math.round(left) + 'px';
   }
 
   function openFolderMenu(anchorBtn, opts) {
@@ -879,14 +939,17 @@
 
   function openGuestPersonModal(p) {
     if (!p) return;
-    trackGuestView('profile', p.slug, p.identity, p.group || '');
+    var guestMode = isGuest();
+    if (guestMode) trackGuestView('profile', p.slug, p.identity, p.group || '');
     var imgs = Array.isArray(p.images) ? p.images : [];
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
     wrap.innerHTML =
       '<div class="rf-modal" style="width:min(680px,100%)">' +
-      '<div class="rf-modal-head"><div><span class="rf-pill rf-pill-guest" style="margin-bottom:6px;display:inline-flex">👁️ READ-ONLY PROFILE</span><h2>👤 ' + esc(p.identity) + '</h2></div>' +
-      '<button type="button" class="rf-btn rf-btn-sm" id="rf-gp-close">✕ Close</button></div>' +
+      '<div class="rf-modal-head"><div><span class="rf-pill ' + (guestMode ? 'rf-pill-guest' : '') + '" style="margin-bottom:6px;display:inline-flex">' + (guestMode ? '👁️ READ-ONLY PROFILE' : '👁️ PROFILE DETAILS') + '</span><h2>👤 ' + esc(p.identity) + '</h2></div>' +
+      '<div style="display:flex;gap:8px">' +
+      (guestMode ? '' : '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-gp-edit">' + EDIT_SVG + '<span>Edit</span></button>') +
+      '<button type="button" class="rf-btn rf-btn-sm" id="rf-gp-close">✕ Close</button></div></div>' +
       '<div class="rf-guest-kv-grid">' +
       '<div class="rf-guest-kv"><span>Group Folder</span><strong>' + esc(p.group || 'Unassigned') + '</strong></div>' +
       '<div class="rf-guest-kv"><span>Biometric Vectors</span><strong>' + Number(p.vector_count || 0) + ' vector(s) · ' + imgs.length + ' photo(s)</strong></div>' +
@@ -906,6 +969,8 @@
     document.body.appendChild(wrap);
     wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
     wrap.querySelector('#rf-gp-close').onclick = function () { wrap.remove(); };
+    var gpEdit = wrap.querySelector('#rf-gp-edit');
+    if (gpEdit) gpEdit.onclick = function () { wrap.remove(); openPersonModal(p); };
     wrap.querySelectorAll('[data-rf-zoom]').forEach(function (el) {
       el.onclick = function () { openViewer(el.getAttribute('data-rf-zoom')); };
     });
@@ -975,11 +1040,9 @@
             '<span class="rf-folder-readonly" title="Group folder (read-only)">' + (p.group ? '📁 ' + esc(p.group) : '📂 Unassigned') + '</span>' +
             '<button type="button" class="rf-btn rf-btn-sm" data-rf-view-p="' + esc(p.slug) + '">' + EYE_SVG + '<span>View Details</span></button>' +
             '</div>'
-          : '<div class="rf-actions">' +
+          : '<div class="rf-actions rf-actions-compact">' +
             '<select class="rf-move-sel" data-rf-move-p="' + esc(p.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
-            (revCnt > 0 ? '<button type="button" class="rf-btn rf-btn-sm" data-rf-rev-p="' + esc(p.slug) + '" title="Compare before/after changes">🕒 Changes</button>' : '') +
-            '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-p="' + esc(p.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
-            '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-p="' + esc(p.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
+            '<button type="button" class="rf-btn rf-card-menu-btn" data-rf-menu-p="' + esc(p.slug) + '" title="Actions (View, Edit, Delete)" aria-label="Person actions">' + DOTS_SVG + '</button>' +
             '</div>';
         return '<article class="rf-card">' + img + '<div class="rf-card-body">' +
           '<h3 title="' + esc(p.identity) + '">' + esc(p.identity) + '</h3>' +
@@ -1069,28 +1132,40 @@
         }
       };
     });
-    body.querySelectorAll('[data-rf-edit-p]').forEach(function (b) {
-      b.onclick = function () {
-        var p = state.profiles.find(function (x) { return x.slug === b.getAttribute('data-rf-edit-p'); });
-        openPersonModal(p || null);
-      };
-    });
-    body.querySelectorAll('[data-rf-del-p]').forEach(function (b) {
-      b.onclick = function () {
-        var p = state.profiles.find(function (x) { return x.slug === b.getAttribute('data-rf-del-p'); });
+    body.querySelectorAll('[data-rf-menu-p]').forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var p = state.profiles.find(function (x) { return x.slug === btn.getAttribute('data-rf-menu-p'); });
         if (!p) return;
+        var revCnt = Number(p.revision_count || 0);
         var vc = Number(p.vector_count || 0);
         var ic = p.images ? p.images.length : 0;
-        openConfirmModal({
-          title: 'Delete "' + p.identity + '"?',
-          message: 'Delete ' + p.identity + ' and their ' + vc + ' vector(s) and ' + ic + ' photo(s)? This cannot be undone.',
-          confirmLabel: 'Delete Person',
-          onConfirm: async function () {
-            var r = await api('/admin/api/profiles/' + encodeURIComponent(p.slug), { method: 'DELETE' });
-            if (r.ok) { toast('Deleted ' + p.identity); await refreshAll(false); }
-            else toast((r.data && r.data.reason) || 'Delete failed', false);
+        var items = [
+          { label: 'View Details', icon: EYE_SVG, onClick: function () { openGuestPersonModal(p); } },
+          { label: 'Edit Person', icon: EDIT_SVG, onClick: function () { openPersonModal(p); } }
+        ];
+        if (revCnt > 0) {
+          items.push({ label: 'View Changes (' + revCnt + ')', icon: '<span>🕒</span>', onClick: function () { openRevisionsModal('profile', p.slug, p.identity); } });
+        }
+        items.push({ divider: true });
+        items.push({
+          label: 'Delete Person',
+          icon: TRASH_SVG,
+          danger: true,
+          onClick: function () {
+            openConfirmModal({
+              title: 'Delete "' + p.identity + '"?',
+              message: 'Delete ' + p.identity + ' and their ' + vc + ' vector(s) and ' + ic + ' photo(s)? This cannot be undone.',
+              confirmLabel: 'Delete Person',
+              onConfirm: async function () {
+                var r = await api('/admin/api/profiles/' + encodeURIComponent(p.slug), { method: 'DELETE' });
+                if (r.ok) { toast('Deleted ' + p.identity); await refreshAll(false); }
+                else toast((r.data && r.data.reason) || 'Delete failed', false);
+              }
+            });
           }
         });
+        openCardActionMenu(btn, items);
       };
     });
   }
@@ -1474,14 +1549,17 @@
 
   function openGuestLocationModal(l) {
     if (!l) return;
-    trackGuestView('location', l.slug, l.name, l.category || l.group || '');
+    var guestMode = isGuest();
+    if (guestMode) trackGuestView('location', l.slug, l.name, l.category || l.group || '');
     var imgs = Array.isArray(l.images) ? l.images : [];
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
     wrap.innerHTML =
       '<div class="rf-modal" style="width:min(700px,100%)">' +
-      '<div class="rf-modal-head"><div><span class="rf-pill rf-pill-guest" style="margin-bottom:6px;display:inline-flex">👁️ READ-ONLY LOCATION</span><h2>📍 ' + esc(l.name) + '</h2></div>' +
-      '<button type="button" class="rf-btn rf-btn-sm" id="rf-gl-close">✕ Close</button></div>' +
+      '<div class="rf-modal-head"><div><span class="rf-pill ' + (guestMode ? 'rf-pill-guest' : '') + '" style="margin-bottom:6px;display:inline-flex">' + (guestMode ? '👁️ READ-ONLY LOCATION' : '👁️ LOCATION DETAILS') + '</span><h2>📍 ' + esc(l.name) + '</h2></div>' +
+      '<div style="display:flex;gap:8px">' +
+      (guestMode ? '' : '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-gl-edit">' + EDIT_SVG + '<span>Edit</span></button>') +
+      '<button type="button" class="rf-btn rf-btn-sm" id="rf-gl-close">✕ Close</button></div></div>' +
       '<div class="rf-guest-kv-grid">' +
       '<div class="rf-guest-kv"><span>Group Folder</span><strong>' + esc(l.group || 'Unassigned') + '</strong></div>' +
       '<div class="rf-guest-kv"><span>Category</span><strong>' + esc(l.category || 'Archival Location') + '</strong></div>' +
@@ -1505,6 +1583,8 @@
     document.body.appendChild(wrap);
     wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
     wrap.querySelector('#rf-gl-close').onclick = function () { wrap.remove(); };
+    var glEdit = wrap.querySelector('#rf-gl-edit');
+    if (glEdit) glEdit.onclick = function () { wrap.remove(); openLocationModal(l); };
     wrap.querySelectorAll('[data-rf-zoom]').forEach(function (el) {
       el.onclick = function () { openViewer(el.getAttribute('data-rf-zoom')); };
     });
@@ -1577,11 +1657,9 @@
             '<span class="rf-folder-readonly" title="Group folder (read-only)">' + (l.group ? '📁 ' + esc(l.group) : '📂 Unassigned') + '</span>' +
             '<button type="button" class="rf-btn rf-btn-sm" data-rf-view-l="' + esc(l.slug) + '">' + EYE_SVG + '<span>View Details</span></button>' +
             '</div>'
-          : '<div class="rf-actions">' +
+          : '<div class="rf-actions rf-actions-compact">' +
             '<select class="rf-move-sel" data-rf-move-l="' + esc(l.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
-            (revCnt > 0 ? '<button type="button" class="rf-btn rf-btn-sm" data-rf-rev-l="' + esc(l.slug) + '" title="Compare before/after changes">🕒 Changes</button>' : '') +
-            '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-l="' + esc(l.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
-            '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-l="' + esc(l.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
+            '<button type="button" class="rf-btn rf-card-menu-btn" data-rf-menu-l="' + esc(l.slug) + '" title="Actions (View, Edit, Delete)" aria-label="Location actions">' + DOTS_SVG + '</button>' +
             '</div>';
         return '<article class="rf-card">' + thumb + '<div class="rf-card-body">' +
           '<h3 title="' + esc(l.name) + '">' + esc(l.name) + '</h3>' +
@@ -1668,26 +1746,38 @@
         }
       };
     });
-    body.querySelectorAll('[data-rf-edit-l]').forEach(function (b) {
-      b.onclick = function () {
-        var l = state.locations.find(function (x) { return x.slug === b.getAttribute('data-rf-edit-l'); });
-        openLocationModal(l || null);
-      };
-    });
-    body.querySelectorAll('[data-rf-del-l]').forEach(function (b) {
-      b.onclick = function () {
-        var l = state.locations.find(function (x) { return x.slug === b.getAttribute('data-rf-del-l'); });
+    body.querySelectorAll('[data-rf-menu-l]').forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var l = state.locations.find(function (x) { return x.slug === btn.getAttribute('data-rf-menu-l'); });
         if (!l) return;
-        openConfirmModal({
-          title: 'Delete Location "' + l.name + '"?',
-          message: 'Delete location "' + l.name + '" and its ' + (l.image_count || 0) + ' reference photo(s)? This cannot be undone.',
-          confirmLabel: 'Delete Location',
-          onConfirm: async function () {
-            var r = await api('/admin/api/locations/' + encodeURIComponent(l.slug), { method: 'DELETE' });
-            if (r.ok) { toast('Deleted location'); await refreshAll(false); }
-            else toast((r.data && r.data.reason) || 'Delete failed', false);
+        var revCnt = Number(l.revision_count || 0);
+        var items = [
+          { label: 'View Details', icon: EYE_SVG, onClick: function () { openGuestLocationModal(l); } },
+          { label: 'Edit Location', icon: EDIT_SVG, onClick: function () { openLocationModal(l); } }
+        ];
+        if (revCnt > 0) {
+          items.push({ label: 'View Changes (' + revCnt + ')', icon: '<span>🕒</span>', onClick: function () { openRevisionsModal('location', l.slug, l.name); } });
+        }
+        items.push({ divider: true });
+        items.push({
+          label: 'Delete Location',
+          icon: TRASH_SVG,
+          danger: true,
+          onClick: function () {
+            openConfirmModal({
+              title: 'Delete Location "' + l.name + '"?',
+              message: 'Delete location "' + l.name + '" and its ' + (l.image_count || 0) + ' reference photo(s)? This cannot be undone.',
+              confirmLabel: 'Delete Location',
+              onConfirm: async function () {
+                var r = await api('/admin/api/locations/' + encodeURIComponent(l.slug), { method: 'DELETE' });
+                if (r.ok) { toast('Deleted location'); await refreshAll(false); }
+                else toast((r.data && r.data.reason) || 'Delete failed', false);
+              }
+            });
           }
         });
+        openCardActionMenu(btn, items);
       };
     });
   }
@@ -1849,15 +1939,30 @@
 
   function openGuestDocumentModal(d) {
     if (!d) return;
-    trackGuestView('document', d.slug, d.title, d.category || '');
+    var guestMode = isGuest();
+    if (guestMode) trackGuestView('document', d.slug, d.title, d.category || '');
+    else {
+      trackUserPref({
+        event_type: 'click_document',
+        category: d.category || '',
+        source: d.author_or_source || '',
+        group_folder: d.group || '',
+        year: d.year || '',
+        item_slug: d.slug,
+        item_title: d.title || d.slug
+      });
+    }
     var files = Array.isArray(d.files) ? d.files : [];
     var yr = d.year || (docYearNum(d) ? String(docYearNum(d)) : '');
+    var expBase = guestMode ? '/guest/api/documents/' : '/admin/api/documents/';
     var wrap = document.createElement('div');
     wrap.className = 'rf-modal-backdrop';
     wrap.innerHTML =
       '<div class="rf-modal" style="width:min(760px,100%)">' +
-      '<div class="rf-modal-head"><div><span class="rf-pill rf-pill-guest" style="margin-bottom:6px;display:inline-flex">👁️ READ-ONLY DOCUMENT</span><h2>📁 ' + esc(d.title || d.slug) + '</h2></div>' +
-      '<button type="button" class="rf-btn rf-btn-sm" id="rf-gd-close">✕ Close</button></div>' +
+      '<div class="rf-modal-head"><div><span class="rf-pill ' + (guestMode ? 'rf-pill-guest' : '') + '" style="margin-bottom:6px;display:inline-flex">' + (guestMode ? '👁️ READ-ONLY DOCUMENT' : '👁️ DOCUMENT DETAILS') + '</span><h2>📁 ' + esc(d.title || d.slug) + '</h2></div>' +
+      '<div style="display:flex;gap:8px">' +
+      (guestMode ? '' : '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="rf-gd-edit">' + EDIT_SVG + '<span>Edit</span></button>') +
+      '<button type="button" class="rf-btn rf-btn-sm" id="rf-gd-close">✕ Close</button></div></div>' +
       '<div class="rf-guest-kv-grid">' +
       '<div class="rf-guest-kv"><span>Category</span><strong>' + esc(d.category || 'Uncategorized') + '</strong></div>' +
       '<div class="rf-guest-kv"><span>Group Folder</span><strong>' + esc(d.group || 'Unassigned') + '</strong></div>' +
@@ -1870,8 +1975,8 @@
       (d.extracted_text ? '<div class="rf-guest-kv rf-guest-kv-full"><span>Transcribed / Extracted Text (Rumi)</span><pre class="rf-guest-pre">' + esc(d.extracted_text) + '</pre></div>' : '') +
       '</div>' +
       '<div class="rf-actions" style="margin:14px 0">' +
-      '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl('/guest/api/documents/' + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx">📄 Download DOCX</a>' +
-      '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl('/guest/api/documents/' + encodeURIComponent(d.slug) + '/export/pdf')) + '" download="' + esc(d.slug) + '.pdf">📕 Download PDF</a>' +
+      '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl(expBase + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx">📄 Download DOCX</a>' +
+      '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl(expBase + encodeURIComponent(d.slug) + '/export/pdf')) + '" download="' + esc(d.slug) + '.pdf">📕 Download PDF</a>' +
       '</div>' +
       '<h3 style="margin:14px 0 10px;font-size:.92rem">Attached Files (' + files.length + ')</h3>' +
       (files.length
@@ -1893,6 +1998,8 @@
     document.body.appendChild(wrap);
     wrap.onclick = function (e) { if (e.target === wrap) wrap.remove(); };
     wrap.querySelector('#rf-gd-close').onclick = function () { wrap.remove(); };
+    var gdEdit = wrap.querySelector('#rf-gd-edit');
+    if (gdEdit) gdEdit.onclick = function () { wrap.remove(); openDocumentModal(d); };
     wrap.querySelectorAll('[data-rf-zoom]').forEach(function (el) {
       el.onclick = function () { openViewer(el.getAttribute('data-rf-zoom')); };
     });
@@ -2070,18 +2177,14 @@
           ? '<img class="rf-thumb" data-rf-zoom="' + esc(apiUrl(firstImg.admin_url)) + '" style="cursor:pointer" src="' + esc(apiUrl(firstImg.admin_url)) + '" alt="' + esc(d.title) + '"/>'
           : '<div class="rf-thumb">📁</div>';
         var actionsHtml = guestMode
-          ? '<div class="rf-actions">' +
+          ? '<div class="rf-actions rf-actions-compact">' +
+            '<span class="rf-folder-readonly" title="Group folder (read-only)">' + (d.group ? '📁 ' + esc(d.group) : '📂 Unassigned') + '</span>' +
             '<button type="button" class="rf-btn rf-btn-sm" data-rf-view-d="' + esc(d.slug) + '">' + EYE_SVG + '<span>View Details</span></button>' +
-            '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx" title="Download as Word (.docx)">📄 DOCX</a>' +
-            '<a class="rf-btn rf-btn-sm" href="' + esc(apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/pdf')) + '" download="' + esc(d.slug) + '.pdf" title="Download as Archival PDF (.pdf)">📕 PDF</a>' +
+            '<button type="button" class="rf-btn rf-card-menu-btn" data-rf-menu-dg="' + esc(d.slug) + '" title="Download options (DOCX, PDF)" aria-label="Download options">' + DOTS_SVG + '</button>' +
             '</div>'
-          : '<div class="rf-actions">' +
+          : '<div class="rf-actions rf-actions-compact">' +
             '<select class="rf-move-sel" data-rf-move-d="' + esc(d.slug) + '" title="Change group folder">' + groupOpts(curGs) + '</select>' +
-            '<a class="rf-btn rf-btn-sm" data-rf-exp-d="' + esc(d.slug) + '" href="' + esc(apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/docx')) + '" download="' + esc(d.slug) + '.docx" title="Download as Word (.docx)">📄 DOCX</a>' +
-            '<a class="rf-btn rf-btn-sm" data-rf-exp-d="' + esc(d.slug) + '" href="' + esc(apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/pdf')) + '" download="' + esc(d.slug) + '.pdf" title="Download as Archival PDF (.pdf)">📕 PDF</a>' +
-            (revCnt > 0 ? '<button type="button" class="rf-btn rf-btn-sm" data-rf-rev-d="' + esc(d.slug) + '" title="Compare before/after changes">🕒 Changes</button>' : '') +
-            '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-edit-d="' + esc(d.slug) + '">' + EDIT_SVG + '<span>Edit</span></button>' +
-            '<button type="button" class="rf-btn rf-btn-danger rf-btn-sm" data-rf-del-d="' + esc(d.slug) + '">' + TRASH_SVG + '<span>Delete</span></button>' +
+            '<button type="button" class="rf-btn rf-card-menu-btn" data-rf-menu-d="' + esc(d.slug) + '" title="Actions (View, Edit, Export, Delete)" aria-label="Document actions">' + DOTS_SVG + '</button>' +
             '</div>';
         return '<article class="rf-card">' + thumbHtml + '<div class="rf-card-body">' +
           '<h3 title="' + esc(d.title) + '">' + esc(d.title) + '</h3>' +
@@ -2235,38 +2338,79 @@
         }
       };
     });
-    body.querySelectorAll('[data-rf-edit-d]').forEach(function (b) {
-      b.onclick = function () {
-        var d = state.documents.find(function (x) { return x.slug === b.getAttribute('data-rf-edit-d'); });
-        if (d) {
+    body.querySelectorAll('[data-rf-menu-dg]').forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var d = state.documents.find(function (x) { return x.slug === btn.getAttribute('data-rf-menu-dg'); });
+        if (!d) return;
+        openCardActionMenu(btn, [
+          { label: 'View Details', icon: EYE_SVG, onClick: function () { openGuestDocumentModal(d); } },
+          { label: 'Download DOCX', icon: '<span>📄</span>', href: apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/docx'), download: d.slug + '.docx' },
+          { label: 'Download PDF', icon: '<span>📕</span>', href: apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/pdf'), download: d.slug + '.pdf' }
+        ]);
+      };
+    });
+    body.querySelectorAll('[data-rf-menu-d]').forEach(function (btn) {
+      btn.onclick = function (ev) {
+        ev.stopPropagation();
+        var d = state.documents.find(function (x) { return x.slug === btn.getAttribute('data-rf-menu-d'); });
+        if (!d) return;
+        var revCnt = Number(d.revision_count || 0);
+        var trackExp = function () {
           trackUserPref({
-            event_type: 'click_document',
+            event_type: 'export',
             category: d.category || '',
             source: d.author_or_source || '',
             group_folder: d.group || '',
             year: d.year || '',
-            tags: Array.isArray(d.key_topics) ? d.key_topics : [],
             item_slug: d.slug,
             item_title: d.title || ''
           });
+        };
+        var items = [
+          { label: 'View Details', icon: EYE_SVG, onClick: function () { openGuestDocumentModal(d); } },
+          {
+            label: 'Edit Document',
+            icon: EDIT_SVG,
+            onClick: function () {
+              trackUserPref({
+                event_type: 'click_document',
+                category: d.category || '',
+                source: d.author_or_source || '',
+                group_folder: d.group || '',
+                year: d.year || '',
+                tags: Array.isArray(d.key_topics) ? d.key_topics : [],
+                item_slug: d.slug,
+                item_title: d.title || ''
+              });
+              openDocumentModal(d);
+            }
+          },
+          { label: 'Download DOCX', icon: '<span>📄</span>', href: apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/docx'), download: d.slug + '.docx', onClick: trackExp },
+          { label: 'Download PDF', icon: '<span>📕</span>', href: apiUrl(exportBase + encodeURIComponent(d.slug) + '/export/pdf'), download: d.slug + '.pdf', onClick: trackExp }
+        ];
+        if (revCnt > 0) {
+          items.push({ label: 'View Changes (' + revCnt + ')', icon: '<span>🕒</span>', onClick: function () { openRevisionsModal('document', d.slug, d.title || d.slug); } });
         }
-        openDocumentModal(d || null);
-      };
-    });
-    body.querySelectorAll('[data-rf-del-d]').forEach(function (b) {
-      b.onclick = function () {
-        var d = state.documents.find(function (x) { return x.slug === b.getAttribute('data-rf-del-d'); });
-        if (!d) return;
-        openConfirmModal({
-          title: 'Delete Document "' + d.title + '"?',
-          message: 'Delete document "' + d.title + '" and its ' + (d.file_count || 0) + ' uploaded file(s)? This cannot be undone.',
-          confirmLabel: 'Delete Document',
-          onConfirm: async function () {
-            var r = await api('/admin/api/documents/' + encodeURIComponent(d.slug), { method: 'DELETE' });
-            if (r.ok) { toast('Deleted document'); await refreshAll(false); }
-            else toast((r.data && r.data.reason) || 'Delete failed', false);
+        items.push({ divider: true });
+        items.push({
+          label: 'Delete Document',
+          icon: TRASH_SVG,
+          danger: true,
+          onClick: function () {
+            openConfirmModal({
+              title: 'Delete Document "' + d.title + '"?',
+              message: 'Delete document "' + d.title + '" and its ' + (d.file_count || 0) + ' uploaded file(s)? This cannot be undone.',
+              confirmLabel: 'Delete Document',
+              onConfirm: async function () {
+                var r = await api('/admin/api/documents/' + encodeURIComponent(d.slug), { method: 'DELETE' });
+                if (r.ok) { toast('Deleted document'); await refreshAll(false); }
+                else toast((r.data && r.data.reason) || 'Delete failed', false);
+              }
+            });
           }
         });
+        openCardActionMenu(btn, items);
       };
     });
   }
@@ -4037,7 +4181,7 @@
   }
 
   document.addEventListener('click', function (ev) {
-    if (!ev.target.closest || (!ev.target.closest('.rf-menu-pop') && !ev.target.closest('.rf-folder-act'))) {
+    if (!ev.target.closest || (!ev.target.closest('.rf-menu-pop') && !ev.target.closest('.rf-folder-act') && !ev.target.closest('.rf-card-menu-btn'))) {
       closeMenus();
     }
     if (!state.open) return;

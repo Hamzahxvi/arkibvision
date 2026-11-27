@@ -2974,3 +2974,40 @@ html:not(.dark) .rf-aud-rec {
   color: var(--arkib-text, rgb(var(--text-primary, 241 245 249)));
   margin-bottom: 6px !important;
 }
+
+/* ─── Consolidated Card Action Row & 3-Dots Menu Button ──────────────────── */
+.rf-actions-compact {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+.rf-card-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 !important;
+  border-radius: 4px !important;
+  border: 1px solid var(--arkib-border, rgb(var(--border-medium, 71 85 105))) !important;
+  background: var(--arkib-surface, rgb(var(--field-fill, 15 23 42))) !important;
+  color: var(--arkib-text, rgb(var(--text-primary, 241 245 249))) !important;
+  flex-shrink: 0;
+}
+.rf-card-menu-btn:hover {
+  border-color: var(--arkib-accent, #3b82f6) !important;
+  background: var(--arkib-surface-focus, rgba(59, 130, 246, 0.14)) !important;
+}
+.rf-menu-pop a.rf-menu-item {
+  text-decoration: none;
+  box-sizing: border-box;
+  font-size: 0.83rem;
+}
+.rf-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: rgb(var(--border-light, 51 65 85));
+}
