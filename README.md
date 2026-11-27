@@ -354,7 +354,7 @@ Open **LibreChat (`http://localhost:3080`)** and click the **Admin Portal** shie
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 
-# Run all 39 unit tests (biometrics, vector store, vision ops, FST Jawi & Hijri colophon,
+# Run all 40 unit tests (biometrics, vector store, vision ops, FST Jawi & Hijri colophon,
 # ancient scripts, DOCX/PDF export, forensics, conservation, compare studio, categories,
 # revisions, audit rules/outliers, click preferences, behavior analytics, canvas, monitor, MCP)
 cargo test

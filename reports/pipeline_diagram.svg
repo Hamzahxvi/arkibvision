@@ -36,7 +36,7 @@
   <text x="52" y="51" fill="#f8fafc" font-size="22" font-weight="700">ArkibVision v2.0.0 — Pure Safe Rust Archival AI, Forensics &amp; Governance Pipeline</text>
   <text x="52" y="74" fill="#94a3b8" font-size="12.5">100% Air-Gapped Local · #![forbid(unsafe_code)] · 0% Python · 25 MCP Tools · 3-Mode Split-Screen Canvas · 8-Tab Admin Portal</text>
   <rect x="1085" y="38" width="186" height="32" rx="16" fill="rgba(16,185,129,0.14)" stroke="#10b981" stroke-width="1"/>
-  <text x="1178" y="59" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">RUST 2024 · 39 TESTS OK</text>
+  <text x="1178" y="59" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">RUST 2024 · 40 TESTS OK</text>
 
   <!-- LAYER 1: USER INTERFACES (LIBRECHAT PORT 3080) -->
   <rect x="28" y="108" width="1264" height="122" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.2"/>

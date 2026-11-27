@@ -600,10 +600,16 @@ pub fn scan_external_disk_changes(cfg: &AppConfig) -> Value {
         });
     };
     let entries = manifest
-        .get("entries")
+        .get("files")
+        .or_else(|| manifest.get("entries"))
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
+
+    let manifest_base = cfg
+        .checksum_manifest_file
+        .parent()
+        .unwrap_or(cfg.project_root.as_path());
 
     let mut checked = 0usize;
     let mut modified_count = 0usize;
@@ -618,7 +624,17 @@ pub fn scan_external_disk_changes(cfg: &AppConfig) -> Value {
         let full_path = if candidate.is_absolute() {
             candidate
         } else {
-            cfg.project_root.join(&rel_or_abs)
+            let under_manifest = manifest_base.join(&rel_or_abs);
+            if under_manifest.is_file() {
+                under_manifest
+            } else {
+                let under_root = cfg.project_root.join(&rel_or_abs);
+                if under_root.is_file() {
+                    under_root
+                } else {
+                    under_manifest
+                }
+            }
         };
         if !full_path.is_file() {
             missing_count += 1;
@@ -750,5 +766,48 @@ mod tests {
         assert_eq!(hist.len(), 2);
 
         let _ = fs::remove_dir_all(cfg.revisions_dir.parent().unwrap());
+    }
+
+    #[test]
+    fn scan_external_disk_changes_reads_files_manifest_and_detects_tampering() {
+        let cfg = temp_cfg();
+        let base = cfg.checksum_manifest_file.parent().unwrap();
+        let clean_file = base.join("profiles/Sample/README.md");
+        let edited_file = base.join("profiles/Sample/edited.txt");
+        fs::create_dir_all(clean_file.parent().unwrap()).unwrap();
+        fs::write(&clean_file, b"original clean content").unwrap();
+        fs::write(&edited_file, b"tampered content").unwrap();
+
+        let manifest = json!({
+            "updated_at": Utc::now().to_rfc3339(),
+            "total_tracked": 3,
+            "files": {
+                "profiles/Sample/README.md": {
+                    "sha256": sha256_bytes(b"original clean content"),
+                    "size_bytes": 22
+                },
+                "profiles/Sample/edited.txt": {
+                    "sha256": sha256_bytes(b"original before tamper"),
+                    "size_bytes": 22
+                },
+                "profiles/Sample/missing.txt": {
+                    "sha256": sha256_bytes(b"gone"),
+                    "size_bytes": 4
+                }
+            }
+        });
+        fs::write(
+            &cfg.checksum_manifest_file,
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let report = scan_external_disk_changes(&cfg);
+        assert_eq!(report["status"], "changes_detected");
+        assert_eq!(report["checked_files"], 3);
+        assert_eq!(report["modified_count"], 1);
+        assert_eq!(report["missing_count"], 1);
+
+        let _ = fs::remove_dir_all(base);
     }
 }
