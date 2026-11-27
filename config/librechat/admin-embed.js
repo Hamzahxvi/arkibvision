@@ -2408,6 +2408,27 @@
         '</div>';
     }).join('') : '<div class="rf-empty" style="padding:28px 12px">No hot topics captured yet. Try asking questions in the chatbot or searching in Documents/People.</div>';
 
+    var insightCards = Array.isArray(bd.admin_insight_cards) && bd.admin_insight_cards.length
+      ? bd.admin_insight_cards
+      : insights.map(function (ins) {
+        return { icon: '💡', tag: 'INSIGHT', tone: 'info', headline: 'User Activity Insight', metric: '', detail: ins };
+      });
+
+    var insightCardsHtml =
+      '<div class="rf-insight-grid">' +
+      insightCards.map(function (c) {
+        var bCls = c.tone === 'warn' ? 'rf-badge-warn' : c.tone === 'ok' ? 'rf-badge-ok' : 'rf-badge-info';
+        return '<div class="rf-insight-card rf-insight-' + esc(c.tone || 'info') + '">' +
+          '<div class="rf-insight-top">' +
+          '<span class="rf-badge ' + bCls + '">' + esc(c.icon || '💡') + ' ' + esc(c.tag || 'INSIGHT') + '</span>' +
+          (c.metric ? '<span class="rf-insight-metric">' + esc(c.metric) + '</span>' : '') +
+          '</div>' +
+          '<div class="rf-insight-head">' + esc(c.headline || '') + '</div>' +
+          '<div class="rf-insight-desc">' + esc(c.detail || '') + '</div>' +
+          '</div>';
+      }).join('') +
+      '</div>';
+
     body.innerHTML =
       '<div class="rf-section-head"><div><h2>📈 User Behavior, Search History &amp; Hot Topics</h2>' +
       '<p>Automatically analyzes what users ask in the chatbot, what they search, and which records they check most frequently — ranked with recency-weighted scoring.</p></div>' +
@@ -2421,9 +2442,7 @@
       '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Records Checked</div><div class="rf-kpi-val" style="color:#34d399">' + Number(sum.item_checks || 0) + '</div></div>' +
       '<div class="rf-kpi-card"><div class="rf-kpi-lbl">Hot Topics Detected</div><div class="rf-kpi-val">' + Number(sum.hot_topic_count || 0) + '</div></div>' +
       '</div>' +
-      '<div class="rf-callout rf-callout-info"><div class="rf-callout-title">💡 Actionable Admin Insights</div><ul class="rf-callout-list">' +
-      insights.map(function (ins) { return '<li>' + esc(ins) + '</li>'; }).join('') +
-      '</ul></div>' +
+      '<div class="rf-audit-panel"><h3>💡 Actionable Admin Insights</h3>' + insightCardsHtml + '</div>' +
       '<div class="rf-chart-grid">' +
       '<div class="rf-audit-panel"><h3>🔥 Hot Topics &amp; Trending Keywords</h3><div class="rf-bar-chart">' + hotTopicsHtml + '</div></div>' +
       '<div class="rf-audit-panel"><h3>📈 7-Day User Activity Trend</h3>' +
@@ -2499,12 +2518,47 @@
 
     var summaryBodyHtml = state.auditAiExplanation
       ? '<div class="rf-explain-rich">' + esc(state.auditAiExplanation).replace(/\n/g, '<br/>') + '</div>'
-      : '<ul class="rf-callout-list">' +
-        '<li><b>Last Checked:</b> ' + esc(fmtTime(snap.generated_at)) + '</li>' +
-        '<li><b>Activity Monitored:</b> ' + Number(snap.total_events_analyzed || 0) + ' recent access, CRUD, login, and export event(s)</li>' +
-        '<li><b>Security Posture:</b> <span class="rf-badge ' + sevCls(snap.risk_level) + '">' + esc(snap.risk_level) + '</span> (Risk Score: ' + Number(snap.risk_score || 0) + '/100)</li>' +
-        '<li><b>Checks Performed:</b> Suspicious bulk deletes/writes, login brute-force, off-hours mutations, SQL/NoSQL injection probes, and Z-score/IQR behavioral outliers.</li>' +
-        '</ul>';
+      : '<div class="rf-sum-grid">' +
+        '<div class="rf-sum-cell"><span class="rf-sum-lbl">Last Checked</span><strong>' + esc(fmtTime(snap.generated_at)) + '</strong></div>' +
+        '<div class="rf-sum-cell"><span class="rf-sum-lbl">Activity Monitored</span><strong>' + Number(snap.total_events_analyzed || 0) + ' event(s)</strong></div>' +
+        '<div class="rf-sum-cell"><span class="rf-sum-lbl">Security Posture</span><strong><span class="rf-badge ' + sevCls(snap.risk_level) + '">' + esc(snap.risk_level) + '</span> ' + Number(snap.risk_score || 0) + '/100</strong></div>' +
+        '<div class="rf-sum-cell"><span class="rf-sum-lbl">Active Protections</span><strong>CRUD Bursts · Auth · SQLi · Z-Score Outliers</strong></div>' +
+        '</div>';
+
+    function resolveRevLocation(rv) {
+      var et = String(rv.entity_type || '').toLowerCase();
+      var sl = String(rv.slug || '');
+      if (et === 'document') {
+        var d = state.documents.find(function (x) { return x.slug === sl; });
+        if (d) {
+          var folder = d.group || 'Unassigned';
+          return { exists: true, label: '📍 Documents › ' + folder + (d.category ? ' · ' + d.category : ''), tab: 'documents', item: d };
+        }
+        return { exists: false, label: '🗑️ Removed — no longer in Documents' };
+      }
+      if (et === 'profile') {
+        var p = state.profiles.find(function (x) { return x.slug === sl; });
+        if (p) {
+          var pf = p.group || 'Unassigned';
+          return { exists: true, label: '📍 People › ' + pf, tab: 'people', item: p };
+        }
+        return { exists: false, label: '🗑️ Removed — no longer in People' };
+      }
+      if (et === 'location') {
+        var l = state.locations.find(function (x) { return x.slug === sl; });
+        if (l) {
+          var lf = l.group || 'Unassigned';
+          return { exists: true, label: '📍 Locations › ' + lf, tab: 'locations', item: l };
+        }
+        return { exists: false, label: '🗑️ Removed — no longer in Locations' };
+      }
+      if (et === 'category') {
+        var c = state.categories.find(function (x) { return x.slug === sl; });
+        if (c) return { exists: true, label: '🏷️ Documents › Manage Categories', tab: 'categories', item: c };
+        return { exists: false, label: '🗑️ Removed from Categories' };
+      }
+      return { exists: false, label: 'Archive log' };
+    }
 
     var diskHtml = '';
     if (state.diskScanResult) {
@@ -2555,12 +2609,17 @@
       '<button type="button" class="rf-btn rf-btn-sm' + (state.auditChangeFilter === 'deleted' ? ' rf-btn-primary' : '') + '" data-rf-ch-flt="deleted">✕ Deleted (' + cntDeleted + ')</button>' +
       '</div></div>' +
       (filteredRevs.length ? filteredRevs.map(function (rv) {
+        var loc = resolveRevLocation(rv);
+        var locBadge = '<span class="rf-badge ' + (loc.exists ? 'rf-badge-ok' : 'rf-badge-crit') + '">' + esc(loc.label) + '</span>';
         return '<div class="rf-alert-row" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
-          '<div>' + changeActionBadge(rv.action) + ' <span class="rf-badge rf-badge-info">' + esc(rv.entity_type) + '</span> <strong>' + esc(rv.title || rv.slug) + '</strong>' +
-          '<div style="font-size:.82rem;margin-top:4px">' + esc(rv.summary) + '</div>' +
-          '<div style="font-size:.75rem;color:rgb(var(--text-secondary));margin-top:2px">By <b>' + esc(rv.actor) + '</b> · ' + esc(fmtTime(rv.timestamp)) + '</div></div>' +
+          '<div style="flex:1;min-width:240px">' +
+          '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' + changeActionBadge(rv.action) + '<span class="rf-badge rf-badge-info">' + esc(rv.entity_type) + '</span><strong>' + esc(rv.title || rv.slug) + '</strong>' + locBadge + '</div>' +
+          '<div style="font-size:.83rem;margin-top:5px">' + esc(rv.summary) + '</div>' +
+          '<div style="font-size:.75rem;color:rgb(var(--text-secondary));margin-top:3px">By <b>' + esc(rv.actor) + '</b> · ' + esc(fmtTime(rv.timestamp)) + '</div></div>' +
+          '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+          (loc.exists ? '<button type="button" class="rf-btn rf-btn-primary rf-btn-sm" data-rf-aud-goto="' + esc(rv.entity_type + '::' + rv.slug) + '">↗ Open Item</button>' : '') +
           '<button type="button" class="rf-btn rf-btn-sm" data-rf-aud-cmp="' + esc(rv.entity_type + '::' + rv.slug + '::' + (rv.title || rv.slug)) + '">🔍 Inspect / Compare</button>' +
-          '</div>';
+          '</div></div>';
       }).join('') : '<div style="font-size:.84rem;color:rgb(var(--text-secondary))">No changes in this filter yet. Creating, adding, editing, or deleting any document, person, location, or category will appear here immediately.</div>') +
       '</div>' +
       '<div class="rf-audit-panel"><h3>🚨 Rules Engine Alerts (' + alertCount + ')</h3>' +
@@ -2623,6 +2682,40 @@
         renderAudit(body);
       } else toast('Disk scan failed', false);
     };
+    body.querySelectorAll('[data-rf-aud-goto]').forEach(function (b) {
+      b.onclick = function () {
+        var parts = b.getAttribute('data-rf-aud-goto').split('::');
+        var et = parts[0], sl = parts[1];
+        if (et === 'document') {
+          var d = state.documents.find(function (x) { return x.slug === sl; });
+          state.tab = 'documents';
+          state.selectedDocGroup = 'all';
+          state.docCategoryFilter = 'all';
+          state.docSourceFilter = 'all';
+          state.search = '';
+          render();
+          if (d) openDocumentModal(d);
+        } else if (et === 'profile') {
+          var p = state.profiles.find(function (x) { return x.slug === sl; });
+          state.tab = 'people';
+          state.selectedGroup = 'all';
+          state.search = '';
+          render();
+          if (p) openPersonModal(p);
+        } else if (et === 'location') {
+          var l = state.locations.find(function (x) { return x.slug === sl; });
+          state.tab = 'locations';
+          state.selectedLocGroup = 'all';
+          state.search = '';
+          render();
+          if (l) openLocationModal(l);
+        } else if (et === 'category') {
+          state.tab = 'documents';
+          render();
+          openCategoriesModal();
+        }
+      };
+    });
     body.querySelectorAll('[data-rf-aud-cmp]').forEach(function (b) {
       b.onclick = function () {
         var parts = b.getAttribute('data-rf-aud-cmp').split('::');

@@ -664,35 +664,71 @@ pub fn build_behavior_analytics(cfg: &AppConfig) -> Value {
     recent_history.reverse();
     recent_history.truncate(40);
 
-    // Build clear, plain-language actionable insights for admins
+    // Build clear, structured & plain-language actionable insights for admins
     let mut admin_insights: Vec<String> = Vec::new();
+    let mut admin_insight_cards: Vec<Value> = Vec::new();
     if let Some(top_t) = hot_topics.first() {
+        let topic_name = top_t["topic"].as_str().unwrap_or("");
+        let cnt = top_t["count"].as_u64().unwrap_or(0);
+        let r24 = top_t["recent_24h"].as_u64().unwrap_or(0);
+        let m_lbl = if cnt == 1 { "mention" } else { "mentions" };
         admin_insights.push(format!(
-            "Hot Topic: \"{}\" is currently the #1 trending topic ({} mentions, {} in the last 24h). Consider featuring or tagging related records.",
-            top_t["topic"].as_str().unwrap_or(""),
-            top_t["count"].as_u64().unwrap_or(0),
-            top_t["recent_24h"].as_u64().unwrap_or(0)
+            "Hot Topic: \"{topic_name}\" is currently the #1 trending topic ({cnt} {m_lbl}, {r24} in the last 24h). Consider featuring or tagging related records."
         ));
+        admin_insight_cards.push(json!({
+            "icon": "🔥",
+            "tag": "HOT TOPIC #1",
+            "tone": "warn",
+            "headline": topic_name,
+            "metric": format!("{cnt} {m_lbl} · {r24} today"),
+            "detail": "Users are frequently asking or searching about this topic. Consider pinning or tagging related archival records."
+        }));
     }
     if let Some(top_f) = tool_usage.first() {
+        let fname = top_f["name"].as_str().unwrap_or("");
+        let cnt = top_f["count"].as_u64().unwrap_or(0);
+        let i_lbl = if cnt == 1 { "interaction" } else { "interactions" };
         admin_insights.push(format!(
-            "Most Used Capability: \"{}\" leads user demand ({} interactions).",
-            top_f["name"].as_str().unwrap_or(""),
-            top_f["count"].as_u64().unwrap_or(0)
+            "Most Used Capability: \"{fname}\" leads user demand ({cnt} {i_lbl})."
         ));
+        admin_insight_cards.push(json!({
+            "icon": "⚡",
+            "tag": "TOP CAPABILITY",
+            "tone": "info",
+            "headline": fname,
+            "metric": format!("{cnt} {i_lbl}"),
+            "detail": "Highest-demand feature across recent chatbot and Admin Portal sessions."
+        }));
     }
     if let Some(top_item) = top_checked_items.first() {
+        let title = top_item["title"].as_str().unwrap_or("");
+        let etype = top_item["entity_type"].as_str().unwrap_or("record");
+        let cnt = top_item["count"].as_u64().unwrap_or(0);
+        let t_lbl = if cnt == 1 { "view" } else { "views" };
         admin_insights.push(format!(
-            "Most Checked Record: \"{}\" ({}) has been opened {} time(s) recently.",
-            top_item["title"].as_str().unwrap_or(""),
-            top_item["entity_type"].as_str().unwrap_or("record"),
-            top_item["count"].as_u64().unwrap_or(0)
+            "Most Checked Record: \"{title}\" ({etype}) has been opened {cnt} {t_lbl} recently."
         ));
+        admin_insight_cards.push(json!({
+            "icon": "⭐",
+            "tag": "MOST CHECKED",
+            "tone": "ok",
+            "headline": title,
+            "metric": format!("{cnt} {t_lbl} · {etype}"),
+            "detail": "Most frequently inspected archival record by recent activity."
+        }));
     }
     if admin_insights.is_empty() {
         admin_insights.push(
             "Ask questions in the chatbot or search/open records in the Admin Portal — hot topics, search history, and graphs update automatically in real time.".to_string(),
         );
+        admin_insight_cards.push(json!({
+            "icon": "💡",
+            "tag": "READY TO LEARN",
+            "tone": "info",
+            "headline": "Listening for User Activity",
+            "metric": "Real-time tracking active",
+            "detail": "Ask questions in the chatbot or search/open records in the Admin Portal to populate hot topics and trend graphs."
+        }));
     }
 
     json!({
@@ -713,6 +749,7 @@ pub fn build_behavior_analytics(cfg: &AppConfig) -> Value {
         "daily_trend": daily_trend,
         "recent_history": recent_history,
         "admin_insights": admin_insights,
+        "admin_insight_cards": admin_insight_cards,
     })
 }
 

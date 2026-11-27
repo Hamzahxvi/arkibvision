@@ -1104,6 +1104,7 @@ mod tests {
         let mut cfg = AppConfig::load();
         cfg.project_root = base.clone();
         cfg.documents_dir = base.join("data").join("processed").join("documents");
+        cfg.revisions_dir = base.join("data").join("interim").join("revisions");
         fs::create_dir_all(&cfg.documents_dir).unwrap();
 
         let pairs = vec![
