@@ -1632,9 +1632,139 @@ impl ArkibService {
             Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
         };
         match enhance_archival_image(&self.cfg, &resolved, mode) {
-            Ok(res) => res,
+            Ok(mut res) => {
+                if let Some(out_name) = res.get("enhanced_filename").and_then(Value::as_str).map(String::from) {
+                    let enh_path = self.cfg.librechat_dir.join("images").join("enhanced").join(&out_name);
+                    if let (Ok(b_bytes), Ok(a_bytes)) = (fs::read(&resolved), fs::read(&enh_path)) {
+                        let b_name = resolved
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("original.jpg");
+                        let title = format!("Conservation Enhancement · {b_name}");
+                        if let Ok((sid, _)) = crate::compare::build_file_comparison_session(
+                            &self.cfg, &title, b_name, &b_bytes, &out_name, &a_bytes,
+                        ) && let Some(obj) = res.as_object_mut()
+                        {
+                            let link = format!(
+                                "[Open Before/After Comparison Studio](#arkib-canvas:compare:{sid})"
+                            );
+                            obj.insert("canvas_compare_session_id".into(), Value::String(sid));
+                            obj.insert("canvas_compare_link".into(), Value::String(link.clone()));
+                            obj.insert(
+                                "display_instruction".into(),
+                                Value::String(format!(
+                                    "Display the enhanced image with ![Enhanced archival image](enhanced_image_url), summarize the Before vs After metrics, and include this clickable card on its own line: {link}"
+                                )),
+                            );
+                        }
+                    }
+                }
+                res
+            }
             Err(reason) => json!({ "status": "error", "reason": reason }),
         }
+    }
+
+    pub fn tool_compare_before_after(
+        &self,
+        document_slug_or_query: &str,
+        before_path: &str,
+        after_path: &str,
+        title: &str,
+    ) -> Value {
+        let q_doc = document_slug_or_query.trim();
+        let bp = before_path.trim();
+        let ap = after_path.trim();
+
+        // Case 1: Compare two explicit image/document files
+        if !bp.is_empty() && !ap.is_empty() {
+            let resolve_any = |raw: &str| -> Result<PathBuf, String> {
+                let direct = PathBuf::from(raw);
+                if direct.is_file() {
+                    return Ok(direct);
+                }
+                self.resolve_image_path(raw)
+            };
+            let b_resolved = match resolve_any(bp) {
+                Ok(p) => p,
+                Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
+            };
+            let a_resolved = match resolve_any(ap) {
+                Ok(p) => p,
+                Err(reason) => return json!({ "status": "unresolved", "reason": reason }),
+            };
+            let (Ok(b_bytes), Ok(a_bytes)) = (fs::read(&b_resolved), fs::read(&a_resolved)) else {
+                return json!({ "status": "error", "reason": "Could not read before or after file bytes." });
+            };
+            let b_name = b_resolved.file_name().and_then(|s| s.to_str()).unwrap_or("before.bin");
+            let a_name = a_resolved.file_name().and_then(|s| s.to_str()).unwrap_or("after.bin");
+            let cmp_title = if title.trim().is_empty() {
+                format!("{b_name} → {a_name}")
+            } else {
+                title.trim().to_string()
+            };
+            return match crate::compare::build_file_comparison_session(
+                &self.cfg, &cmp_title, b_name, &b_bytes, a_name, &a_bytes,
+            ) {
+                Ok((sid, cmp)) => {
+                    let link = format!(
+                        "[Open Before/After Comparison Studio](#arkib-canvas:compare:{sid})"
+                    );
+                    json!({
+                        "status": "ok",
+                        "comparison_kind": cmp["comparison_kind"],
+                        "title": cmp_title,
+                        "changed_page_count": cmp["document_pages"]["changed_page_count"],
+                        "total_pages": cmp["document_pages"]["total_pages"],
+                        "migration_verdict": cmp["migration_fidelity"]["verdict"],
+                        "canvas_compare_session_id": sid,
+                        "canvas_compare_link": link,
+                        "display_instruction": format!("Summarize the key Before → After metrics and include this clickable card on its own line: {link}"),
+                    })
+                }
+                Err(reason) => json!({ "status": "error", "reason": reason }),
+            };
+        }
+
+        // Case 2: Compare an archived document Original vs Latest
+        if !q_doc.is_empty() {
+            let docs = list_documents(&self.cfg);
+            let q_lc = q_doc.to_ascii_lowercase();
+            let matched = docs.iter().find(|d| {
+                d["slug"].as_str().unwrap_or("").eq_ignore_ascii_case(&q_lc)
+                    || d["title"].as_str().unwrap_or("").to_ascii_lowercase().contains(&q_lc)
+            });
+            if let Some(doc) = matched {
+                let slug = doc["slug"].as_str().unwrap_or("").to_string();
+                let doc_title = doc["title"].as_str().unwrap_or(&slug).to_string();
+                if let Ok(cmp) = crate::compare::build_archived_document_comparison(&self.cfg, &slug) {
+                    let link = format!(
+                        "[Open Before/After Comparison Studio](#arkib-canvas:compare:doc_{slug})"
+                    );
+                    return json!({
+                        "status": "ok",
+                        "comparison_kind": "document",
+                        "document_slug": slug,
+                        "title": doc_title,
+                        "revision_count": cmp["revision_count"],
+                        "changed_page_count": cmp["document_pages"]["changed_page_count"],
+                        "total_pages": cmp["document_pages"]["total_pages"],
+                        "intake_metadata": cmp["intake_metadata"],
+                        "canvas_compare_link": link,
+                        "display_instruction": format!("Summarize Original vs Latest changes (changed pages & metadata) and include this clickable card on its own line: {link}"),
+                    });
+                }
+            }
+        }
+
+        // Case 3: Open interactive Compare Studio so user can pick a document or drop Before/After files
+        let link = "[Open Before/After Comparison Studio](#arkib-canvas:compare:new)";
+        json!({
+            "status": "ready",
+            "message": "Interactive Before & After Comparison Studio is ready.",
+            "canvas_compare_link": link,
+            "display_instruction": format!("Include this clickable card on its own line so the user can open the interactive Before & After Comparison Studio directly: {link}"),
+        })
     }
 
     pub fn tool_verify_integrity(&self, update_manifest: bool) -> Value {

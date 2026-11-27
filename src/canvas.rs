@@ -14,7 +14,7 @@ use crate::jawi::decode_jawi_text;
 use crate::mcp_sse::is_allowed_host;
 use crate::metadata::{default_detail_visibility, profile_slug, value_to_trimmed_string};
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Path as AxumPath, Request, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -131,7 +131,16 @@ pub fn canvas_router(state: AdminState) -> Router {
             post(canvas_submit_enrollment),
         )
         .route("/canvas/api/track-chat-query", post(canvas_track_chat_query))
-        .layer(DefaultBodyLimit::max(14 * 1024 * 1024))
+        .route(
+            "/canvas/api/compare-media/{filename}",
+            get(canvas_serve_compare_media),
+        )
+        .route("/canvas/api/compare-analyze", post(canvas_compare_analyze))
+        .route(
+            "/canvas/api/compare-document/{slug}",
+            get(canvas_compare_document),
+        )
+        .layer(DefaultBodyLimit::max(24 * 1024 * 1024))
         .layer(middleware::from_fn(host_guard_middleware))
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -182,10 +191,10 @@ async fn canvas_get_session(
     headers: HeaderMap,
     AxumPath((kind, id)): AxumPath<(String, String)>,
 ) -> Response {
-    if kind != "ocr" && kind != "enroll" {
+    if kind != "ocr" && kind != "enroll" && kind != "compare" {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({ "status": "error", "reason": "Canvas mode must be 'ocr' or 'enroll'." })),
+            Json(json!({ "status": "error", "reason": "Canvas mode must be 'ocr', 'enroll', or 'compare'." })),
         )
             .into_response();
     }
@@ -217,7 +226,42 @@ async fn canvas_get_session(
             (id.clone(), map)
         };
 
-        if kind == "ocr" {
+        if kind == "compare" {
+            let docs: Vec<Value> = archives::list_documents(&svc.cfg)
+                .into_iter()
+                .map(|d| {
+                    let slug = d.get("slug").and_then(Value::as_str).unwrap_or("").to_string();
+                    let revs = crate::revisions::get_entity_revisions(&svc.cfg, "document", &slug);
+                    json!({
+                        "slug": slug,
+                        "title": d.get("title").and_then(Value::as_str).unwrap_or(""),
+                        "category": d.get("category").and_then(Value::as_str).unwrap_or(""),
+                        "revision_count": revs.len(),
+                    })
+                })
+                .collect();
+
+            if let Some(doc_slug) = id.strip_prefix("doc_")
+                && let Ok(mut cmp) = crate::compare::build_archived_document_comparison(&svc.cfg, doc_slug)
+            {
+                if let Some(obj) = cmp.as_object_mut() {
+                    obj.insert("status".into(), json!("ok"));
+                    obj.insert("kind".into(), json!("compare"));
+                    obj.insert("session_id".into(), json!(id));
+                    obj.insert("is_admin".into(), json!(is_admin));
+                    obj.insert("documents".into(), json!(docs));
+                }
+                return cmp;
+            }
+
+            let mut out = session_map;
+            out.insert("status".into(), json!("ok"));
+            out.insert("kind".into(), json!("compare"));
+            out.insert("session_id".into(), json!(resolved_id));
+            out.insert("is_admin".into(), json!(is_admin));
+            out.insert("documents".into(), json!(docs));
+            Value::Object(out)
+        } else if kind == "ocr" {
             let raw_jawi = session_map
                 .get("raw_jawi_text")
                 .and_then(Value::as_str)
@@ -1077,6 +1121,155 @@ async fn canvas_track_chat_query(
         .await;
     }
     Json(json!({ "status": "ok" }))
+}
+
+async fn canvas_serve_compare_media(
+    State(state): State<AdminState>,
+    AxumPath(filename): AxumPath<String>,
+) -> Response {
+    let clean = filename.trim();
+    if clean.is_empty()
+        || clean.contains("..")
+        || clean.contains('/')
+        || clean.contains('\\')
+        || clean.contains('\0')
+    {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let path = crate::compare::compare_media_dir(&state.service.cfg).join(clean);
+    let Ok(bytes) = fs::read(&path) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let mime = mime_guess::from_path(&path)
+        .first_or_octet_stream()
+        .essence_str()
+        .to_string();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime)
+        .body(Body::from(bytes))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+async fn canvas_compare_analyze(
+    State(state): State<AdminState>,
+    mut multipart: Multipart,
+) -> Response {
+    let mut before_name = String::new();
+    let mut before_bytes: Option<Vec<u8>> = None;
+    let mut after_name = String::new();
+    let mut after_bytes: Option<Vec<u8>> = None;
+    let mut title = String::new();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        match field.name() {
+            Some("before_file") | Some("before") => {
+                before_name = field.file_name().unwrap_or("before.bin").to_string();
+                if let Ok(b) = field.bytes().await {
+                    before_bytes = Some(b.to_vec());
+                }
+            }
+            Some("after_file") | Some("after") => {
+                after_name = field.file_name().unwrap_or("after.bin").to_string();
+                if let Ok(b) = field.bytes().await {
+                    after_bytes = Some(b.to_vec());
+                }
+            }
+            Some("title") => {
+                if let Ok(t) = field.text().await {
+                    title = t.trim().to_string();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let (Some(b_bytes), Some(a_bytes)) = (before_bytes, after_bytes) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Select both a Before file and an After file to compare." })),
+        )
+            .into_response();
+    };
+    if b_bytes.len() > MAX_CANVAS_IMAGE_BYTES || a_bytes.len() > MAX_CANVAS_IMAGE_BYTES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Each file must be 10 MB or smaller." })),
+        )
+            .into_response();
+    }
+    if title.is_empty() {
+        title = format!("{before_name} → {after_name}");
+    }
+
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        crate::compare::build_file_comparison_session(
+            &cfg,
+            &title,
+            &before_name,
+            &b_bytes,
+            &after_name,
+            &a_bytes,
+        )
+    })
+    .await
+    {
+        Ok(Ok((_sid, mut out))) => {
+            if let Some(o) = out.as_object_mut() {
+                o.insert("status".into(), json!("ok"));
+                o.insert("kind".into(), json!("compare"));
+            }
+            (StatusCode::OK, Json(out)).into_response()
+        }
+        Ok(Err(reason)) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn canvas_compare_document(
+    State(state): State<AdminState>,
+    AxumPath(slug): AxumPath<String>,
+) -> Response {
+    if !is_safe_id(&slug) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "status": "error", "reason": "Invalid document slug." })),
+        )
+            .into_response();
+    }
+    let cfg = state.service.cfg.clone();
+    match tokio::task::spawn_blocking(move || {
+        crate::compare::build_archived_document_comparison(&cfg, &slug)
+    })
+    .await
+    {
+        Ok(Ok(mut out)) => {
+            if let Some(o) = out.as_object_mut() {
+                o.insert("status".into(), json!("ok"));
+                o.insert("kind".into(), json!("compare"));
+            }
+            (StatusCode::OK, Json(out)).into_response()
+        }
+        Ok(Err(reason)) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "status": "error", "reason": reason })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "status": "error", "reason": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]

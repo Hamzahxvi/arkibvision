@@ -3365,7 +3365,7 @@
     if (idx === -1) return null;
     var frag = raw.slice(idx + '#arkib-canvas:'.length);
     var parts = frag.split(':');
-    var mode = (parts[0] === 'enroll') ? 'enroll' : 'ocr';
+    var mode = (parts[0] === 'enroll') ? 'enroll' : (parts[0] === 'compare') ? 'compare' : 'ocr';
     var id = (parts[1] || 'latest').replace(/[^a-zA-Z0-9_-]/g, '') || 'latest';
     return { mode: mode, id: id };
   }
@@ -3394,8 +3394,9 @@
       '  </div>' +
       '</div>' +
       '<div class="ac-mode-tabs" id="ac-mode-tabs">' +
-      '  <button type="button" class="ac-mode-tab" data-ac-mode="ocr">📜 Jawi OCR Workbench</button>' +
-      '  <button type="button" class="ac-mode-tab" data-ac-mode="enroll">🪪 Identity Enrollment</button>' +
+      '  <button type="button" class="ac-mode-tab" data-ac-mode="ocr">📜 Jawi OCR</button>' +
+      '  <button type="button" class="ac-mode-tab" data-ac-mode="enroll">🪪 Enrollment</button>' +
+      '  <button type="button" class="ac-mode-tab" data-ac-mode="compare">⚖️ Before / After</button>' +
       '</div>' +
       '<div class="ac-body" id="ac-body"><div class="rf-empty">Loading…</div></div>' +
       '<div class="ac-footer" id="ac-footer"></div>';
@@ -3474,7 +3475,7 @@
   }
 
   async function openCanvas(mode, id, lockedMode) {
-    ac.mode = (mode === 'enroll') ? 'enroll' : 'ocr';
+    ac.mode = (mode === 'enroll') ? 'enroll' : (mode === 'compare') ? 'compare' : 'ocr';
     ac.sessionId = id || 'new';
     ac.lockedMode = !!lockedMode;
     ac.lastPathname = window.location.pathname;
@@ -3487,7 +3488,7 @@
     var titleEl = document.getElementById('ac-header-title');
     if (titleEl) {
       titleEl.textContent = ac.lockedMode
-        ? (ac.mode === 'ocr' ? '📜 Jawi OCR Workbench' : '🪪 Identity Enrollment')
+        ? (ac.mode === 'ocr' ? '📜 Jawi OCR Workbench' : ac.mode === 'compare' ? '⚖️ Before & After Comparison Studio' : '🪪 Identity Enrollment')
         : '🗂️ Arkib Canvas';
     }
     updateRailButtonState();
@@ -3501,7 +3502,7 @@
     });
     var body = document.getElementById('ac-body');
     var footer = document.getElementById('ac-footer');
-    body.innerHTML = '<div class="rf-empty">Loading ' + (mode === 'ocr' ? 'Jawi OCR Workbench' : 'Enrollment Canvas') + '…</div>';
+    body.innerHTML = '<div class="rf-empty">Loading ' + (mode === 'ocr' ? 'Jawi OCR Workbench' : mode === 'compare' ? 'Before & After Comparison Studio' : 'Enrollment Canvas') + '…</div>';
     footer.innerHTML = '';
 
     try {
@@ -3528,6 +3529,12 @@
         ac.rumiManualOverride = false;
         ac.lexiconPairs = [];
         renderOcrWorkbench(body, footer);
+      } else if (mode === 'compare') {
+        ac.compareView = 'slider';
+        ac.compareSliderPct = 50;
+        ac.compareBlendPct = 50;
+        ac.compareMetaChangedOnly = false;
+        renderCompareCanvas(body, footer);
       } else {
         ac.rotateDeg = 0;
         ac.brightness = 100;
@@ -4286,6 +4293,264 @@
     }
   });
 
+  // ─── Mode 3: Interactive Before & After Comparison Studio ─────────────────
+  function renderCompareCanvas(body, footer) {
+    var d = ac.data || {};
+    var docs = Array.isArray(d.documents) ? d.documents : [];
+    var hasImages = !!(d.before_image_url && d.after_image_url);
+    var consRows = Array.isArray(d.conservation_metrics) ? d.conservation_metrics : [];
+    var metaRows = Array.isArray(d.intake_metadata) ? d.intake_metadata : [];
+    var pagesInfo = d.document_pages || null;
+    var jawiPages = d.jawi_pages || null;
+    var fidelity = d.migration_fidelity && typeof d.migration_fidelity === 'object' ? d.migration_fidelity : null;
+
+    function statusPill(st) {
+      var s = String(st || '');
+      var lc = s.toLowerCase();
+      var cls = (lc.indexOf('improv') !== -1 || lc === 'added' || lc === 'pass' || lc === 'preserved' || lc === 'high fidelity' || lc === 'verified new')
+        ? 'ac-pill-ok'
+        : (lc === 'removed' || lc === 'degraded' || lc === 'review' || lc.indexOf('stripped') !== -1 || lc.indexOf('major') !== -1)
+          ? 'ac-pill-crit'
+          : (lc === 'updated' || lc === 'changed' || lc === 'enhanced' || lc === 'resized' || lc.indexOf('minor') !== -1)
+            ? 'ac-pill-warn'
+            : 'ac-pill-muted';
+      return '<span class="ac-st-pill ' + cls + '">' + esc(s || '—') + '</span>';
+    }
+
+    function renderTokenStream(tokens, side) {
+      if (!Array.isArray(tokens) || !tokens.length) return '<span style="opacity:.6">(empty)</span>';
+      return tokens.map(function (t) {
+        if (t.kind === 'del') return '<span class="ac-tok-del">' + esc(t.text) + '</span>';
+        if (t.kind === 'add') return '<span class="ac-tok-add">' + esc(t.text) + '</span>';
+        return esc(t.text);
+      }).join(' ');
+    }
+
+    function renderChangedPagesSection(pgObj, headingLabel, forceRtl) {
+      if (!pgObj || !Number(pgObj.total_pages || 0)) return '';
+      var changed = Array.isArray(pgObj.changed_pages) ? pgObj.changed_pages : [];
+      var total = Number(pgObj.total_pages || 0);
+      var unchangedCnt = Number(pgObj.unchanged_page_count || 0);
+      var badge = '<span class="ac-st-pill ac-pill-ok">Showing ' + changed.length + ' changed page(s) of ' + total + ' total' + (unchangedCnt > 0 ? ' · ' + unchangedCnt + ' unchanged hidden' : '') + '</span>';
+      if (!changed.length) {
+        return '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>' + esc(headingLabel) + '</strong>' + badge + '</div>' +
+          '<div style="font-size:.82rem;color:#34d399">✓ Original and Latest pages are identical — no text differences found.</div></div>';
+      }
+      return '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>' + esc(headingLabel) + '</strong>' + badge + '</div>' +
+        changed.map(function (pg) {
+          var rtlCls = (forceRtl || pg.is_rtl) ? ' ac-diff-rtl' : '';
+          return '<div class="ac-page-diff-block">' +
+            '<div class="ac-page-diff-bar"><span>📄 Page ' + Number(pg.page || 1) + '</span>' + statusPill(pg.status) + '<span style="font-size:.73rem;opacity:.75">' + Number(pg.word_changes || 0) + ' word change(s)</span></div>' +
+            '<div class="ac-diff-pair">' +
+            '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">BEFORE · ORIGINAL (PAGE ' + Number(pg.page || 1) + ')</div><div class="ac-diff-pane-body' + rtlCls + '">' + renderTokenStream(pg.before_tokens, 'before') + '</div></div>' +
+            '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">AFTER · LATEST (PAGE ' + Number(pg.page || 1) + ')</div><div class="ac-diff-pane-body' + rtlCls + '">' + renderTokenStream(pg.after_tokens, 'after') + '</div></div>' +
+            '</div></div>';
+        }).join('') +
+        '</div>';
+    }
+
+    // 1. Source Picker / Upload Bar
+    var docOpts = '<option value="">— Select Archived Document (Original vs Latest) —</option>' +
+      docs.map(function (doc) {
+        var sel = d.document_slug && d.document_slug === doc.slug ? ' selected' : '';
+        return '<option value="' + esc(doc.slug) + '"' + sel + '>' + esc(doc.title || doc.slug) + ' (' + Number(doc.revision_count || 0) + ' rev)</option>';
+      }).join('');
+
+    var pickerHtml =
+      '<div class="ac-cmp-card">' +
+      '<div class="ac-cmp-head"><strong>⚖️ Select Files or Document to Compare</strong>' + (d.title ? '<span class="ac-st-pill ac-pill-muted">' + esc(d.title) + '</span>' : '') + '</div>' +
+      (docs.length ? '<div class="ac-cmp-row"><select class="rf-select" id="ac-cmp-doc-sel" style="flex:1">' + docOpts + '</select><button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="ac-cmp-doc-btn">Compare Original vs Latest</button></div>' : '') +
+      '<div class="ac-cmp-upload-grid">' +
+      '<label class="ac-cmp-drop"><span>Before (Original Image / File)</span><input type="file" id="ac-cmp-before-in" accept=".jpg,.jpeg,.png,.webp,.bmp,.pdf,.docx,.txt,.md,.csv,.html,.xml,.json"/></label>' +
+      '<label class="ac-cmp-drop"><span>After (Edited / Latest Image / File)</span><input type="file" id="ac-cmp-after-in" accept=".jpg,.jpeg,.png,.webp,.bmp,.pdf,.docx,.txt,.md,.csv,.html,.xml,.json"/></label>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:flex-end;margin-top:8px"><button type="button" class="rf-btn rf-btn-primary rf-btn-sm" id="ac-cmp-run-btn">⚖️ Compare Uploaded Files</button></div>' +
+      '</div>';
+
+    // 2. Interactive Image Comparator (Slider / Side-by-Side / Onion-Skin Blend)
+    var imageStageHtml = '';
+    if (hasImages) {
+      var bUrl = apiUrl(d.before_image_url);
+      var aUrl = apiUrl(d.after_image_url);
+      var stageInner = '';
+      if (ac.compareView === 'side') {
+        stageInner =
+          '<div class="ac-diff-pair">' +
+          '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">' + esc(d.before_label || 'BEFORE · ORIGINAL') + '</div><img class="ac-cmp-img" src="' + esc(bUrl) + '" alt="Before"/></div>' +
+          '<div class="ac-diff-pane"><div class="ac-diff-pane-lbl">' + esc(d.after_label || 'AFTER · LATEST') + '</div><img class="ac-cmp-img" src="' + esc(aUrl) + '" alt="After"/></div>' +
+          '</div>';
+      } else if (ac.compareView === 'blend') {
+        stageInner =
+          '<div class="ac-blend-stage">' +
+          '<img class="ac-blend-base" src="' + esc(bUrl) + '" alt="Before"/>' +
+          '<img class="ac-blend-top" id="ac-blend-top" src="' + esc(aUrl) + '" alt="After" style="opacity:' + (ac.compareBlendPct / 100) + '"/>' +
+          '<span class="ac-corner-tag ac-tag-l">BEFORE</span><span class="ac-corner-tag ac-tag-r">AFTER (' + ac.compareBlendPct + '%)</span>' +
+          '</div>' +
+          '<div class="ac-slider-bar"><span>Before 0%</span><input type="range" id="ac-blend-range" min="0" max="100" value="' + ac.compareBlendPct + '"/><span>After 100%</span></div>';
+      } else {
+        stageInner =
+          '<div class="ac-curtain-stage" id="ac-curtain-stage">' +
+          '<img class="ac-curtain-img" src="' + esc(aUrl) + '" alt="After"/>' +
+          '<div class="ac-curtain-before" id="ac-curtain-before" style="clip-path:inset(0 ' + (100 - ac.compareSliderPct) + '% 0 0)">' +
+          '<img class="ac-curtain-img" src="' + esc(bUrl) + '" alt="Before"/>' +
+          '</div>' +
+          '<div class="ac-curtain-line" id="ac-curtain-line" style="left:' + ac.compareSliderPct + '%"><span class="ac-curtain-knob">↔</span></div>' +
+          '<span class="ac-corner-tag ac-tag-l">BEFORE</span><span class="ac-corner-tag ac-tag-r">AFTER</span>' +
+          '</div>' +
+          '<div class="ac-slider-bar"><span>Before</span><input type="range" id="ac-curtain-range" min="0" max="100" value="' + ac.compareSliderPct + '"/><span>After</span></div>';
+      }
+
+      imageStageHtml =
+        '<div class="ac-cmp-card">' +
+        '<div class="ac-cmp-head"><strong>🖼️ Interactive Image Comparison</strong>' +
+        '<div style="display:flex;gap:4px">' +
+        '<button type="button" class="rf-btn rf-btn-sm' + (ac.compareView === 'slider' ? ' rf-btn-primary' : '') + '" data-ac-cv="slider">↔ Slider</button>' +
+        '<button type="button" class="rf-btn rf-btn-sm' + (ac.compareView === 'side' ? ' rf-btn-primary' : '') + '" data-ac-cv="side">◫ Side-by-Side</button>' +
+        '<button type="button" class="rf-btn rf-btn-sm' + (ac.compareView === 'blend' ? ' rf-btn-primary' : '') + '" data-ac-cv="blend">👁 Overlay</button>' +
+        '</div></div>' + stageInner + '</div>';
+    }
+
+    // 3. Conservation & Integrity Metrics (Before -> After)
+    var consHtml = consRows.length ? (
+      '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>🛡️ Conservation &amp; Integrity Metrics (Before → After)</strong></div>' +
+      '<div style="overflow-x:auto"><table class="ac-cmp-table"><thead><tr><th>Metric</th><th>Before</th><th>After</th><th>Delta</th><th>Status</th></tr></thead><tbody>' +
+      consRows.map(function (r) {
+        return '<tr><td><b>' + esc(r.metric) + '</b></td><td>' + esc(r.before) + '</td><td>' + esc(r.after) + '</td><td>' + esc(r.delta) + '</td><td>' + statusPill(r.status) + '</td></tr>';
+      }).join('') +
+      '</tbody></table></div></div>'
+    ) : '';
+
+    // 4. Document Pages (Original vs Latest — Changed Pages Only)
+    var pagesHtml = renderChangedPagesSection(jawiPages, '📜 Jawi Manuscript Changes (Original vs Latest · Changed Pages Only)', true) +
+      renderChangedPagesSection(pagesInfo, '📄 Document Text Changes (Original vs Latest · Changed Pages Only)', false);
+
+    // 5. Intake Metadata Comparison (Before -> After): field, before, after, status
+    var visibleMeta = ac.compareMetaChangedOnly
+      ? metaRows.filter(function (m) { return m.status !== 'Unchanged'; })
+      : metaRows;
+    var metaHtml = metaRows.length ? (
+      '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>📋 Intake Metadata Comparison (Before → After)</strong>' +
+      '<label style="font-size:.75rem;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="ac-meta-chg-only"' + (ac.compareMetaChangedOnly ? ' checked' : '') + '/> Changed fields only</label></div>' +
+      '<div style="overflow-x:auto"><table class="ac-cmp-table"><thead><tr><th>Field</th><th>Before</th><th>After</th><th>Status</th></tr></thead><tbody>' +
+      (visibleMeta.length ? visibleMeta.map(function (m) {
+        return '<tr><td><b>' + esc(m.label || m.field) + '</b></td><td class="' + (m.status === 'Updated' || m.status === 'Removed' ? 'ac-cell-before' : '') + '">' + esc(m.before) + '</td><td class="' + (m.status === 'Updated' || m.status === 'Added' ? 'ac-cell-after' : '') + '">' + esc(m.after) + '</td><td>' + statusPill(m.status) + '</td></tr>';
+      }).join('') : '<tr><td colspan="4" style="text-align:center;opacity:.7">No metadata fields changed.</td></tr>') +
+      '</tbody></table></div></div>'
+    ) : '';
+
+    // 6. Format Migration Fidelity
+    var fidelityHtml = fidelity ? (
+      '<div class="ac-cmp-card"><div class="ac-cmp-head"><strong>📦 Format Migration Fidelity</strong>' + statusPill(fidelity.verdict || 'PASS') + '</div>' +
+      '<div class="ac-fid-grid">' +
+      '<div class="ac-fid-cell"><span>Format</span><strong>' + esc(fidelity.source_format) + ' → ' + esc(fidelity.target_format) + '</strong></div>' +
+      '<div class="ac-fid-cell"><span>File Size</span><strong>' + esc(fidelity.before_size_human) + ' → ' + esc(fidelity.after_size_human) + '</strong></div>' +
+      '<div class="ac-fid-cell"><span>Dimensions</span><strong>' + esc(fidelity.before_dimensions) + ' → ' + esc(fidelity.after_dimensions) + ' ' + statusPill(fidelity.dimensions_status) + '</strong></div>' +
+      '<div class="ac-fid-cell"><span>Visual Fidelity (aHash)</span><strong>' + (fidelity.visual_similarity_pct != null ? fidelity.visual_similarity_pct + '% · ' : '') + statusPill(fidelity.visual_status) + '</strong></div>' +
+      '<div class="ac-fid-cell"><span>Metadata / EXIF Retention</span><strong>' + statusPill(fidelity.metadata_retention) + '</strong></div>' +
+      '<div class="ac-fid-cell"><span>SHA-256 Checksums</span><strong style="font-family:monospace;font-size:.73rem">' + esc((fidelity.before_sha256 || '—').slice(0, 12)) + ' → ' + esc((fidelity.after_sha256 || '—').slice(0, 12)) + '</strong></div>' +
+      '</div></div>'
+    ) : '';
+
+    body.innerHTML = pickerHtml + imageStageHtml + consHtml + pagesHtml + metaHtml + fidelityHtml;
+    footer.innerHTML = '<div style="font-size:.76rem;color:rgb(var(--text-secondary))">Interactive Before &amp; After Studio · 100% Pure-Rust local analysis (0 LLM tokens)</div>';
+
+    // Bind Compare Document button
+    var docBtn = document.getElementById('ac-cmp-doc-btn');
+    if (docBtn) {
+      docBtn.onclick = async function () {
+        var sel = document.getElementById('ac-cmp-doc-sel');
+        var slug = sel && sel.value;
+        if (!slug) { toast('Select a document first', false); return; }
+        docBtn.disabled = true;
+        docBtn.textContent = '⏳ Comparing…';
+        var r = await acApi('/canvas/api/compare-document/' + encodeURIComponent(slug));
+        docBtn.disabled = false;
+        docBtn.textContent = 'Compare Original vs Latest';
+        if (r.ok && r.data) {
+          r.data.documents = docs;
+          ac.data = r.data;
+          renderCompareCanvas(body, footer);
+        } else toast((r.data && r.data.reason) || 'Comparison failed', false);
+      };
+    }
+
+    // Bind Compare Two Uploaded Files button
+    var runBtn = document.getElementById('ac-cmp-run-btn');
+    if (runBtn) {
+      runBtn.onclick = async function () {
+        var bIn = document.getElementById('ac-cmp-before-in');
+        var aIn = document.getElementById('ac-cmp-after-in');
+        var bf = bIn && bIn.files && bIn.files[0];
+        var af = aIn && aIn.files && aIn.files[0];
+        if (!bf || !af) { toast('Choose both a Before file and an After file', false); return; }
+        runBtn.disabled = true;
+        runBtn.textContent = '⏳ Analyzing…';
+        var fd = new FormData();
+        fd.append('before_file', bf);
+        fd.append('after_file', af);
+        var r = await acApi('/canvas/api/compare-analyze', { method: 'POST', body: fd });
+        runBtn.disabled = false;
+        runBtn.textContent = '⚖️ Compare Uploaded Files';
+        if (r.ok && r.data) {
+          r.data.documents = docs;
+          ac.data = r.data;
+          renderCompareCanvas(body, footer);
+          toast('Before → After analysis complete');
+        } else toast((r.data && r.data.reason) || 'Comparison failed', false);
+      };
+    }
+
+    // View mode switches (Slider / Side-by-Side / Blend)
+    body.querySelectorAll('[data-ac-cv]').forEach(function (b) {
+      b.onclick = function () {
+        ac.compareView = b.getAttribute('data-ac-cv');
+        renderCompareCanvas(body, footer);
+      };
+    });
+
+    // Interactive Curtain Slider
+    var cRange = document.getElementById('ac-curtain-range');
+    var cBefore = document.getElementById('ac-curtain-before');
+    var cLine = document.getElementById('ac-curtain-line');
+    var cStage = document.getElementById('ac-curtain-stage');
+    function setCurtain(pct) {
+      ac.compareSliderPct = Math.max(0, Math.min(100, Math.round(pct)));
+      if (cRange) cRange.value = String(ac.compareSliderPct);
+      if (cBefore) cBefore.style.clipPath = 'inset(0 ' + (100 - ac.compareSliderPct) + '% 0 0)';
+      if (cLine) cLine.style.left = ac.compareSliderPct + '%';
+    }
+    if (cRange) cRange.oninput = function (e) { setCurtain(Number(e.target.value)); };
+    if (cStage) {
+      var dragging = false;
+      var updateFromEvent = function (e) {
+        var rect = cStage.getBoundingClientRect();
+        if (rect.width > 0) setCurtain(((e.clientX - rect.left) / rect.width) * 100);
+      };
+      cStage.addEventListener('mousedown', function (e) { dragging = true; updateFromEvent(e); });
+      window.addEventListener('mousemove', function (e) { if (dragging) updateFromEvent(e); });
+      window.addEventListener('mouseup', function () { dragging = false; });
+    }
+
+    // Overlay Blend Slider
+    var bRange = document.getElementById('ac-blend-range');
+    var bTop = document.getElementById('ac-blend-top');
+    if (bRange && bTop) {
+      bRange.oninput = function (e) {
+        ac.compareBlendPct = Number(e.target.value);
+        bTop.style.opacity = String(ac.compareBlendPct / 100);
+      };
+    }
+
+    // Metadata Changed-only Toggle
+    var mChk = document.getElementById('ac-meta-chg-only');
+    if (mChk) {
+      mChk.onchange = function () {
+        ac.compareMetaChangedOnly = mChk.checked;
+        renderCompareCanvas(body, footer);
+      };
+    }
+  }
+
   function upgradeCanvasLinks() {
     var links = document.querySelectorAll('a[href*="#arkib-canvas:"]:not([data-ac-card="1"])');
     links.forEach(function (a) {
@@ -4293,13 +4558,18 @@
       if (!parsed) return;
       a.setAttribute('data-ac-card', '1');
       var isOcr = parsed.mode === 'ocr';
-      var title = isOcr ? 'Jawi OCR Workbench' : 'Identity Enrollment Canvas';
-      var sub = isOcr
-        ? 'Edit Jawi & Rumi side-by-side · Export DOCX / PDF'
-        : 'Crop photo, set group folder & enroll to archive';
-      var iconSvg = isOcr
-        ? '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>'
-        : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h2"/><path d="M15 12h2"/><path d="M7 16c.5-1.5 2-2 4-2s3.5.5 4 2"/></svg>';
+      var isCmp = parsed.mode === 'compare';
+      var title = isCmp ? 'Before & After Comparison Studio' : isOcr ? 'Jawi OCR Workbench' : 'Identity Enrollment Canvas';
+      var sub = isCmp
+        ? 'Interactive slider · Changed pages · Conservation & Migration Fidelity'
+        : isOcr
+          ? 'Edit Jawi & Rumi side-by-side · Export DOCX / PDF'
+          : 'Crop photo, set group folder & enroll to archive';
+      var iconSvg = isCmp
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="21"/><rect x="3" y="5" width="7" height="14" rx="1"/><rect x="14" y="5" width="7" height="14" rx="1"/></svg>'
+        : isOcr
+          ? '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>'
+          : '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h2"/><path d="M15 12h2"/><path d="M7 16c.5-1.5 2-2 4-2s3.5.5 4 2"/></svg>';
       a.innerHTML =
         '<span class="ac-cc-left">' +
         '  <span class="ac-cc-icon">' + iconSvg + '</span>' +

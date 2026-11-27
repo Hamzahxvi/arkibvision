@@ -354,6 +354,12 @@ async fn dispatch_tool(
                     arg_bool(&args, "purge_files", true),
                     &arg_str(&args, "admin_key"),
                 )),
+                "arkib_compare_before_after" => Ok(svc.tool_compare_before_after(
+                    &arg_str(&args, "document"),
+                    &arg_str(&args, "before_path"),
+                    &arg_str(&args, "after_path"),
+                    &arg_str(&args, "title"),
+                )),
                 _ => Err(format!("Unknown tool: {tool}")),
             })
             .await
@@ -616,6 +622,19 @@ pub fn tool_definitions() -> Vec<Value> {
             "description": "Check live server CPU, RAM, Disk, Ollama latency, workload, and overload advice.",
             "inputSchema": { "type": "object", "properties": {} }
         }),
+        json!({
+            "name": "arkib_compare_before_after",
+            "description": "Open interactive Canvas Before vs. After comparison studio for images/files or an archived document (Original vs Latest changed pages, Conservation & Integrity metrics, Intake Metadata table, Format Migration Fidelity).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "document": { "type": "string", "default": "" },
+                    "before_path": { "type": "string", "default": "" },
+                    "after_path": { "type": "string", "default": "" },
+                    "title": { "type": "string", "default": "" }
+                }
+            }
+        }),
     ]
 }
 
@@ -626,7 +645,7 @@ mod tests {
     #[test]
     fn test_mcp_tool_catalog_and_host_guard() {
         let tools = tool_definitions();
-        assert_eq!(tools.len(), 24);
+        assert_eq!(tools.len(), 25);
         for t in &tools {
             assert!(t["name"].as_str().unwrap_or("").starts_with("arkib_"));
             assert_eq!(t["inputSchema"]["type"].as_str(), Some("object"));

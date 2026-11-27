@@ -8,6 +8,7 @@ mod audit;
 mod biometrics;
 mod canvas;
 mod categories;
+mod compare;
 mod config;
 mod conservation;
 mod export;
