@@ -156,8 +156,8 @@ Every authenticity check (`arkib_detect_authenticity`, `arkib_analyze_image`, `a
 
 ### Step 1 — Clone & Compile the Pure-Rust Binary
 ```powershell
-git clone https://github.com/Hamzahxvi/rojakface-enterprise-vision.git
-cd rojakface-enterprise-vision
+git clone https://github.com/Hamzahxvi/arkibvision.git
+cd arkibvision
 
 cargo build --release
 ```
